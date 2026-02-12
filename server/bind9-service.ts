@@ -656,6 +656,115 @@ zone "${domain}" {
         return validZones;
     }
 
+    /**
+     * Parse named.conf.acls to extract existing ACLs.
+     * Returns array of { name, networks }
+     */
+    async syncAclsFromConfig(): Promise<Array<{ name: string; networks: string }>> {
+        const acls: Array<{ name: string; networks: string }> = [];
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                console.log("[bind9] named.conf.acls not found, skipping import.");
+                return [];
+            }
+
+            // Simple regex parser for: acl "name" { 1.2.3.4; ... };
+            // Matches: acl "NAME" { CONTENT };
+            const aclRegex = /acl\s+"([^"]+)"\s*{([^}]+)};/g;
+            let match;
+
+            while ((match = aclRegex.exec(content)) !== null) {
+                const name = match[1];
+                const cleanContent = match[2]
+                    .replace(/\/\/.*$/gm, "") // remove comments
+                    .replace(/\s+/g, " ")     // normalize whitespace
+                    .split(";")               // split by semi-colon
+                    .map(s => s.trim())
+                    .filter(s => s);          // remove empty strings
+
+                const networks = cleanContent.join("; ");
+                if (name && networks) {
+                    acls.push({ name, networks: networks + ";" });
+                }
+            }
+            console.log(`[bind9] Found ${acls.length} ACLs in config`);
+            return acls;
+
+        } catch (error: any) {
+            console.error(`[bind9] Failed to sync ACLs from config: ${error.message}`);
+            return [];
+        }
+    }
+
+    /**
+     * Parse named.conf recursively to extract TSIG Keys.
+     * Returns array of { name, algorithm, secret }
+     */
+    async syncKeysFromConfig(): Promise<Array<{ name: string; algorithm: string; secret: string }>> {
+        const keys: Array<{ name: string; algorithm: string; secret: string }> = [];
+        const visited = new Set<string>();
+
+        const parseFile = async (confPath: string) => {
+            if (visited.has(confPath)) return;
+            visited.add(confPath);
+
+            let content: string;
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch { return; }
+
+            // Remove comments
+            const cleaned = content
+                .replace(/\/\/.*$/gm, "")
+                .replace(/#.*$/gm, "")
+                .replace(/\/\*[\s\S]*?\*\//g, "");
+
+            // 1. Process 'include' directives
+            const includeRegex = /include\s+"([^"]+)"\s*;/gi;
+            let includeMatch;
+            while ((includeMatch = includeRegex.exec(cleaned)) !== null) {
+                const includePath = includeMatch[1];
+                let resolvedPath = includePath;
+                if (!path.isAbsolute(includePath)) {
+                    resolvedPath = path.posix.join(BIND9_CONF_DIR, includePath);
+                }
+                await parseFile(resolvedPath);
+            }
+
+            // 2. Parse keys: key "name" { algorithm ...; secret ...; };
+            // Simple regex for standard formatted keys
+            const keyRegex = /key\s+"([^"]+)"\s*{([\s\S]*?)};/g;
+            let match;
+            while ((match = keyRegex.exec(cleaned)) !== null) {
+                const name = match[1];
+                const body = match[2];
+
+                const algoMatch = body.match(/algorithm\s+([^;]+);/);
+                const secretMatch = body.match(/secret\s+"([^"]+)";/);
+
+                if (name && algoMatch && secretMatch) {
+                    keys.push({
+                        name,
+                        algorithm: algoMatch[1].trim(),
+                        secret: secretMatch[1].trim()
+                    });
+                }
+            }
+        };
+
+        // Start from main named.conf to catch all includes
+        const mainConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
+        console.log(`[bind9] Syncing keys starting from ${mainConfPath}`);
+        await parseFile(mainConfPath);
+
+        console.log(`[bind9] Sync complete. Found ${keys.length} keys.`);
+        return keys;
+    }
+
     // ── BIND9 Log Reading ───────────────────────────────────────────
 
     /**

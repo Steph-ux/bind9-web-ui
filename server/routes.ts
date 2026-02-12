@@ -208,8 +208,42 @@ export async function registerRoutes(
   try {
     if (await bind9Service.isAvailable()) {
       console.log("[startup] Syncing ACLs and Keys...");
+
+      // 1. Import existing ACLs from file if DB is empty or missing them
+      const existingAcls = await bind9Service.syncAclsFromConfig();
+      const currentDbAcls = await storage.getAcls();
+
+      for (const fileAcl of existingAcls) {
+        if (!currentDbAcls.find(a => a.name === fileAcl.name)) {
+          console.log(`[startup] Importing ACL '${fileAcl.name}' from named.conf.acls`);
+          await storage.createAcl({
+            name: fileAcl.name,
+            networks: fileAcl.networks,
+            comment: "Imported from named.conf.acls"
+          });
+        }
+      }
+
+      // 2. Write back to ensuring loose consistency
       const allAcls = await storage.getAcls();
       await bind9Service.writeAclsConf(allAcls);
+
+      // 3. Import existing Keys from file (recursively) if DB is empty or missing them
+      const existingKeys = await bind9Service.syncKeysFromConfig();
+      const currentDbKeys = await storage.getKeys();
+
+      for (const fileKey of existingKeys) {
+        if (!currentDbKeys.find(k => k.name === fileKey.name)) {
+          console.log(`[startup] Importing Key '${fileKey.name}' from config`);
+          await storage.createKey({
+            name: fileKey.name,
+            algorithm: fileKey.algorithm as any,
+            secret: fileKey.secret
+          });
+        }
+      }
+
+      // 4. Write back keys
       const allKeys = await storage.getKeys();
       await bind9Service.writeKeysConf(allKeys);
       await bind9Service.ensureConfigIncludes();
