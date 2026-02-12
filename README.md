@@ -114,7 +114,13 @@ git clone https://github.com/Steph-ux/bind9.git
 cd bind9
 ```
 
-### 2. Installer les dépendances
+### 2. Prérequis Linux (compilation du module SQLite natif)
+
+```bash
+sudo apt update && sudo apt install -y build-essential python3
+```
+
+### 3. Installer les dépendances
 
 ```bash
 npm install
