@@ -596,6 +596,8 @@ class Bind9Service {
         return logs.slice(0, limit);
     }
 
+
+
     // ── Private helpers ──────────────────────────────────────────
 
     private generateSerial(): string {
@@ -607,6 +609,7 @@ class Bind9Service {
     private parseZoneFile(content: string): Array<{ name: string; type: string; value: string; ttl: number; priority?: number }> {
         const records: Array<{ name: string; type: string; value: string; ttl: number; priority?: number }> = [];
         const lines = content.split("\n");
+        console.log(`[bind9] Parsing ${lines.length} lines`);
 
         let currentOrigin = "@"; // Default origin
         let currentName = "@";   // Default name for inheritance
@@ -628,11 +631,13 @@ class Bind9Service {
             if (trimmed.startsWith("$ORIGIN")) {
                 const parts = trimmed.split(/\s+/);
                 if (parts[1]) currentOrigin = parts[1];
+                console.log(`[bind9] Set origin: ${currentOrigin}`);
                 continue;
             }
             if (trimmed.startsWith("$TTL")) {
                 const parts = trimmed.split(/\s+/);
                 if (parts[1]) currentTTL = parseInt(parts[1]) || 3600;
+                console.log(`[bind9] Set TTL: ${currentTTL}`);
                 continue;
             }
 
