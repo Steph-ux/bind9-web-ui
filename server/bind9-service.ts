@@ -608,34 +608,115 @@ class Bind9Service {
         const records: Array<{ name: string; type: string; value: string; ttl: number; priority?: number }> = [];
         const lines = content.split("\n");
 
+        let currentOrigin = "@"; // Default origin
+        let currentName = "@";   // Default name for inheritance
+        let currentTTL = 3600;   // Default TTL
+
         for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith(";") || trimmed.startsWith("$")) continue;
+            // retain indentation to detect name inheritance
+            const rawLine = line;
+            let trimmed = rawLine.trim();
 
-            const match = trimmed.match(/^(\S+)\s+(\d+)?\s*IN\s+(A|AAAA|CNAME|MX|TXT|NS|SOA|PTR|SRV)\s+(.+)$/i);
-            if (match) {
-                const [, name, ttlStr, type, value] = match;
-                let priority: number | undefined;
-                let cleanValue = value.trim();
+            // Remove comments
+            const commentIndex = trimmed.indexOf(";");
+            if (commentIndex >= 0) {
+                trimmed = trimmed.substring(0, commentIndex).trim();
+            }
+            if (!trimmed) continue;
 
-                if (type.toUpperCase() === "MX") {
-                    const mxMatch = cleanValue.match(/^(\d+)\s+(.+)/);
-                    if (mxMatch) {
-                        priority = parseInt(mxMatch[1]);
-                        cleanValue = mxMatch[2].trim();
-                    }
+            // Handle $ORIGIN and $TTL directives
+            if (trimmed.startsWith("$ORIGIN")) {
+                const parts = trimmed.split(/\s+/);
+                if (parts[1]) currentOrigin = parts[1];
+                continue;
+            }
+            if (trimmed.startsWith("$TTL")) {
+                const parts = trimmed.split(/\s+/);
+                if (parts[1]) currentTTL = parseInt(parts[1]) || 3600;
+                continue;
+            }
+
+            // Parse line
+            // Cases:
+            // 1. NAME [TTL] [CLASS] TYPE DATA...
+            // 2.      [TTL] [CLASS] TYPE DATA... (indented, inherits NAME)
+
+            let name = currentName;
+            let ttl = currentTTL;
+            let type = "";
+            let value = "";
+            let priority: number | undefined;
+
+            // Split by whitespace
+            let tokens = trimmed.split(/\s+/);
+
+            // Detect if line starts with whitespace (inheritance)
+            const startsWithWhitespace = /^\s/.test(rawLine);
+
+            if (!startsWithWhitespace) {
+                // First token is name
+                name = tokens[0];
+                tokens = tokens.slice(1);
+                currentName = name; // Update current name
+            }
+
+            // Now consume optional TTL and Class
+            // Peek at first token
+            if (tokens.length > 0) {
+                // Check for TTL (digits)
+                if (/^\d+$/.test(tokens[0])) {
+                    ttl = parseInt(tokens[0]);
+                    tokens = tokens.slice(1);
                 }
 
-                records.push({
-                    name: name || "@",
-                    type: type.toUpperCase(),
-                    value: cleanValue,
-                    ttl: ttlStr ? parseInt(ttlStr) : 3600,
-                    priority,
-                });
+                // Check for Class (IN, CH, HS) - we only care about IN but consume it if present
+                if (tokens.length > 0 && /^(IN|CH|HS)$/i.test(tokens[0])) {
+                    tokens = tokens.slice(1);
+                }
+
+                // Next must be Type
+                if (tokens.length > 0) {
+                    type = tokens[0].toUpperCase();
+                    tokens = tokens.slice(1);
+
+                    // The rest is value
+                    value = tokens.join(" ");
+
+                    if (["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV"].includes(type)) {
+
+                        // Handle MX priority
+                        if (type === "MX") {
+                            const mxParts = value.trim().split(/\s+/);
+                            if (mxParts.length >= 2) {
+                                priority = parseInt(mxParts[0]);
+                                value = mxParts.slice(1).join(" ");
+                            }
+                        }
+
+                        // Handle SOA - for now just keep as string, but maybe we want to ignore it or parse it
+                        // The loop splits by line, but SOA can be multi-line parentheses. 
+                        // Simple parser might fail on multi-line SOA. 
+                        // For this basic version, valid single-line records are most important.
+                        // If type is SOA, we generally skip importing it as a record in our DB schema usually
+                        // checks for SOA and handles it separately or ignores it. 
+                        // The user said "nothing at all", suggesting A/CNAME/NS are missing too.
+
+                        // Clean value (remove quotes for TXT if needed, though BIND keeps them usually)
+                        if (type === "TXT") {
+                            // keep quotes
+                        }
+
+                        records.push({
+                            name,
+                            type,
+                            value,
+                            ttl,
+                            priority
+                        });
+                    }
+                }
             }
         }
-
         return records;
     }
 
