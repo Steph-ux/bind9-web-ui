@@ -44,6 +44,57 @@ export async function registerRoutes(
     console.log(`[startup] No active connection: ${e.message}`);
   }
 
+  // ── Auto-sync zones from BIND9 config on startup ──────────────
+  try {
+    if (await bind9Service.isAvailable()) {
+      const configZones = await bind9Service.syncZonesFromConfig();
+      let synced = 0;
+      for (const cz of configZones) {
+        const existing = await storage.getZones();
+        const found = existing.find(z => z.domain === cz.domain);
+        if (!found) {
+          const zone = await storage.createZone({
+            domain: cz.domain,
+            type: cz.type as any,
+          });
+          // Update filePath
+          await storage.updateZone(zone.id, { filePath: cz.filePath });
+
+          // Try to import records from zone file
+          if (cz.filePath) {
+            try {
+              const records = await bind9Service.readZoneFile(cz.filePath);
+              for (const rec of records) {
+                if (rec.type === "SOA") continue;
+                try {
+                  await storage.createRecord({
+                    zoneId: zone.id,
+                    name: rec.name,
+                    type: rec.type as any,
+                    value: rec.value,
+                    ttl: rec.ttl,
+                    priority: rec.priority,
+                  });
+                } catch { }
+              }
+            } catch { }
+          }
+          synced++;
+        }
+      }
+      if (synced > 0) {
+        console.log(`[startup] Synced ${synced} zones from BIND9 config`);
+        await storage.insertLog({
+          level: "INFO",
+          source: "zones",
+          message: `Auto-synced ${synced} zones from BIND9 configuration files`,
+        });
+      }
+    }
+  } catch (e: any) {
+    console.log(`[startup] Zone sync failed: ${e.message}`);
+  }
+
   // ══════════════════════════════════════════════════════════════
   //  DASHBOARD
   // ══════════════════════════════════════════════════════════════
@@ -104,6 +155,70 @@ export async function registerRoutes(
         records: await storage.getZoneRecordCount(zone.id),
       })));
       res.json(enriched);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  /** Sync zones from BIND9 config files into the database */
+  app.post("/api/zones/sync", async (_req: Request, res: Response) => {
+    try {
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+
+      const configZones = await bind9Service.syncZonesFromConfig();
+      const existingZones = await storage.getZones();
+      let synced = 0;
+      let skipped = 0;
+
+      for (const cz of configZones) {
+        const found = existingZones.find(z => z.domain === cz.domain);
+        if (found) {
+          skipped++;
+          continue;
+        }
+
+        const zone = await storage.createZone({
+          domain: cz.domain,
+          type: cz.type as any,
+        });
+        await storage.updateZone(zone.id, { filePath: cz.filePath });
+
+        // Import records from zone file
+        if (cz.filePath) {
+          try {
+            const records = await bind9Service.readZoneFile(cz.filePath);
+            for (const rec of records) {
+              if (rec.type === "SOA") continue;
+              try {
+                await storage.createRecord({
+                  zoneId: zone.id,
+                  name: rec.name,
+                  type: rec.type as any,
+                  value: rec.value,
+                  ttl: rec.ttl,
+                  priority: rec.priority,
+                });
+              } catch { }
+            }
+          } catch { }
+        }
+        synced++;
+      }
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "zones",
+        message: `Zone sync: ${synced} imported, ${skipped} already exist, ${configZones.length} total in BIND9`,
+      });
+
+      res.json({
+        message: `Synced ${synced} zones, ${skipped} already existed`,
+        total: configZones.length,
+        synced,
+        skipped,
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -447,7 +562,55 @@ export async function registerRoutes(
         search: req.query.search as string | undefined,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 200,
       };
-      res.json(await storage.getLogs(filter));
+      // Combine app logs with real BIND9 logs
+      const appLogs = await storage.getLogs(filter);
+
+      let bind9Logs: typeof appLogs = [];
+      try {
+        if (await bind9Service.isAvailable()) {
+          const raw = await bind9Service.readBind9Logs(filter.limit || 200);
+          bind9Logs = raw.map(l => ({
+            id: `bind9-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            ...l,
+            level: l.level as "INFO" | "WARN" | "ERROR" | "DEBUG",
+          }));
+
+          // Apply filters to BIND9 logs too
+          if (filter.level) {
+            bind9Logs = bind9Logs.filter(l => l.level === filter.level);
+          }
+          if (filter.source && filter.source !== "app") {
+            bind9Logs = bind9Logs.filter(l => l.source === filter.source);
+          }
+          if (filter.search) {
+            const q = filter.search.toLowerCase();
+            bind9Logs = bind9Logs.filter(l => l.message.toLowerCase().includes(q));
+          }
+        }
+      } catch { }
+
+      // If source=app, only show app logs
+      if (filter.source === "app") {
+        return res.json(appLogs);
+      }
+
+      // Merge and sort by timestamp desc
+      const all = [...appLogs, ...bind9Logs]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, filter.limit || 200);
+
+      res.json(all);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  /** Get only real BIND9 daemon logs */
+  app.get("/api/logs/bind9", async (req: Request, res: Response) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 200;
+      const logs = await bind9Service.readBind9Logs(limit);
+      res.json(logs);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

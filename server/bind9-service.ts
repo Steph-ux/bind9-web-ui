@@ -393,6 +393,140 @@ class Bind9Service {
         return `${minutes}m`;
     }
 
+    // ── Zone Sync ─────────────────────────────────────────────────
+
+    /**
+     * Parse named.conf.local (and included files) to extract zone declarations.
+     * Returns array of { domain, type, filePath } found in BIND9 config.
+     */
+    async syncZonesFromConfig(): Promise<Array<{ domain: string; type: string; filePath: string }>> {
+        const zones: Array<{ domain: string; type: string; filePath: string }> = [];
+        const visited = new Set<string>();
+
+        const parseFile = async (confPath: string) => {
+            if (visited.has(confPath)) return;
+            visited.add(confPath);
+
+            let content: string;
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                return; // File doesn't exist or can't be read
+            }
+
+            // Remove comments
+            const cleaned = content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+
+            // Find include directives
+            const includeRegex = /include\s+"([^"]+)"\s*;/gi;
+            let includeMatch;
+            while ((includeMatch = includeRegex.exec(cleaned)) !== null) {
+                await parseFile(includeMatch[1]);
+            }
+
+            // Find zone declarations
+            const zoneRegex = /zone\s+"([^"]+)"\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/gi;
+            let zoneMatch;
+            while ((zoneMatch = zoneRegex.exec(cleaned)) !== null) {
+                const domain = zoneMatch[1];
+                const body = zoneMatch[2];
+
+                // Skip built-in zones
+                if (domain === "." || domain === "localhost" || domain === "127.in-addr.arpa" ||
+                    domain === "0.in-addr.arpa" || domain === "255.in-addr.arpa") continue;
+
+                const typeMatch = body.match(/type\s+(master|slave|forward|primary|secondary|stub|hint)\s*;/i);
+                const fileMatch = body.match(/file\s+"([^"]+)"\s*;/i);
+
+                let type = typeMatch ? typeMatch[1].toLowerCase() : "master";
+                if (type === "primary") type = "master";
+                if (type === "secondary") type = "slave";
+
+                zones.push({
+                    domain,
+                    type,
+                    filePath: fileMatch ? fileMatch[1] : "",
+                });
+            }
+        };
+
+        // Start with named.conf.local, then named.conf
+        const localConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
+        const mainConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
+
+        await parseFile(localConfPath);
+        await parseFile(mainConfPath);
+
+        return zones;
+    }
+
+    // ── BIND9 Log Reading ───────────────────────────────────────────
+
+    /**
+     * Read real BIND9 log files and return parsed entries.
+     * Tries common log paths: /var/log/named/data/, /var/log/named/, /var/log/syslog
+     */
+    async readBind9Logs(limit: number = 200): Promise<Array<{ timestamp: string; level: string; source: string; message: string }>> {
+        const logs: Array<{ timestamp: string; level: string; source: string; message: string }> = [];
+
+        // Log files to check, ordered by priority
+        const logFiles = [
+            { path: "/var/log/named/data/query.log", source: "query" },
+            { path: "/var/log/named/data/error.log", source: "error" },
+            { path: "/var/log/named/data/security.log", source: "security" },
+            { path: "/var/log/named/data/notification.log", source: "notify" },
+            { path: "/var/log/named/data/rate_limiting.log", source: "rate-limit" },
+        ];
+
+        for (const logFile of logFiles) {
+            try {
+                // Read only the last N lines using tail
+                const { stdout } = await this.execCommand(`tail -n ${Math.ceil(limit / logFiles.length)} ${logFile.path} 2>/dev/null`);
+                if (!stdout.trim()) continue;
+
+                const lines = stdout.trim().split("\n");
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+
+                    // BIND9 log format: "12-Feb-2026 12:34:56.789 queries: info: ..."
+                    // or: "12-Feb-2026 12:34:56.789 security: error: ..."
+                    const tsMatch = line.match(/^(\d{1,2}-\w+-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.*)/);
+                    if (tsMatch) {
+                        let timestamp: string;
+                        try {
+                            timestamp = new Date(tsMatch[1]).toISOString();
+                        } catch {
+                            timestamp = new Date().toISOString();
+                        }
+
+                        const rest = tsMatch[2];
+                        // Detect level from the content
+                        let level = "INFO";
+                        if (/error|fail/i.test(rest)) level = "ERROR";
+                        else if (/warn/i.test(rest)) level = "WARN";
+                        else if (/debug/i.test(rest)) level = "DEBUG";
+
+                        logs.push({ timestamp, level, source: logFile.source, message: rest.substring(0, 500) });
+                    } else {
+                        // Fallback for unrecognized format
+                        logs.push({
+                            timestamp: new Date().toISOString(),
+                            level: "INFO",
+                            source: logFile.source,
+                            message: line.substring(0, 500),
+                        });
+                    }
+                }
+            } catch {
+                // Log file doesn't exist or not readable, skip
+            }
+        }
+
+        // Sort by timestamp desc and limit
+        logs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        return logs.slice(0, limit);
+    }
+
     // ── Private helpers ──────────────────────────────────────────
 
     private generateSerial(): string {

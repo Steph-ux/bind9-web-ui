@@ -41,7 +41,7 @@ export interface ZoneData {
     updatedAt: string;
 }
 
-export interface ZoneDetail extends ZoneData {
+export interface ZoneDetail extends Omit<ZoneData, "records"> {
     records: any[];
 }
 
@@ -211,3 +211,7 @@ export const activateConnection = (id: string) =>
 
 export const deactivateConnections = () =>
     request<{ message: string }>("/connections/deactivate", { method: "PUT" });
+
+// ── Zone Sync ──────────────────────────────────────────────
+export const syncZones = () =>
+    request<{ message: string; total: number; synced: number; skipped: number }>("/zones/sync", { method: "POST" });
