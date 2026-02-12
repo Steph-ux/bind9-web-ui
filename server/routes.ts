@@ -44,6 +44,22 @@ export async function registerRoutes(
     console.log(`[startup] No active connection: ${e.message}`);
   }
 
+  // ── Auto-sync ACLs and Keys on startup ────────────────────────
+  try {
+    if (await bind9Service.isAvailable()) {
+      console.log("[startup] Syncing ACLs and Keys...");
+      const allAcls = await storage.getAcls();
+      await bind9Service.writeAclsConf(allAcls);
+      const allKeys = await storage.getKeys();
+      await bind9Service.writeKeysConf(allKeys);
+      await bind9Service.ensureConfigIncludes();
+      await bind9Service.rndc("reconfig");
+      console.log("[startup] ACLs and Keys synced");
+    }
+  } catch (e: any) {
+    console.log(`[startup] Failed to sync ACLs/Keys: ${e.message}`);
+  }
+
   // ── Auto-sync zones from BIND9 config on startup ──────────────
   try {
     if (await bind9Service.isAvailable()) {
@@ -650,6 +666,17 @@ export async function registerRoutes(
         message: `ACL '${acl.name}' created with networks: ${acl.networks}`,
       });
 
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
       res.status(201).json(acl);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -665,6 +692,18 @@ export async function registerRoutes(
       const acl = await storage.getAcl(id);
       if (!acl) return res.status(404).json({ message: "ACL not found" });
       const updated = await storage.updateAcl(id, req.body);
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -683,6 +722,17 @@ export async function registerRoutes(
         source: "security",
         message: `ACL '${acl.name}' deleted`,
       });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
 
       res.json({ message: "ACL deleted" });
     } catch (error: any) {
@@ -716,6 +766,17 @@ export async function registerRoutes(
         message: `TSIG key '${key.name}' created (${key.algorithm})`,
       });
 
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allKeys = await storage.getKeys();
+          await bind9Service.writeKeysConf(allKeys);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync Keys: ${e.message}`);
+      }
+
       res.status(201).json({
         ...key,
         secret: key.secret.slice(0, 5) + "...[hidden]",
@@ -740,6 +801,17 @@ export async function registerRoutes(
         source: "security",
         message: `TSIG key '${key.name}' deleted`,
       });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allKeys = await storage.getKeys();
+          await bind9Service.writeKeysConf(allKeys);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync Keys: ${e.message}`);
+      }
 
       res.json({ message: "Key deleted" });
     } catch (error: any) {

@@ -222,6 +222,71 @@ class Bind9Service {
         }
     }
 
+    /** Write ACLs to named.conf.acls */
+    async writeAclsConf(acls: Array<{ name: string; networks: string }>): Promise<void> {
+        let content = "";
+        for (const acl of acls) {
+            content += `acl "${acl.name}" {\n`;
+            // Ensure networks are semi-colon terminated
+            const nets = acl.networks.split(/[,\n\s]+/).filter(s => s);
+            for (const net of nets) {
+                const n = net.endsWith(";") ? net : `${net};`;
+                content += `    ${n}\n`;
+            }
+            content += `};\n\n`;
+        }
+        const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
+        await this.writeRemoteFile(confPath, content);
+    }
+
+    /** Write TSIG Keys to named.conf.keys */
+    async writeKeysConf(keys: Array<{ name: string; algorithm: string; secret: string }>): Promise<void> {
+        let content = "";
+        for (const key of keys) {
+            content += `key "${key.name}" {\n`;
+            content += `    algorithm ${key.algorithm};\n`;
+            content += `    secret "${key.secret}";\n`;
+            content += `};\n\n`;
+        }
+        const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.keys");
+        await this.writeRemoteFile(confPath, content);
+    }
+
+    /** Ensure named.conf includes acls and keys configs */
+    async ensureConfigIncludes(): Promise<void> {
+        try {
+            const namedConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(namedConfPath);
+            } catch {
+                // If named.conf doesn't exist query named.conf.options? No, just return.
+                return;
+            }
+
+            const aclsInclude = `include "${path.posix.join(BIND9_CONF_DIR, "named.conf.acls")}";`;
+            const keysInclude = `include "${path.posix.join(BIND9_CONF_DIR, "named.conf.keys")}";`;
+
+            let modified = false;
+            // Check loosely for the filename to avoid duplicate includes if path differs slightly
+            if (!content.includes("named.conf.acls")) {
+                content += `\n${aclsInclude}\n`;
+                modified = true;
+            }
+            if (!content.includes("named.conf.keys")) {
+                content += `\n${keysInclude}\n`;
+                modified = true;
+            }
+
+            if (modified) {
+                await this.writeRemoteFile(namedConfPath, content);
+                console.log("[bind9] Added missing includes to named.conf");
+            }
+        } catch (error: any) {
+            console.error(`[bind9] Failed to ensure config includes: ${error.message}`);
+        }
+    }
+
     /** Reload BIND9 configuration */
     async reload(): Promise<string> {
         return this.rndc("reload");
