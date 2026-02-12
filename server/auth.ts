@@ -19,7 +19,9 @@ async function comparePasswords(supplied: string, stored: string) {
     const [hashed, salt] = stored.split(".");
     const hashedBuf = Buffer.from(hashed, "hex");
     const suppliedBuf = (await scryptAsync(supplied, salt, 64)) as Buffer;
-    return timingSafeEqual(hashedBuf, suppliedBuf);
+    const match = timingSafeEqual(hashedBuf, suppliedBuf);
+
+    return match;
 }
 
 export function setupAuth(app: Express) {
@@ -27,9 +29,9 @@ export function setupAuth(app: Express) {
         secret: process.env.SESSION_SECRET || "bind9_secret_key_change_me",
         resave: false,
         saveUninitialized: false,
-        store: undefined, // MemoryStore default is fine for development/small scale, but consider connecting to SQLite via connect-sqlite3 if persistence needed
+        store: undefined,
         cookie: {
-            secure: process.env.NODE_ENV === "production", // cookie only works in https if secure: true
+            secure: app.get("env") === "production",
             httpOnly: true,
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         }
@@ -45,17 +47,24 @@ export function setupAuth(app: Express) {
 
     passport.use(
         new LocalStrategy(async (username, password, done) => {
+
             try {
                 const user = await storage.getUserByUsername(username);
                 if (!user) {
+
                     return done(null, false, { message: "Incorrect username." });
                 }
+
+
                 const isValid = await comparePasswords(password, user.password);
                 if (!isValid) {
+
                     return done(null, false, { message: "Incorrect password." });
                 }
+
                 return done(null, user);
             } catch (error) {
+
                 return done(error);
             }
         }),
