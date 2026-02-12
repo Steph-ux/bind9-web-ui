@@ -178,13 +178,15 @@ export default function FirewallPage() {
                                     <Label htmlFor="fw-toggle" className="block font-semibold mb-1 cursor-pointer">
                                         {toggling ? "Updating..." : (status.active ? "Enabled" : "Disabled")}
                                     </Label>
-                                    <span className="text-xs text-muted-foreground">System Startup</span>
+                                    <span className={`text-xs ${status.active ? "text-green-500 font-medium" : "text-muted-foreground"}`}>
+                                        {status.active ? "Active on Startup" : "Inactive"}
+                                    </span>
                                 </div>
                                 <Switch
                                     id="fw-toggle"
                                     checked={status.active}
                                     onCheckedChange={handleToggle}
-                                    disabled={toggling}
+                                    disabled={loading || toggling}
                                     className={status.active ? "data-[state=checked]:bg-green-500" : "data-[state=unchecked]:bg-destructive"}
                                 />
                             </div>

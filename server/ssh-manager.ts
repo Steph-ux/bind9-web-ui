@@ -113,21 +113,44 @@ class SSHManager {
         const client = await this.ensureConnected();
 
         return new Promise((resolve, reject) => {
+            // Add safety timeout (e.g. 30s) to prevent infinite hangs
+            const timeout = setTimeout(() => {
+                // We can't easily kill the remote process without a stream, 
+                // but we can reject the promise and maybe close connection
+                reject(new Error("SSH execution timed out (30s)"));
+            }, 30000);
+
             client.exec(command, (err, stream) => {
                 if (err) {
+                    clearTimeout(timeout);
                     // Try reconnecting once on error
                     this.connected = false;
                     this.ensureConnected()
                         .then((c) => {
                             c.exec(command, (retryErr, retryStream) => {
                                 if (retryErr) return reject(new Error(`SSH exec failed: ${retryErr.message}`));
-                                this.collectStream(retryStream, resolve, reject);
+                                this.collectStream(retryStream, (res) => {
+                                    clearTimeout(timeout);
+                                    resolve(res);
+                                }, (err) => {
+                                    clearTimeout(timeout);
+                                    reject(err);
+                                });
                             });
                         })
-                        .catch(reject);
+                        .catch((err) => {
+                            clearTimeout(timeout);
+                            reject(err);
+                        });
                     return;
                 }
-                this.collectStream(stream, resolve, reject);
+                this.collectStream(stream, (res) => {
+                    clearTimeout(timeout);
+                    resolve(res);
+                }, (err) => {
+                    clearTimeout(timeout);
+                    reject(err);
+                });
             });
         });
     }
