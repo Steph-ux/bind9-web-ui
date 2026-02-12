@@ -435,7 +435,8 @@ export async function registerRoutes(
       const existingRecords = await storage.getRecords(targetZone.id);
 
       if (action === "create") {
-        const exists = existingRecords.find(r => r.name === ptrName && r.type === "PTR");
+        // Check specific PTR
+        const exists = existingRecords.find(r => r.name === ptrName && r.value === ptrValue && r.type === "PTR");
         if (!exists) {
           await storage.createRecord({
             zoneId: targetZone.id,
@@ -445,6 +446,8 @@ export async function registerRoutes(
             ttl: 3600,
           });
           await syncZoneFile(targetZone.id);
+        } else {
+          console.log(`[auto-reverse] PTR ${ptrName} -> ${ptrValue} already exists. Skipping.`);
         }
       } else if (action === "update") {
         // If IP changed, delete old PTR and create new
@@ -454,20 +457,22 @@ export async function registerRoutes(
           return;
         }
 
-        // If name changed, update PTR value
-        const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR");
-        if (targetRecord) {
-          await storage.updateRecord(targetRecord.id, { value: ptrValue });
-          await syncZoneFile(targetZone.id);
-        }
-      } else if (action === "delete") {
-        const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR");
-        if (targetRecord) {
-          // Verify it points to us before deleting (safety check)
-          if (targetRecord.value === ptrValue) {
-            await storage.deleteRecord(targetRecord.id);
+        // If name changed, we need to find the OLD PTR record and update it
+        if (oldRecord && oldRecord.name !== record.name) {
+          const oldFqdn = sourceZone ? (oldRecord.name === "@" ? sourceZone.domain : `${oldRecord.name}.${sourceZone.domain}`) : oldRecord.name;
+          const oldPtrValue = oldFqdn.endsWith(".") ? oldFqdn : `${oldFqdn}.`;
+
+          const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR" && r.value === oldPtrValue);
+          if (targetRecord) {
+            await storage.updateRecord(targetRecord.id, { value: ptrValue });
             await syncZoneFile(targetZone.id);
           }
+        }
+      } else if (action === "delete") {
+        const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR" && r.value === ptrValue);
+        if (targetRecord) {
+          await storage.deleteRecord(targetRecord.id);
+          await syncZoneFile(targetZone.id);
         }
       }
 
