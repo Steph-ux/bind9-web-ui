@@ -30,6 +30,8 @@ export default function Zones() {
   const [newDomain, setNewDomain] = useState("");
   const [newType, setNewType] = useState("master");
   const [newAdmin, setNewAdmin] = useState("");
+  const [autoReverse, setAutoReverse] = useState(false);
+  const [network, setNetwork] = useState("");
   const [syncing, setSyncing] = useState(false);
   const { toast } = useToast();
   const { canManageDNS } = useAuth();
@@ -59,12 +61,20 @@ export default function Zones() {
     }
     try {
       setCreating(true);
-      await createZone({ domain: newDomain.trim(), type: newType, adminEmail: newAdmin.trim() || undefined });
+      await createZone({
+        domain: newDomain.trim(),
+        type: newType,
+        adminEmail: newAdmin.trim() || undefined,
+        autoReverse: newType === "master" ? autoReverse : undefined,
+        network: newType === "master" && autoReverse ? network.trim() : undefined
+      });
       toast({ title: "Success", description: `Zone ${newDomain} created` });
       setIsDialogOpen(false);
       setNewDomain("");
       setNewType("master");
       setNewAdmin("");
+      setAutoReverse(false);
+      setNetwork("");
       fetchZones();
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -151,7 +161,6 @@ export default function Zones() {
                       <SelectContent>
                         <SelectItem value="master">Master</SelectItem>
                         <SelectItem value="slave">Slave</SelectItem>
-                        <SelectItem value="forward">Forward</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -165,6 +174,44 @@ export default function Zones() {
                       onChange={(e) => setNewAdmin(e.target.value)}
                     />
                   </div>
+
+                  {newType === "master" && (
+                    <>
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="autoReverse" className="text-right">Reverse Zone</Label>
+                        <div className="col-span-3 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="autoReverse"
+                            className="h-4 w-4 rounded border-primary/50 bg-background text-primary focus:ring-primary/50"
+                            checked={autoReverse}
+                            onChange={(e) => setAutoReverse(e.target.checked)}
+                          />
+                          <label htmlFor="autoReverse" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                            Auto-create reverse zone
+                          </label>
+                        </div>
+                      </div>
+
+                      {autoReverse && (
+                        <div className="grid grid-cols-4 items-center gap-4 animate-in slide-in-from-top-2 fade-in duration-200">
+                          <Label htmlFor="network" className="text-right">Network</Label>
+                          <div className="col-span-3">
+                            <Input
+                              id="network"
+                              placeholder="e.g. 192.168.1"
+                              className="font-mono"
+                              value={network}
+                              onChange={(e) => setNetwork(e.target.value)}
+                            />
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              Enter subnet (e.g., 192.168.1). The reverse zone will be 1.168.192.in-addr.arpa
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
                 <DialogFooter>
                   <Button onClick={handleCreate} disabled={creating}>

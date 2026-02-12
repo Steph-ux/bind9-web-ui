@@ -252,6 +252,65 @@ class Bind9Service {
         await this.writeRemoteFile(confPath, content);
     }
 
+    /** Add a zone to named.conf.local */
+    async addZoneToConfig(domain: string, type: "master" | "slave" | "forward", file: string): Promise<void> {
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                content = "// Local zone definitions\n";
+            }
+
+            // Check if zone already exists to avoid duplicates
+            if (content.includes(`zone "${domain}"`)) {
+                console.log(`[bind9] Zone ${domain} already in config, skipping add.`);
+                return;
+            }
+
+            const newBlock = `
+zone "${domain}" {
+    type ${type};
+    file "${file}";
+};
+`;
+            await this.writeRemoteFile(confPath, content + newBlock);
+            console.log(`[bind9] Added zone ${domain} to named.conf.local`);
+        } catch (error: any) {
+            throw new Error(`Failed to add zone to config: ${error.message}`);
+        }
+    }
+
+    /** Remove a zone from named.conf.local */
+    async removeZoneFromConfig(domain: string): Promise<void> {
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                return; // File doesn't exist, nothing to remove
+            }
+
+            // Regex to match the zone block: zone "domain" { ... };
+            // We use [\s\S]*? to match across newlines non-greedily until the first closing brace followed by semi-colon
+            // This is a basic parser; for complex nested braces it might be fragile but standard BIND format is usually clean.
+            const regex = new RegExp(`zone\\s+"${domain}"\\s*{[\\s\\S]*?};\\s*`, "g");
+
+            if (!regex.test(content)) {
+                console.log(`[bind9] Zone ${domain} not found in config, skipping remove.`);
+                return;
+            }
+
+            const newContent = content.replace(regex, "");
+            await this.writeRemoteFile(confPath, newContent.trim() + "\n");
+            console.log(`[bind9] Removed zone ${domain} from named.conf.local`);
+        } catch (error: any) {
+            throw new Error(`Failed to remove zone from config: ${error.message}`);
+        }
+    }
+
     /** Ensure named.conf includes acls and keys configs */
     async ensureConfigIncludes(): Promise<void> {
         try {

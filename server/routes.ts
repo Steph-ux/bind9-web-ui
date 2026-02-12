@@ -447,13 +447,22 @@ export async function registerRoutes(
 
   app.post("/api/zones", requireOperator, async (req: Request, res: Response) => {
     try {
+      // Validate schema (allowing extra fields not in DB schema)
       const data = insertZoneSchema.parse(req.body);
+
+      // Extract extra fields
+      const { autoReverse, network } = req.body;
+
+      // 1. Create the requested zone
       const zone = await storage.createZone(data);
 
       try {
         if (await bind9Service.isAvailable()) {
+          // Write empty zone file
           await bind9Service.writeZoneFile(zone.filePath, zone.domain, [], zone.serial);
-          await bind9Service.reload();
+
+          // Add to named.conf.local
+          await bind9Service.addZoneToConfig(zone.domain, zone.type, zone.filePath);
         }
       } catch (e: any) {
         await storage.insertLog({
@@ -468,6 +477,50 @@ export async function registerRoutes(
         source: "zones",
         message: `Zone ${zone.domain} created (type: ${zone.type})`,
       });
+
+      // 2. Handle Auto-Reverse Zone
+      if (autoReverse && network && zone.type === "master") {
+        try {
+          // Calculate reverse domain: 192.168.1 -> 1.168.192.in-addr.arpa
+          const parts = network.split(".").filter(Boolean);
+          const reverseDomain = parts.reverse().join(".") + ".in-addr.arpa";
+
+          // Check if already exists
+          const existing = await storage.getZones();
+          if (!existing.find(z => z.domain === reverseDomain)) {
+
+            const reverseZone = await storage.createZone({
+              domain: reverseDomain,
+              type: "master",
+              adminEmail: zone.adminEmail,
+            });
+
+            if (await bind9Service.isAvailable()) {
+              // Write empty zone file for reverse
+              await bind9Service.writeZoneFile(reverseZone.filePath, reverseZone.domain, [], reverseZone.serial);
+              // Add to named.conf.local
+              await bind9Service.addZoneToConfig(reverseZone.domain, "master", reverseZone.filePath);
+            }
+
+            await storage.insertLog({
+              level: "INFO",
+              source: "zones",
+              message: `Auto-created reverse zone ${reverseDomain} for network ${network}`,
+            });
+          }
+        } catch (revError: any) {
+          await storage.insertLog({
+            level: "WARN",
+            source: "zones",
+            message: `Failed to auto-create reverse zone: ${revError.message}`,
+          });
+        }
+      }
+
+      // Reload BIND9 once at the end
+      if (await bind9Service.isAvailable()) {
+        await bind9Service.reload();
+      }
 
       res.status(201).json(zone);
     } catch (error: any) {
@@ -496,6 +549,16 @@ export async function registerRoutes(
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
       await storage.deleteZone(id);
+
+      // Remove from named.conf.local
+      try {
+        if (await bind9Service.isAvailable()) {
+          await bind9Service.removeZoneFromConfig(zone.domain);
+          await bind9Service.reload();
+        }
+      } catch (e: any) {
+        console.error(`[api] Failed to remove zone from config: ${e.message}`);
+      }
 
       await storage.insertLog({
         level: "WARN",

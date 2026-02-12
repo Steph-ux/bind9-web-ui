@@ -47,7 +47,7 @@ export interface ZoneDetail extends Omit<ZoneData, "records"> {
 
 export const getZones = () => request<ZoneData[]>("/zones");
 export const getZone = (id: string) => request<ZoneDetail>(`/zones/${id}`);
-export const createZone = (data: { domain: string; type: string; adminEmail?: string }) =>
+export const createZone = (data: { domain: string; type: string; adminEmail?: string; autoReverse?: boolean; network?: string }) =>
     request<ZoneData>("/zones", { method: "POST", body: JSON.stringify(data) });
 export const updateZone = (id: string, data: Partial<ZoneData>) =>
     request<ZoneData>(`/zones/${id}`, { method: "PUT", body: JSON.stringify(data) });
