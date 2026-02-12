@@ -157,6 +157,7 @@ export async function registerRoutes(
   });
 
   /** Sync zones from BIND9 config files into the database */
+  /** Sync zones from BIND9 config files into the database */
   app.post("/api/zones/sync", async (_req: Request, res: Response) => {
     try {
       if (!(await bind9Service.isAvailable())) {
@@ -179,34 +180,52 @@ export async function registerRoutes(
             continue;
           }
 
+          let zoneId = "";
           const found = existingZones.find(z => z.domain === cz.domain);
+
           if (found) {
-            skipped++;
-            continue;
+            console.log(`[api] Zone ${cz.domain} exists, updating details...`);
+            zoneId = found.id;
+            await storage.updateZone(found.id, { filePath: cz.filePath });
+          } else {
+            const newZone = await storage.createZone({
+              domain: cz.domain,
+              type: cz.type as any,
+            });
+            zoneId = newZone.id;
+            await storage.updateZone(newZone.id, { filePath: cz.filePath });
           }
 
-          const zone = await storage.createZone({
-            domain: cz.domain,
-            type: cz.type as any,
-          });
-          await storage.updateZone(zone.id, { filePath: cz.filePath });
-
-          // Import records from zone file - wrap in try/catch to not fail the zone creation execution if records fail
+          // Import records from zone file
           if (cz.filePath) {
             try {
               const records = await bind9Service.readZoneFile(cz.filePath);
-              for (const rec of records) {
-                if (rec.type === "SOA") continue;
-                try {
-                  await storage.createRecord({
-                    zoneId: zone.id,
-                    name: rec.name,
-                    type: rec.type as any,
-                    value: rec.value,
-                    ttl: rec.ttl,
-                    priority: rec.priority,
-                  });
-                } catch { }
+
+              if (records.length > 0) {
+                // Delete existing records
+                const currentRecords = await storage.getRecords(zoneId);
+                for (const r of currentRecords) {
+                  await storage.deleteRecord(r.id);
+                }
+
+                let importedCount = 0;
+                for (const rec of records) {
+                  if (rec.type === "SOA") continue;
+                  try {
+                    await storage.createRecord({
+                      zoneId: zoneId,
+                      name: rec.name,
+                      type: rec.type as any,
+                      value: rec.value,
+                      ttl: rec.ttl,
+                      priority: rec.priority,
+                    });
+                    importedCount++;
+                  } catch { }
+                }
+                console.log(`[api] Imported ${importedCount} records for zone ${cz.domain}`);
+              } else {
+                console.log(`[api] No records found for zone ${cz.domain} (or parsing failed)`);
               }
             } catch (recError: any) {
               console.warn(`[api] Failed to read records for zone ${cz.domain}: ${recError.message}`);
@@ -231,6 +250,7 @@ export async function registerRoutes(
         synced,
         skipped,
       });
+
     } catch (error: any) {
       console.error(`[api] Sync fatal error: ${error.message}`);
       res.status(500).json({ message: error.message });
