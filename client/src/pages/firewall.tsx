@@ -18,7 +18,7 @@ import { Shield, ShieldAlert, ShieldCheck, Plus, Trash2, Loader2, AlertTriangle,
 import { Separator } from "@/components/ui/separator";
 
 export default function FirewallPage() {
-    const [status, setStatus] = useState<FirewallStatus>({ active: false, rules: [] });
+    const [status, setStatus] = useState<FirewallStatus>({ active: false, rules: [], installed: true });
     const [loading, setLoading] = useState(true);
     const [toggling, setToggling] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -130,47 +130,67 @@ export default function FirewallPage() {
                 </div>
 
                 {/* Status Card */}
-                <Card className={`glass-panel border-l-4 ${status.active ? "border-l-green-500 shadow-[0_0_20px_rgba(34,197,94,0.1)]" : "border-l-destructive shadow-[0_0_20px_rgba(239,68,68,0.1)]"}`}>
-                    <CardContent className="flex items-center justify-between py-8">
-                        <div className="flex items-center gap-6">
-                            <div className={`p-4 rounded-full ${status.active ? "bg-green-500/10" : "bg-destructive/10"}`}>
-                                {status.active ?
-                                    <ShieldCheck className="h-12 w-12 text-green-500" /> :
-                                    <ShieldAlert className="h-12 w-12 text-destructive" />
-                                }
+                {!status.installed ? (
+                    <Card className="glass-panel border-l-4 border-l-orange-500 bg-orange-500/5">
+                        <CardContent className="flex items-center gap-6 py-8">
+                            <div className="p-4 rounded-full bg-orange-500/10">
+                                <AlertTriangle className="h-12 w-12 text-orange-500" />
                             </div>
                             <div>
-                                <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
-                                    Firewall is {status.active ? "Active" : "Inactive"}
-                                    {status.active && <span className="relative flex h-3 w-3">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                                    </span>}
-                                </h2>
-                                <p className="text-muted-foreground mt-1 max-w-lg">
-                                    {status.active
-                                        ? "Your system is protected. Incoming connections are blocked unless explicitly allowed by the rules below."
-                                        : "Your system is currently exposed to all incoming traffic. Enable the firewall to secure your network."}
+                                <h2 className="text-2xl font-bold tracking-tight text-foreground">Firewall Not Detected</h2>
+                                <p className="text-muted-foreground mt-2 max-w-lg">
+                                    The <code>ufw</code> command was not found on this system.
+                                    This interface relies on UFW to manage rules.
+                                    <br /><br />
+                                    Please install UFW to use this feature:
+                                    <code className="block mt-2 bg-black/20 p-2 rounded text-xs font-mono">sudo apt-get install ufw</code>
                                 </p>
                             </div>
-                        </div>
-                        <div className="flex items-center gap-4 bg-card/50 p-4 rounded-lg border border-border/50">
-                            <div className="text-right mr-2">
-                                <Label htmlFor="fw-toggle" className="block font-semibold mb-1 cursor-pointer">
-                                    {toggling ? "Updating..." : (status.active ? "Enabled" : "Disabled")}
-                                </Label>
-                                <span className="text-xs text-muted-foreground">System Startup</span>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <Card className={`glass-panel border-l-4 ${status.active ? "border-l-green-500 shadow-[0_0_20px_rgba(34,197,94,0.1)]" : "border-l-destructive shadow-[0_0_20px_rgba(239,68,68,0.1)]"}`}>
+                        <CardContent className="flex items-center justify-between py-8">
+                            <div className="flex items-center gap-6">
+                                <div className={`p-4 rounded-full ${status.active ? "bg-green-500/10" : "bg-destructive/10"}`}>
+                                    {status.active ?
+                                        <ShieldCheck className="h-12 w-12 text-green-500" /> :
+                                        <ShieldAlert className="h-12 w-12 text-destructive" />
+                                    }
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+                                        Firewall is {status.active ? "Active" : "Inactive"}
+                                        {status.active && <span className="relative flex h-3 w-3">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                                        </span>}
+                                    </h2>
+                                    <p className="text-muted-foreground mt-1 max-w-lg">
+                                        {status.active
+                                            ? "Your system is protected. Incoming connections are blocked unless explicitly allowed by the rules below."
+                                            : "Your system is currently exposed to all incoming traffic. Enable the firewall to secure your network."}
+                                    </p>
+                                </div>
                             </div>
-                            <Switch
-                                id="fw-toggle"
-                                checked={status.active}
-                                onCheckedChange={handleToggle}
-                                disabled={toggling}
-                                className={status.active ? "data-[state=checked]:bg-green-500" : "data-[state=unchecked]:bg-destructive"}
-                            />
-                        </div>
-                    </CardContent>
-                </Card>
+                            <div className="flex items-center gap-4 bg-card/50 p-4 rounded-lg border border-border/50">
+                                <div className="text-right mr-2">
+                                    <Label htmlFor="fw-toggle" className="block font-semibold mb-1 cursor-pointer">
+                                        {toggling ? "Updating..." : (status.active ? "Enabled" : "Disabled")}
+                                    </Label>
+                                    <span className="text-xs text-muted-foreground">System Startup</span>
+                                </div>
+                                <Switch
+                                    id="fw-toggle"
+                                    checked={status.active}
+                                    onCheckedChange={handleToggle}
+                                    disabled={toggling}
+                                    className={status.active ? "data-[state=checked]:bg-green-500" : "data-[state=unchecked]:bg-destructive"}
+                                />
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Rules Section */}
                 <div className="space-y-4">

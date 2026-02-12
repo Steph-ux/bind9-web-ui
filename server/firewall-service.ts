@@ -18,6 +18,7 @@ export interface FirewallRule {
 export interface FirewallStatus {
     active: boolean;
     rules: FirewallRule[];
+    installed: boolean;
 }
 
 class FirewallService {
@@ -117,14 +118,17 @@ class FirewallService {
                 }
             }
 
-            return { active, rules };
+            return { active, rules, installed: true };
         } catch (e: any) {
             if (e.message.includes("inactive")) {
-                return { active: false, rules: [] };
+                return { active: false, rules: [], installed: true };
+            }
+            if (e.message.includes("command not found")) {
+                return { active: false, rules: [], installed: false };
             }
             // Fallback for mock environment if not caught above
             if (os.platform() === "win32" && !sshManager.isConfigured()) {
-                return { active: this.mockActive, rules: this.mockRules };
+                return { active: this.mockActive, rules: this.mockRules, installed: true };
             }
             console.error("Failed to get firewall status:", e);
             throw e;

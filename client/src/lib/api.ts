@@ -229,6 +229,7 @@ export interface FirewallRule {
 export interface FirewallStatus {
     active: boolean;
     rules: FirewallRule[];
+    installed: boolean;
 }
 
 export const getFirewallStatus = () => request<FirewallStatus>("/firewall/status");
