@@ -3,12 +3,12 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "@shared/schema";
 import path from "path";
 import { fileURLToPath } from "url";
+import { mkdirSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = path.resolve(__dirname, "..", "data", "bind9admin.db");
 
 // Ensure data directory exists
-import { mkdirSync } from "fs";
 mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const sqlite = new Database(dbPath);
@@ -76,6 +76,23 @@ sqlite.exec(`
     level TEXT NOT NULL DEFAULT 'INFO',
     source TEXT NOT NULL DEFAULT 'general',
     message TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS connections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    username TEXT NOT NULL DEFAULT 'root',
+    auth_type TEXT NOT NULL DEFAULT 'password',
+    password TEXT DEFAULT '',
+    private_key TEXT DEFAULT '',
+    bind9_conf_dir TEXT DEFAULT '',
+    bind9_zone_dir TEXT DEFAULT '',
+    rndc_bin TEXT DEFAULT 'rndc',
+    is_active INTEGER NOT NULL DEFAULT 0,
+    last_status TEXT DEFAULT 'unknown',
+    created_at TEXT NOT NULL
   );
 `);
 
