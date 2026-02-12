@@ -1,0 +1,213 @@
+/** API client for BIND9 Admin Panel */
+
+const BASE = "/api";
+
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+    const res = await fetch(`${BASE}${url}`, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+// ── Dashboard ──────────────────────────────────────────────
+export interface DashboardData {
+    zones: { total: number; active: number };
+    records: number;
+    bind9: { running: boolean; version: string; uptime: string; zones: number; pid: number | null; threads: number };
+    uptime: string;
+    system: { cpu: number; memory: { used: number; total: number } };
+    typeDistribution: Array<{ name: string; value: number }>;
+    recentLogs: Array<{ id: string; timestamp: string; level: string; source: string; message: string }>;
+}
+
+export const getDashboard = () => request<DashboardData>("/dashboard");
+
+// ── Zones ──────────────────────────────────────────────────
+export interface ZoneData {
+    id: string;
+    domain: string;
+    type: string;
+    status: string;
+    serial: string;
+    filePath: string;
+    adminEmail: string;
+    records: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface ZoneDetail extends ZoneData {
+    records: any[];
+}
+
+export const getZones = () => request<ZoneData[]>("/zones");
+export const getZone = (id: string) => request<ZoneDetail>(`/zones/${id}`);
+export const createZone = (data: { domain: string; type: string; adminEmail?: string }) =>
+    request<ZoneData>("/zones", { method: "POST", body: JSON.stringify(data) });
+export const updateZone = (id: string, data: Partial<ZoneData>) =>
+    request<ZoneData>(`/zones/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteZone = (id: string) =>
+    request<{ message: string }>(`/zones/${id}`, { method: "DELETE" });
+
+// ── DNS Records ────────────────────────────────────────────
+export interface RecordData {
+    id: string;
+    zoneId: string;
+    name: string;
+    type: string;
+    value: string;
+    ttl: number;
+    priority: number | null;
+}
+
+export const getRecords = (zoneId: string) => request<RecordData[]>(`/zones/${zoneId}/records`);
+export const createRecord = (zoneId: string, data: Omit<RecordData, "id" | "zoneId">) =>
+    request<RecordData>(`/zones/${zoneId}/records`, { method: "POST", body: JSON.stringify(data) });
+export const updateRecord = (id: string, data: Partial<RecordData>) =>
+    request<RecordData>(`/records/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteRecord = (id: string) =>
+    request<{ message: string }>(`/records/${id}`, { method: "DELETE" });
+
+// ── Config ─────────────────────────────────────────────────
+export interface ConfigData {
+    section: string;
+    content: string;
+}
+
+export const getConfig = (section: string) => request<ConfigData>(`/config/${section}`);
+export const saveConfig = (section: string, content: string) =>
+    request<any>(`/config/${section}`, { method: "PUT", body: JSON.stringify({ content }) });
+
+// ── ACLs ───────────────────────────────────────────────────
+export interface AclData {
+    id: string;
+    name: string;
+    networks: string;
+    comment: string;
+    createdAt: string;
+}
+
+export const getAcls = () => request<AclData[]>("/acls");
+export const createAcl = (data: { name: string; networks: string; comment?: string }) =>
+    request<AclData>("/acls", { method: "POST", body: JSON.stringify(data) });
+export const updateAcl = (id: string, data: Partial<AclData>) =>
+    request<AclData>(`/acls/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteAcl = (id: string) =>
+    request<{ message: string }>(`/acls/${id}`, { method: "DELETE" });
+
+// ── TSIG Keys ──────────────────────────────────────────────
+export interface KeyData {
+    id: string;
+    name: string;
+    algorithm: string;
+    secret: string;
+    createdAt: string;
+}
+
+export const getKeys = () => request<KeyData[]>("/keys");
+export const createKey = (data: { name: string; algorithm: string; secret: string }) =>
+    request<KeyData>("/keys", { method: "POST", body: JSON.stringify(data) });
+export const deleteKey = (id: string) =>
+    request<{ message: string }>(`/keys/${id}`, { method: "DELETE" });
+
+// ── Logs ───────────────────────────────────────────────────
+export interface LogData {
+    id: string;
+    timestamp: string;
+    level: string;
+    source: string;
+    message: string;
+}
+
+export const getLogs = (params?: { level?: string; source?: string; search?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.level) query.set("level", params.level);
+    if (params?.source) query.set("source", params.source);
+    if (params?.search) query.set("search", params.search);
+    if (params?.limit) query.set("limit", String(params.limit));
+    const qs = query.toString();
+    return request<LogData[]>(`/logs${qs ? `?${qs}` : ""}`);
+};
+export const clearLogs = () => request<{ message: string }>("/logs", { method: "DELETE" });
+
+// ── Status ─────────────────────────────────────────────────
+export interface StatusData {
+    bind9: { running: boolean; version: string; uptime: string; zones: number; pid: number | null; threads: number };
+    system: {
+        cpu: { user: number; system: number; total: number };
+        memory: { used: number; total: number; cached: number };
+        openFiles: number;
+        interfaces: Array<{ name: string; ip: string; rx: string; tx: string }>;
+    };
+    uptime: string;
+    hostname: string;
+}
+
+export const getStatus = () => request<StatusData>("/status");
+
+// ── rndc ───────────────────────────────────────────────────
+export const executeRndc = (command: string) =>
+    request<{ command: string; output: string }>(`/rndc/${command}`, { method: "POST" });
+
+// ── SSH Connections ────────────────────────────────────────
+export interface ConnectionData {
+    id: string;
+    name: string;
+    host: string;
+    port: number;
+    username: string;
+    authType: string;
+    password: string;
+    privateKey: string;
+    bind9ConfDir: string;
+    bind9ZoneDir: string;
+    rndcBin: string;
+    isActive: boolean;
+    lastStatus: string;
+    createdAt: string;
+}
+
+export interface TestConnectionResult {
+    success: boolean;
+    message: string;
+    serverInfo?: {
+        hostname: string;
+        os: string;
+        bind9Version: string;
+        bind9Running: boolean;
+        confDir: string;
+        zoneDir: string;
+    };
+}
+
+export const getConnections = () => request<ConnectionData[]>("/connections");
+export const createConnection = (data: {
+    name: string; host: string; port?: number; username: string;
+    authType?: string; password?: string; privateKey?: string;
+    bind9ConfDir?: string; bind9ZoneDir?: string;
+}) => request<ConnectionData>("/connections", { method: "POST", body: JSON.stringify(data) });
+
+export const updateConnection = (id: string, data: Partial<ConnectionData>) =>
+    request<ConnectionData>(`/connections/${id}`, { method: "PUT", body: JSON.stringify(data) });
+
+export const deleteConnection = (id: string) =>
+    request<{ message: string }>(`/connections/${id}`, { method: "DELETE" });
+
+export const testConnection = (id: string) =>
+    request<TestConnectionResult>(`/connections/${id}/test`, { method: "POST" });
+
+export const testConnectionInline = (data: {
+    host: string; port?: number; username: string;
+    authType?: string; password?: string;
+}) => request<TestConnectionResult>("/connections/test", { method: "POST", body: JSON.stringify(data) });
+
+export const activateConnection = (id: string) =>
+    request<ConnectionData & { message: string }>(`/connections/${id}/activate`, { method: "PUT" });
+
+export const deactivateConnections = () =>
+    request<{ message: string }>("/connections/deactivate", { method: "PUT" });

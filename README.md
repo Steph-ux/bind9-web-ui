@@ -1,0 +1,330 @@
+# BIND9 Admin Panel
+
+> Panneau d'administration web complet pour serveurs **BIND9**, avec support de gestion **locale** et **distante via SSH**.
+
+![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white)
+![Express](https://img.shields.io/badge/Express-5.0-000?logo=express)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+---
+
+## Fonctionnalités
+
+### DNS Management
+- **Zones** — Création, modification et suppression de zones DNS (master, slave, forward)
+- **Enregistrements** — CRUD complet pour A, AAAA, CNAME, MX, TXT, NS, SOA, PTR, SRV
+- **Fichiers de zone** — Génération et parsing automatique des fichiers de zone BIND9
+- **Vérification** — Validation de la configuration via `named-checkconf` avant application
+
+### Sécurité
+- **ACLs** — Gestion des listes de contrôle d'accès réseau
+- **TSIG Keys** — Création et gestion des clés d'authentification DNS (hmac-sha256, hmac-sha512, hmac-md5)
+
+### Configuration
+- **Éditeur de configuration** — Édition de `named.conf.options` et `named.conf.local` avec sauvegarde automatique
+- **Snapshots** — Historique des configurations en base de données
+- **Backup automatique** — Sauvegarde avant chaque modification avec rollback en cas d'erreur de validation
+
+### Monitoring
+- **Dashboard** — Vue d'ensemble temps réel (zones, records, CPU, mémoire, logs récents)
+- **Server Status** — Métriques système détaillées (CPU, RAM, interfaces réseau, fichiers ouverts)
+- **Logs en temps réel** — Streaming WebSocket des logs avec filtrage et recherche
+- **Commandes rndc** — Exécution directe de commandes rndc (reload, flush, status, stats, reconfig, dumpdb, querylog)
+
+### Connexion SSH distante
+- **Multi-serveur** — Gérez plusieurs serveurs BIND9 depuis un seul panneau
+- **Détection automatique** — Auto-détection des chemins BIND9 sur le serveur distant (Debian, CentOS, FreeBSD)
+- **Test de connexion** — Vérification SSH avec affichage des infos serveur (OS, version BIND9, état)
+- **Basculement** — Passage transparent entre mode local et SSH
+- **Reconnexion** — Restauration automatique de la connexion active au démarrage
+
+---
+
+## Stack Technique
+
+| Couche | Technologies |
+|--------|-------------|
+| **Frontend** | React 19, Vite 7, TypeScript, Tailwind CSS 4, shadcn/ui, Recharts, Lucide React, Wouter |
+| **Backend** | Node.js, Express 5, TypeScript, WebSocket (ws) |
+| **Base de données** | SQLite (better-sqlite3), Drizzle ORM |
+| **SSH** | ssh2 (connexion, exécution de commandes, SFTP) |
+| **Validation** | Zod, drizzle-zod |
+
+---
+
+## Architecture du Projet
+
+```
+Bind-Config/
+├── client/                      # Frontend React
+│   └── src/
+│       ├── components/
+│       │   ├── layout/
+│       │   │   └── DashboardLayout.tsx   # Layout principal + sidebar
+│       │   └── ui/                       # Composants shadcn/ui
+│       ├── pages/
+│       │   ├── dashboard.tsx             # Vue d'ensemble
+│       │   ├── zones.tsx                 # Gestion des zones DNS
+│       │   ├── config.tsx                # Éditeur de configuration
+│       │   ├── acls.tsx                  # ACLs & TSIG Keys
+│       │   ├── logs.tsx                  # Logs temps réel (WebSocket)
+│       │   ├── status.tsx                # Métriques serveur
+│       │   └── connections.tsx           # Connexions SSH distantes
+│       ├── lib/
+│       │   └── api.ts                    # Client API typé
+│       └── App.tsx                       # Router
+│
+├── server/                      # Backend Express
+│   ├── index.ts                 # Point d'entrée serveur
+│   ├── routes.ts                # Tous les endpoints REST + WebSocket
+│   ├── bind9-service.ts         # Service BIND9 (local + SSH)
+│   ├── ssh-manager.ts           # Gestionnaire de connexions SSH
+│   ├── storage.ts               # Couche d'accès aux données (Drizzle)
+│   ├── db.ts                    # Initialisation SQLite
+│   └── vite.ts                  # Middleware Vite pour le dev
+│
+├── shared/
+│   └── schema.ts                # Schéma Drizzle (8 tables)
+│
+├── data/
+│   └── bind9admin.db            # Base SQLite (auto-créée)
+│
+├── drizzle.config.ts            # Configuration Drizzle Kit
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
+```
+
+---
+
+## Installation
+
+### Prérequis
+
+- **Node.js** 18+
+- **npm** ou **yarn**
+- (Optionnel) Un serveur BIND9 accessible localement ou via SSH
+
+### 1. Cloner le projet
+
+```bash
+git clone https://github.com/Steph-ux/bind9.git
+cd bind9
+```
+
+### 2. Installer les dépendances
+
+```bash
+npm install
+```
+
+### 3. Initialiser la base de données
+
+```bash
+npm run db:push
+```
+
+Cela crée automatiquement le fichier `data/bind9admin.db` avec toutes les tables.
+
+### 4. Lancer en développement
+
+```bash
+npm run dev
+```
+
+Le serveur démarre sur **http://localhost:3001** (backend + frontend servis ensemble).
+
+### 5. Build de production
+
+```bash
+npm run build
+npm start
+```
+
+---
+
+## Configuration
+
+### Variables d'environnement
+
+| Variable | Défaut | Description |
+|----------|--------|-------------|
+| `PORT` | `3001` | Port du serveur |
+| `DATABASE_URL` | `data/bind9admin.db` | Chemin vers la base SQLite |
+| `BIND9_CONF_DIR` | `/etc/bind` | Répertoire de configuration BIND9 (mode local) |
+| `BIND9_ZONE_DIR` | `/var/cache/bind` | Répertoire des fichiers de zone (mode local) |
+| `RNDC_BIN` | `rndc` | Chemin vers le binaire rndc |
+| `NAMED_CHECKCONF` | `named-checkconf` | Chemin vers named-checkconf |
+
+### Mode de fonctionnement
+
+L'application supporte deux modes :
+
+#### Mode Local (défaut)
+Le panneau interagit directement avec BIND9 sur la machine locale via les commandes `rndc` et l'accès direct aux fichiers de configuration.
+
+#### Mode SSH (distant)
+Le panneau se connecte à un serveur BIND9 distant via SSH. Toutes les commandes et opérations fichiers transitent par la connexion SSH.
+
+Pour configurer une connexion SSH :
+1. Aller dans **Connections** dans la sidebar
+2. Cliquer **Add Connection**
+3. Renseigner l'hôte, le port SSH, l'utilisateur et le mot de passe
+4. (Optionnel) Les chemins BIND9 sont auto-détectés, mais peuvent être spécifiés manuellement
+5. Cliquer **Test** pour vérifier la connexion et détecter les chemins
+6. Cliquer **Activate** pour basculer en mode SSH
+
+---
+
+## API REST
+
+### Dashboard
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/dashboard` | Données agrégées du tableau de bord |
+
+### Zones
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/zones` | Lister toutes les zones |
+| GET | `/api/zones/:id` | Détail d'une zone avec ses records |
+| POST | `/api/zones` | Créer une zone |
+| PUT | `/api/zones/:id` | Modifier une zone |
+| DELETE | `/api/zones/:id` | Supprimer une zone |
+
+### DNS Records
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/zones/:id/records` | Lister les records d'une zone |
+| POST | `/api/zones/:id/records` | Ajouter un record |
+| PUT | `/api/records/:id` | Modifier un record |
+| DELETE | `/api/records/:id` | Supprimer un record |
+
+### Configuration
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/config/:section` | Lire une section de configuration |
+| PUT | `/api/config/:section` | Sauvegarder une section |
+
+### ACLs
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/acls` | Lister les ACLs |
+| POST | `/api/acls` | Créer une ACL |
+| PUT | `/api/acls/:id` | Modifier une ACL |
+| DELETE | `/api/acls/:id` | Supprimer une ACL |
+
+### TSIG Keys
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/keys` | Lister les clés (secrets masqués) |
+| POST | `/api/keys` | Créer une clé |
+| DELETE | `/api/keys/:id` | Supprimer une clé |
+
+### Logs
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/logs?level=&source=&search=` | Lister les logs avec filtres |
+| DELETE | `/api/logs` | Vider les logs |
+| WS | `/ws/logs` | Streaming temps réel |
+
+### Server Status
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/status` | État BIND9 + métriques système |
+
+### rndc Commands
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| POST | `/api/rndc/:command` | Exécuter une commande rndc |
+
+Commandes autorisées : `reload`, `flush`, `status`, `stats`, `reconfig`, `dumpdb`, `querylog`
+
+### Connexions SSH
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/connections` | Lister les connexions |
+| POST | `/api/connections` | Créer une connexion |
+| PUT | `/api/connections/:id` | Modifier une connexion |
+| DELETE | `/api/connections/:id` | Supprimer une connexion |
+| POST | `/api/connections/:id/test` | Tester la connexion SSH |
+| POST | `/api/connections/test` | Tester avec credentials inline |
+| PUT | `/api/connections/:id/activate` | Activer (bascule en mode SSH) |
+| PUT | `/api/connections/deactivate` | Désactiver (retour mode local) |
+
+---
+
+## Base de Données
+
+### Schéma (SQLite, 8 tables)
+
+```
+users           → Comptes utilisateurs
+zones           → Zones DNS (domain, type, serial, filePath)
+dns_records     → Enregistrements DNS (A, AAAA, CNAME, MX, TXT, NS, etc.)
+acls            → Listes de contrôle d'accès
+tsig_keys       → Clés TSIG pour l'authentification DNS
+config_snapshots → Historique des configurations
+log_entries     → Logs applicatifs
+connections     → Connexions SSH distantes
+```
+
+### Commandes Drizzle
+
+```bash
+# Pousser le schéma vers la DB (créer/mettre à jour les tables)
+npm run db:push
+
+# Générer une migration
+npx drizzle-kit generate
+
+# Visualiser la DB
+npx drizzle-kit studio
+```
+
+---
+
+## Développement
+
+### Scripts disponibles
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Lancer le serveur en mode dev (backend + frontend) |
+| `npm run dev:client` | Lancer uniquement le frontend Vite |
+| `npm run build` | Builder pour la production |
+| `npm start` | Lancer la version de production |
+| `npm run check` | Vérification TypeScript |
+| `npm run db:push` | Synchroniser le schéma DB |
+
+### Ajouter une nouvelle page
+
+1. Créer le composant dans `client/src/pages/ma-page.tsx`
+2. Ajouter la route dans `client/src/App.tsx`
+3. Ajouter le lien dans la sidebar (`DashboardLayout.tsx`)
+4. (Optionnel) Ajouter les fonctions API dans `client/src/lib/api.ts`
+
+### Ajouter une nouvelle table
+
+1. Définir le schéma dans `shared/schema.ts`
+2. Ajouter les méthodes CRUD dans `server/storage.ts`
+3. Ajouter les routes API dans `server/routes.ts`
+4. Pousser le schéma : `npm run db:push`
+
+---
+
+## Sécurité
+
+> **Note :** Les mots de passe SSH sont stockés en base de données en clair. Pour un environnement de production, il est recommandé de :
+> - Chiffrer les mots de passe en base
+> - Utiliser un coffre-fort de secrets (HashiCorp Vault, etc.)
+> - Privilégier l'authentification par clé SSH
+> - Ajouter une couche d'authentification au panneau (le système de sessions est préparé mais pas activé)
+
+---
+
+## Licence
+
+MIT
