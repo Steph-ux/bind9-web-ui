@@ -1,21 +1,24 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/layout/DashboardLayout";
 import {
     getConnections, createConnection, deleteConnection,
     testConnection, activateConnection, deactivateConnections,
     type ConnectionData, type TestConnectionResult,
 } from "@/lib/api";
-import { Server, Plus, Trash2, Zap, ZapOff, TestTube, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Server, Plus, Trash2, Zap, ZapOff, TestTube, Loader2, Wifi, WifiOff, Terminal, FolderOpen, ArrowRight } from "lucide-react";
 
 export default function ConnectionsPage() {
     const [connections, setConnections] = useState<ConnectionData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showForm, setShowForm] = useState(false);
+    const [dialogOpen, setDialogOpen] = useState(false);
     const [testing, setTesting] = useState<string | null>(null);
     const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
     const [activating, setActivating] = useState<string | null>(null);
@@ -30,6 +33,7 @@ export default function ConnectionsPage() {
     const [password, setPassword] = useState("");
     const [confDir, setConfDir] = useState("");
     const [zoneDir, setZoneDir] = useState("");
+    const [creating, setCreating] = useState(false);
 
     const fetchConnections = async () => {
         try {
@@ -49,6 +53,7 @@ export default function ConnectionsPage() {
             toast({ title: "Error", description: "Name, host and username are required", variant: "destructive" });
             return;
         }
+        setCreating(true);
         try {
             await createConnection({
                 name: name.trim(),
@@ -61,11 +66,13 @@ export default function ConnectionsPage() {
                 bind9ZoneDir: zoneDir.trim() || undefined,
             });
             toast({ title: "Connection created" });
-            setShowForm(false);
+            setDialogOpen(false);
             setName(""); setHost(""); setPort("22"); setUsername("root"); setPassword(""); setConfDir(""); setZoneDir("");
             fetchConnections();
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
+        } finally {
+            setCreating(false);
         }
     };
 
@@ -80,7 +87,7 @@ export default function ConnectionsPage() {
                 description: result.message,
                 variant: result.success ? "default" : "destructive",
             });
-            fetchConnections(); // Refresh to get updated paths
+            fetchConnections();
         } catch (e: any) {
             toast({ title: "Test failed", description: e.message, variant: "destructive" });
         } finally {
@@ -126,233 +133,274 @@ export default function ConnectionsPage() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-[50vh]">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
+            <DashboardLayout>
+                <div className="flex items-center justify-center h-[50vh]">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+            </DashboardLayout>
         );
     }
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold">SSH Connections</h1>
-                    <p className="text-muted-foreground">Connect to a remote BIND9 server via SSH</p>
-                </div>
-                {isAdmin && (
-                    <Button onClick={() => setShowForm(!showForm)}>
-                        <Plus className="h-4 w-4 mr-2" /> Add Connection
-                    </Button>
-                )}
-            </div>
-
-            {/* Active connection indicator */}
-            <Card className={activeConn ? "border-green-500/50 bg-green-500/5" : "border-yellow-500/50 bg-yellow-500/5"}>
-                <CardContent className="flex items-center gap-3 py-4">
-                    {activeConn ? (
-                        <>
-                            <Wifi className="h-5 w-5 text-green-500" />
-                            <div className="flex-1">
-                                <span className="font-medium text-green-700 dark:text-green-400">
-                                    SSH Mode — Connected to {activeConn.name}
-                                </span>
-                                <span className="text-sm text-muted-foreground ml-2">
-                                    ({activeConn.host}:{activeConn.port})
-                                </span>
-                            </div>
-                            {isAdmin && (
-                                <Button variant="outline" size="sm" onClick={handleDeactivate}>
-                                    <ZapOff className="h-4 w-4 mr-1" /> Disconnect
+        <DashboardLayout>
+            <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-foreground">SSH Connections</h1>
+                        <p className="text-muted-foreground mt-1">Manage remote BIND9 servers securely.</p>
+                    </div>
+                    {isAdmin && (
+                        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button className="shadow-[0_0_15px_rgba(0,240,255,0.3)]">
+                                    <Plus className="h-4 w-4 mr-2" /> Add Connection
                                 </Button>
-                            )}
-                        </>
-                    ) : (
-                        <>
-                            <WifiOff className="h-5 w-5 text-yellow-500" />
-                            <span className="font-medium text-yellow-700 dark:text-yellow-400">
-                                Local Mode — No remote connection active
-                            </span>
-                        </>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[450px] border-primary/20 bg-card/95 backdrop-blur-xl">
+                                <DialogHeader>
+                                    <DialogTitle>New SSH Connection</DialogTitle>
+                                    <DialogDescription>Enter the details of the remote BIND9 server.</DialogDescription>
+                                </DialogHeader>
+                                <div className="grid gap-4 py-4">
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right">Name</Label>
+                                        <Input
+                                            value={name} onChange={e => setName(e.target.value)}
+                                            placeholder="e.g. Production DNS"
+                                            className="col-span-3"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right">Host</Label>
+                                        <Input
+                                            value={host} onChange={e => setHost(e.target.value)}
+                                            placeholder="IP or Hostname"
+                                            className="col-span-3 font-mono"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right">Port</Label>
+                                        <Input
+                                            value={port} onChange={e => setPort(e.target.value)}
+                                            placeholder="22"
+                                            className="col-span-3 font-mono"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right">User</Label>
+                                        <Input
+                                            value={username} onChange={e => setUsername(e.target.value)}
+                                            placeholder="root"
+                                            className="col-span-3 font-mono"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right">Password</Label>
+                                        <Input
+                                            value={password} onChange={e => setPassword(e.target.value)}
+                                            type="password"
+                                            placeholder="SSH Password"
+                                            className="col-span-3 font-mono"
+                                        />
+                                    </div>
+
+                                    <div className="my-2 border-t border-border/50"></div>
+                                    <p className="text-xs text-muted-foreground text-center">Optional: Override default paths if auto-detection fails</p>
+
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right text-xs">Config Dir</Label>
+                                        <Input
+                                            value={confDir} onChange={e => setConfDir(e.target.value)}
+                                            placeholder="/etc/bind"
+                                            className="col-span-3 font-mono text-xs h-8"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label className="text-right text-xs">Zone Dir</Label>
+                                        <Input
+                                            value={zoneDir} onChange={e => setZoneDir(e.target.value)}
+                                            placeholder="/var/cache/bind"
+                                            className="col-span-3 font-mono text-xs h-8"
+                                        />
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button onClick={handleCreate} disabled={creating}>
+                                        {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                                        Create Connection
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
                     )}
-                </CardContent>
-            </Card>
+                </div>
 
-            {/* New Connection Form */}
-            {showForm && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>New SSH Connection</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Connection Name</Label>
-                                <Input value={name} onChange={e => setName(e.target.value)} placeholder="My BIND9 VM" />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Host / IP</Label>
-                                <Input value={host} onChange={e => setHost(e.target.value)} placeholder="192.168.1.100" />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>SSH Port</Label>
-                                <Input value={port} onChange={e => setPort(e.target.value)} placeholder="22" type="number" />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Username</Label>
-                                <Input value={username} onChange={e => setUsername(e.target.value)} placeholder="root" />
-                            </div>
-                            <div className="col-span-2 space-y-2">
-                                <Label>Password</Label>
-                                <Input value={password} onChange={e => setPassword(e.target.value)} type="password" placeholder="SSH password" />
-                            </div>
+                {/* Status Banner */}
+                <Card className={`glass-panel border-l-4 ${activeConn ? "border-l-green-500 bg-green-500/5" : "border-l-yellow-500 bg-yellow-500/5"}`}>
+                    <CardContent className="flex items-center gap-4 py-6">
+                        <div className={`p-3 rounded-full ${activeConn ? "bg-green-500/10" : "bg-yellow-500/10"}`}>
+                            {activeConn ? <Wifi className="h-6 w-6 text-green-500" /> : <WifiOff className="h-6 w-6 text-yellow-500" />}
                         </div>
-                        <div className="border-t pt-4">
-                            <p className="text-sm text-muted-foreground mb-3">
-                                BIND9 paths — leave blank for auto-detection
+                        <div className="flex-1">
+                            <h2 className="text-lg font-semibold tracking-tight">
+                                {activeConn ? `Connected to ${activeConn.name}` : "Local Mode Active"}
+                            </h2>
+                            <p className="text-sm text-muted-foreground">
+                                {activeConn
+                                    ? `Managing remote BIND9 server at ${activeConn.host}`
+                                    : "You are managing the local BIND9 instance on this machine."}
                             </p>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Config Directory</Label>
-                                    <Input value={confDir} onChange={e => setConfDir(e.target.value)} placeholder="/etc/bind (auto-detect)" />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Zone Directory</Label>
-                                    <Input value={zoneDir} onChange={e => setZoneDir(e.target.value)} placeholder="/var/cache/bind (auto-detect)" />
-                                </div>
-                            </div>
                         </div>
-                        <div className="flex gap-2 justify-end">
-                            <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-                            <Button onClick={handleCreate}>
-                                <Plus className="h-4 w-4 mr-2" /> Create
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Connection list */}
-            {connections.length === 0 && !showForm && (
-                <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                        <Server className="h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="text-lg font-medium mb-2">No connections configured</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                            Add a SSH connection to manage a remote BIND9 server
-                        </p>
-                        {isAdmin && (
-                            <Button onClick={() => setShowForm(true)}>
-                                <Plus className="h-4 w-4 mr-2" /> Add Connection
+                        {activeConn && isAdmin && (
+                            <Button variant="outline" onClick={handleDeactivate} className="border-red-500/20 hover:bg-red-500/10 hover:text-red-500">
+                                <ZapOff className="h-4 w-4 mr-2" /> Disconnect
                             </Button>
                         )}
                     </CardContent>
                 </Card>
-            )}
 
-            <div className="grid gap-4">
-                {connections.map(conn => (
-                    <Card key={conn.id} className={conn.isActive ? "border-green-500/50" : ""}>
-                        <CardContent className="flex items-center gap-4 py-4">
-                            {/* Status dot */}
-                            <div className={`h-3 w-3 rounded-full flex-shrink-0 ${conn.lastStatus === "connected" ? "bg-green-500" :
-                                conn.lastStatus === "failed" ? "bg-red-500" : "bg-yellow-500"
-                                }`} />
+                {/* Connections Grid */}
+                <div>
+                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <Server className="w-5 h-5 text-primary" />
+                        Available Connections
+                    </h3>
 
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-medium">{conn.name}</span>
-                                    {conn.isActive && (
-                                        <span className="text-xs bg-green-500/20 text-green-600 dark:text-green-400 px-2 py-0.5 rounded-full">
-                                            ACTIVE
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="text-sm text-muted-foreground">
-                                    {conn.username}@{conn.host}:{conn.port}
-                                </div>
-                                {(conn.bind9ConfDir || conn.bind9ZoneDir) && (
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                        {conn.bind9ConfDir && <span>conf: {conn.bind9ConfDir}</span>}
-                                        {conn.bind9ConfDir && conn.bind9ZoneDir && <span className="mx-2">|</span>}
-                                        {conn.bind9ZoneDir && <span>zones: {conn.bind9ZoneDir}</span>}
+                    {connections.length === 0 ? (
+                        <Card className="glass-panel border-dashed border-2 border-primary/20 bg-muted/5">
+                            <CardContent className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                                <Server className="h-12 w-12 mb-4 opacity-20" />
+                                <h3 className="text-lg font-semibold">No Connections Configured</h3>
+                                <p className="max-w-sm mt-2 mb-6">Add a remote SSH connection to manage another BIND9 server from this panel.</p>
+                                <Button variant="outline" onClick={() => setDialogOpen(true)}>Add First Connection</Button>
+                            </CardContent>
+                        </Card>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {connections.map((conn) => (
+                                <Card key={conn.id} className={`glass-panel group transition-all duration-300 ${conn.isActive ? "border-green-500/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]" : "hover:border-primary/40"}`}>
+                                    <CardContent className="p-5">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${conn.isActive ? "bg-green-500/10 text-green-500" : "bg-primary/10 text-primary"}`}>
+                                                    <Terminal className="h-5 w-5" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-lg leading-none">{conn.name}</h3>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <Badge variant={conn.isActive ? "default" : "outline"} className={conn.isActive ? "bg-green-500 hover:bg-green-600" : "text-muted-foreground font-normal"}>
+                                                            {conn.isActive ? "Active" : "Idle"}
+                                                        </Badge>
+                                                        {conn.lastStatus === "failed" && <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">Error</Badge>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {isAdmin && (
+                                                <Button
+                                                    variant="ghost" size="icon"
+                                                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 -mt-1 -mr-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    onClick={() => handleDelete(conn.id)}
+                                                    disabled={conn.isActive}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-2 mb-4">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-muted-foreground">Host:</span>
+                                                <span className="font-mono bg-muted/50 px-1 rounded">{conn.host}:{conn.port}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-muted-foreground">User:</span>
+                                                <span className="font-mono bg-muted/50 px-1 rounded">{conn.username}</span>
+                                            </div>
+                                        </div>
+
+                                        {(conn.bind9ConfDir || conn.bind9ZoneDir) && (
+                                            <div className="mb-4 pt-3 border-t border-border/40">
+                                                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                                                    <FolderOpen className="h-3 w-3" />
+                                                    <span>Detected Paths</span>
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    {conn.bind9ConfDir && <div className="text-[10px] font-mono truncate" title={conn.bind9ConfDir}>{conn.bind9ConfDir}</div>}
+                                                    {conn.bind9ZoneDir && <div className="text-[10px] font-mono truncate" title={conn.bind9ZoneDir}>{conn.bind9ZoneDir}</div>}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="flex gap-2 mt-4">
+                                            {isAdmin && (
+                                                <>
+                                                    <Button
+                                                        variant="outline" size="sm" className="flex-1"
+                                                        onClick={() => handleTest(conn.id)}
+                                                        disabled={testing === conn.id}
+                                                    >
+                                                        {testing === conn.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <TestTube className="h-3 w-3 mr-1" />}
+                                                        Test
+                                                    </Button>
+                                                    {!conn.isActive && (
+                                                        <Button
+                                                            size="sm" className="flex-1"
+                                                            onClick={() => handleActivate(conn.id)}
+                                                            disabled={activating === conn.id}
+                                                        >
+                                                            {activating === conn.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
+                                                            Connect
+                                                        </Button>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Detailed Test Result */}
+                {testResult && (
+                    <Dialog open={!!testResult} onOpenChange={(open) => !open && setTestResult(null)}>
+                        <DialogContent className={`${testResult.success ? "border-green-500/50" : "border-red-500/50"} glass-panel`}>
+                            <DialogHeader>
+                                <DialogTitle className={testResult.success ? "text-green-500" : "text-red-500"}>
+                                    {testResult.success ? "Connection Successful" : "Connection Failed"}
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Result of the connection test to remote server.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="py-4">
+                                <p className="mb-4">{testResult.message}</p>
+                                {testResult.serverInfo && (
+                                    <div className="bg-muted/30 p-3 rounded-md space-y-2 text-sm">
+                                        <div className="flex justify-between"><span>Hostname:</span> <span className="font-mono">{testResult.serverInfo.hostname}</span></div>
+                                        <div className="flex justify-between"><span>OS:</span> <span className="font-mono">{testResult.serverInfo.os}</span></div>
+                                        <div className="flex justify-between"><span>BIND Version:</span> <span className="font-mono">{testResult.serverInfo.bind9Version}</span></div>
+                                        <div className="flex justify-between"><span>Service Status:</span> <span className="font-mono">{testResult.serverInfo.bind9Running ? "Running" : "Stopped"}</span></div>
+                                        <div className="border-t border-border/30 my-2"></div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-muted-foreground text-xs">Config Directory:</span>
+                                            <span className="font-mono text-xs break-all">{testResult.serverInfo.confDir}</span>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-muted-foreground text-xs">Zone Directory:</span>
+                                            <span className="font-mono text-xs break-all">{testResult.serverInfo.zoneDir}</span>
+                                        </div>
                                     </div>
                                 )}
                             </div>
-
-                            {/* Actions */}
-                            {isAdmin && (
-                                <div className="flex gap-2 flex-shrink-0">
-                                    <Button
-                                        variant="outline" size="sm"
-                                        onClick={() => handleTest(conn.id)}
-                                        disabled={testing === conn.id}
-                                    >
-                                        {testing === conn.id ? (
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <TestTube className="h-4 w-4" />
-                                        )}
-                                        <span className="ml-1">Test</span>
-                                    </Button>
-
-                                    {!conn.isActive ? (
-                                        <Button
-                                            variant="default" size="sm"
-                                            onClick={() => handleActivate(conn.id)}
-                                            disabled={activating === conn.id}
-                                        >
-                                            {activating === conn.id ? (
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                            ) : (
-                                                <Zap className="h-4 w-4" />
-                                            )}
-                                            <span className="ml-1">Activate</span>
-                                        </Button>
-                                    ) : (
-                                        <Button variant="outline" size="sm" onClick={handleDeactivate}>
-                                            <ZapOff className="h-4 w-4 mr-1" /> Disconnect
-                                        </Button>
-                                    )}
-
-                                    <Button
-                                        variant="ghost" size="sm"
-                                        onClick={() => handleDelete(conn.id)}
-                                        disabled={conn.isActive}
-                                    >
-                                        <Trash2 className="h-4 w-4 text-red-500" />
-                                    </Button>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                ))}
+                            <DialogFooter>
+                                <Button onClick={() => setTestResult(null)}>Close</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                )}
             </div>
-
-            {/* Test result */}
-            {testResult && (
-                <Card className={testResult.success ? "border-green-500/50" : "border-red-500/50"}>
-                    <CardHeader>
-                        <CardTitle className="text-sm">
-                            {testResult.success ? "✅ Connection Test Passed" : "❌ Connection Test Failed"}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-sm text-muted-foreground mb-3">{testResult.message}</p>
-                        {testResult.serverInfo && (
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                                <div><strong>Hostname:</strong> {testResult.serverInfo.hostname}</div>
-                                <div><strong>OS:</strong> {testResult.serverInfo.os}</div>
-                                <div><strong>BIND9:</strong> {testResult.serverInfo.bind9Version}</div>
-                                <div><strong>Running:</strong> {testResult.serverInfo.bind9Running ? "Yes ✅" : "No ❌"}</div>
-                                <div><strong>Config Dir:</strong> {testResult.serverInfo.confDir}</div>
-                                <div><strong>Zone Dir:</strong> {testResult.serverInfo.zoneDir}</div>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-            )}
-        </div>
+        </DashboardLayout>
     );
 }
