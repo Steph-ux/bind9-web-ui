@@ -10,6 +10,7 @@ const httpServer = createServer(app);
 
 // ... (middleware)
 
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // Setup Authentication
