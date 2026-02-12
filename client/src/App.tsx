@@ -11,12 +11,14 @@ import Logs from "@/pages/logs";
 import ACLs from "@/pages/acls";
 import Status from "@/pages/status";
 import Connections from "@/pages/connections";
+import ZoneEditor from "@/pages/zone-editor";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/zones" component={Zones} />
+      <Route path="/zones/:id" component={ZoneEditor} />
       <Route path="/config" component={Config} />
       <Route path="/logs" component={Logs} />
       <Route path="/acls" component={ACLs} />

@@ -316,6 +316,46 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  DNS RECORDS
   // ══════════════════════════════════════════════════════════════
+  // Helper to write zone changes to disk and reload
+  const syncZoneFile = async (zoneId: string) => {
+    try {
+      const zone = await storage.getZone(zoneId);
+      if (!zone || !zone.filePath) return;
+
+      const records = await storage.getRecords(zoneId);
+      const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
+        String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
+
+      // Update serial in DB
+      await storage.updateZone(zone.id, { serial });
+
+      // Build record list for bind9 service
+      const zoneRecords = records.map(r => ({
+        name: r.name,
+        type: r.type,
+        value: r.value,
+        ttl: r.ttl,
+        priority: r.priority || undefined,
+      }));
+
+      // Write file
+      await bind9Service.writeZoneFile(
+        zone.filePath,
+        zone.domain,
+        zoneRecords,
+        serial,
+        { adminEmail: zone.adminEmail || undefined }
+      );
+
+      // Reload zone
+      await bind9Service.rndc(`reload ${zone.domain}`);
+      console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
+    } catch (error: any) {
+      console.error(`[bind9] Failed to sync zone file: ${error.message}`);
+      // Don't throw, just log. The DB is updated.
+    }
+  };
+
   app.get("/api/zones/:id/records", async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
@@ -337,15 +377,14 @@ export async function registerRoutes(
       const data = insertDnsRecordSchema.parse({ ...req.body, zoneId: id });
       const record = await storage.createRecord(data);
 
-      const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
-        String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
-      await storage.updateZone(zone.id, { serial });
-
       await storage.insertLog({
         level: "INFO",
         source: "records",
         message: `Record ${record.name} ${record.type} ${record.value} added to ${zone.domain}`,
       });
+
+      // Sync changes to disk
+      await syncZoneFile(id);
 
       res.status(201).json(record);
     } catch (error: any) {
@@ -361,7 +400,12 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
+
       const updated = await storage.updateRecord(id, req.body);
+
+      // Sync changes to disk
+      await syncZoneFile(record.zoneId);
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -373,7 +417,12 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
+
       await storage.deleteRecord(id);
+
+      // Sync changes to disk
+      await syncZoneFile(record.zoneId);
+
       res.json({ message: "Record deleted" });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
