@@ -9,7 +9,7 @@ import { getStatus, type StatusData } from "@/lib/api";
 export default function Status() {
   const [data, setData] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const intervalRef = useRef<any>(null);
 
   const fetchStatus = async () => {
     try {
@@ -54,8 +54,8 @@ export default function Status() {
           <p className="text-muted-foreground mt-1">Hardware utilization and daemon health.</p>
         </div>
         <Badge className={`px-3 py-1 text-sm font-mono tracking-wider ${data?.bind9.running
-            ? "bg-green-500/10 text-green-500 border-green-500/20"
-            : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+          ? "bg-green-500/10 text-green-500 border-green-500/20"
+          : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
           }`}>
           {data?.bind9.running ? "RUNNING" : "BIND9 NOT DETECTED"}
         </Badge>

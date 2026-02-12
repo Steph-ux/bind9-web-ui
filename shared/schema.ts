@@ -8,11 +8,14 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  role: text("role", { enum: ["admin", "operator", "viewer"] }).notNull().default("viewer"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
+  role: true,
 });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;

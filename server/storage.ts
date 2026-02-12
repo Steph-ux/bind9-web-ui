@@ -24,6 +24,9 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  getUsers(): Promise<User[]>;
+  updateUser(id: string, data: Partial<User>): Promise<User>;
+  deleteUser(id: string): Promise<void>;
   // Zones
   getZones(): Promise<Zone[]>;
   getZone(id: string): Promise<Zone | undefined>;
@@ -81,6 +84,20 @@ export class DatabaseStorage implements IStorage {
   async createUser(insertUser: InsertUser): Promise<User> {
     const [user] = await db.insert(users).values(insertUser).returning();
     return user;
+  }
+
+  async getUsers(): Promise<User[]> {
+    return db.select().from(users);
+  }
+
+  async updateUser(id: string, data: Partial<User>): Promise<User> {
+    const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    if (!user) throw new Error("User not found");
+    return user;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
   }
 
   // ── Zones ────────────────────────────────────────────

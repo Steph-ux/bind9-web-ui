@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import { getZones, createZone, deleteZone, syncZones, type ZoneData } from "@/li
 import { useToast } from "@/hooks/use-toast";
 
 export default function Zones() {
+  const [, setLocation] = useLocation();
   const [zones, setZones] = useState<ZoneData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -242,7 +244,7 @@ export default function Zones() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="gap-2">
+                          <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
                             <FileEdit className="w-4 h-4" /> Edit Records
                           </DropdownMenuItem>
                           <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => handleDelete(zone)}>

@@ -22,7 +22,9 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
-    password TEXT NOT NULL
+    password TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'viewer',
+    created_at TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS zones (

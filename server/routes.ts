@@ -8,10 +8,107 @@ import { sshManager } from "./ssh-manager";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema } from "@shared/schema";
 import { z } from "zod";
 
+import { hashPassword } from "./auth";
+import { insertUserSchema } from "@shared/schema";
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // Middleware to ensure user is authenticated
+  const requireAuth = (req: Request, res: Response, next: Function) => {
+    // Exclude auth routes (handled by setupAuth)
+    if (req.path.startsWith("/api/auth")) return next();
+
+    if (req.isAuthenticated()) {
+      return next();
+    }
+    res.status(401).json({ message: "Unauthorized" });
+  };
+
+  // Middleware to ensure user is admin
+  const requireAdmin = (req: Request, res: Response, next: Function) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "Unauthorized" });
+    if ((req.user as any).role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    next();
+  };
+
+  // Protect all API routes defined below
+  app.use("/api", requireAuth);
+
+  // ── Users Management (Admin Only) ─────────────────────────────
+  app.get("/api/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const users = await storage.getUsers();
+      // Remove passwords
+      const safeUsers = users.map(u => {
+        const { password, ...rest } = u;
+        return rest;
+      });
+      res.json(safeUsers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const data = insertUserSchema.parse(req.body);
+      const existing = await storage.getUserByUsername(data.username);
+      if (existing) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const hashedPassword = await hashPassword(data.password);
+      const user = await storage.createUser({
+        ...data,
+        password: hashedPassword,
+      });
+
+      const { password, ...safeUser } = user;
+      res.status(201).json(safeUser);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const { password, role, ...rest } = req.body;
+
+      const updateData: any = {};
+      if (role) updateData.role = role;
+      if (password) {
+        updateData.password = await hashPassword(password);
+      }
+
+      const updated = await storage.updateUser(id, updateData);
+      // exclude password
+      const { password: _, ...safe } = updated;
+      res.json(safe);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      if (id === (req.user as any).id) {
+        return res.status(400).json({ message: "Cannot delete yourself" });
+      }
+      await storage.deleteUser(id);
+      res.json({ message: "User deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
 
   // ── Restore active SSH connection on startup ──────────────────
   try {
@@ -44,55 +141,67 @@ export async function registerRoutes(
     console.log(`[startup] No active connection: ${e.message}`);
   }
 
+  // ── Auto-sync ACLs and Keys on startup ────────────────────────
+  try {
+    if (await bind9Service.isAvailable()) {
+      console.log("[startup] Syncing ACLs and Keys...");
+      const allAcls = await storage.getAcls();
+      await bind9Service.writeAclsConf(allAcls);
+      const allKeys = await storage.getKeys();
+      await bind9Service.writeKeysConf(allKeys);
+      await bind9Service.ensureConfigIncludes();
+      await bind9Service.rndc("reconfig");
+      console.log("[startup] ACLs and Keys synced");
+    }
+  } catch (e: any) {
+    console.log(`[startup] Failed to sync ACLs/Keys: ${e.message}`);
+  }
+
   // ── Auto-sync zones from BIND9 config on startup ──────────────
   try {
     if (await bind9Service.isAvailable()) {
+      console.log("[startup] Starting zone sync...");
       const configZones = await bind9Service.syncZonesFromConfig();
       let synced = 0;
-      for (const cz of configZones) {
-        const existing = await storage.getZones();
-        const found = existing.find(z => z.domain === cz.domain);
-        if (!found) {
-          const zone = await storage.createZone({
-            domain: cz.domain,
-            type: cz.type as any,
-          });
-          // Update filePath
-          await storage.updateZone(zone.id, { filePath: cz.filePath });
+      let errors = 0;
 
-          // Try to import records from zone file
-          if (cz.filePath) {
-            try {
-              const records = await bind9Service.readZoneFile(cz.filePath);
-              for (const rec of records) {
-                if (rec.type === "SOA") continue;
-                try {
-                  await storage.createRecord({
-                    zoneId: zone.id,
-                    name: rec.name,
-                    type: rec.type as any,
-                    value: rec.value,
-                    ttl: rec.ttl,
-                    priority: rec.priority,
-                  });
-                } catch { }
-              }
-            } catch { }
+      for (const cz of configZones) {
+        try {
+          // Check if supported type
+          if (!["master", "slave", "forward"].includes(cz.type)) {
+            console.log(`[startup] Skipping zone ${cz.domain}: unsupported type '${cz.type}'`);
+            continue;
           }
-          synced++;
+
+          const existing = await storage.getZones();
+          const found = existing.find(z => z.domain === cz.domain);
+
+          if (!found) {
+            const zone = await storage.createZone({
+              domain: cz.domain,
+              type: cz.type as any,
+            });
+            // Update filePath
+            await storage.updateZone(zone.id, { filePath: cz.filePath });
+            synced++;
+          }
+        } catch (err: any) {
+          console.error(`[startup] Failed to sync zone ${cz.domain}: ${err.message}`);
+          errors++;
         }
       }
-      if (synced > 0) {
-        console.log(`[startup] Synced ${synced} zones from BIND9 config`);
+
+      if (synced > 0 || errors > 0) {
+        console.log(`[startup] Sync result: ${synced} imported, ${errors} failed`);
         await storage.insertLog({
           level: "INFO",
           source: "zones",
-          message: `Auto-synced ${synced} zones from BIND9 configuration files`,
+          message: `Auto-sync: ${synced} imported, ${errors} failed`,
         });
       }
     }
   } catch (e: any) {
-    console.log(`[startup] Zone sync failed: ${e.message}`);
+    console.log(`[startup] Zone sync process failed: ${e.message}`);
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -161,65 +270,102 @@ export async function registerRoutes(
   });
 
   /** Sync zones from BIND9 config files into the database */
+  /** Sync zones from BIND9 config files into the database */
   app.post("/api/zones/sync", async (_req: Request, res: Response) => {
     try {
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
       }
 
+      console.log("[api] Starting manual zone sync");
       const configZones = await bind9Service.syncZonesFromConfig();
       const existingZones = await storage.getZones();
       let synced = 0;
       let skipped = 0;
+      let errors = 0;
 
       for (const cz of configZones) {
-        const found = existingZones.find(z => z.domain === cz.domain);
-        if (found) {
-          skipped++;
-          continue;
-        }
+        try {
+          // Check if supported type
+          if (!["master", "slave", "forward"].includes(cz.type)) {
+            console.log(`[api] Skipping zone ${cz.domain}: unsupported type '${cz.type}'`);
+            skipped++;
+            continue;
+          }
 
-        const zone = await storage.createZone({
-          domain: cz.domain,
-          type: cz.type as any,
-        });
-        await storage.updateZone(zone.id, { filePath: cz.filePath });
+          let zoneId = "";
+          const found = existingZones.find(z => z.domain === cz.domain);
 
-        // Import records from zone file
-        if (cz.filePath) {
-          try {
-            const records = await bind9Service.readZoneFile(cz.filePath);
-            for (const rec of records) {
-              if (rec.type === "SOA") continue;
-              try {
-                await storage.createRecord({
-                  zoneId: zone.id,
-                  name: rec.name,
-                  type: rec.type as any,
-                  value: rec.value,
-                  ttl: rec.ttl,
-                  priority: rec.priority,
-                });
-              } catch { }
+          if (found) {
+            console.log(`[api] Zone ${cz.domain} exists, updating details...`);
+            zoneId = found.id;
+            await storage.updateZone(found.id, { filePath: cz.filePath });
+          } else {
+            const newZone = await storage.createZone({
+              domain: cz.domain,
+              type: cz.type as any,
+            });
+            zoneId = newZone.id;
+            await storage.updateZone(newZone.id, { filePath: cz.filePath });
+          }
+
+          // Import records from zone file
+          if (cz.filePath) {
+            try {
+              const records = await bind9Service.readZoneFile(cz.filePath);
+
+              if (records.length > 0) {
+                // Delete existing records
+                const currentRecords = await storage.getRecords(zoneId);
+                for (const r of currentRecords) {
+                  await storage.deleteRecord(r.id);
+                }
+
+                let importedCount = 0;
+                for (const rec of records) {
+                  if (rec.type === "SOA") continue;
+                  try {
+                    await storage.createRecord({
+                      zoneId: zoneId,
+                      name: rec.name,
+                      type: rec.type as any,
+                      value: rec.value,
+                      ttl: rec.ttl,
+                      priority: rec.priority,
+                    });
+                    importedCount++;
+                  } catch { }
+                }
+                console.log(`[api] Imported ${importedCount} records for zone ${cz.domain}`);
+              } else {
+                console.log(`[api] No records found for zone ${cz.domain} (or parsing failed)`);
+              }
+            } catch (recError: any) {
+              console.warn(`[api] Failed to read records for zone ${cz.domain}: ${recError.message}`);
             }
-          } catch { }
+          }
+          synced++;
+        } catch (zoneError: any) {
+          console.error(`[api] Failed to sync zone ${cz.domain}: ${zoneError.message}`);
+          errors++;
         }
-        synced++;
       }
 
       await storage.insertLog({
         level: "INFO",
         source: "zones",
-        message: `Zone sync: ${synced} imported, ${skipped} already exist, ${configZones.length} total in BIND9`,
+        message: `Zone sync: ${synced} imported, ${skipped} skipped, ${errors} failed, ${configZones.length} total found`,
       });
 
       res.json({
-        message: `Synced ${synced} zones, ${skipped} already existed`,
+        message: `Synced ${synced} zones, ${skipped} skipped (exist or unsupported), ${errors} failed`,
         total: configZones.length,
         synced,
         skipped,
       });
+
     } catch (error: any) {
+      console.error(`[api] Sync fatal error: ${error.message}`);
       res.status(500).json({ message: error.message });
     }
   });
@@ -303,6 +449,151 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  DNS RECORDS
   // ══════════════════════════════════════════════════════════════
+  // Helper to write zone changes to disk and reload
+  const syncZoneFile = async (zoneId: string) => {
+    try {
+      const zone = await storage.getZone(zoneId);
+      if (!zone || !zone.filePath) return;
+
+      const records = await storage.getRecords(zoneId);
+      const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
+        String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
+
+      // Update serial in DB
+      await storage.updateZone(zone.id, { serial });
+
+      // Build record list for bind9 service
+      const zoneRecords = records.map(r => ({
+        name: r.name,
+        type: r.type,
+        value: r.value,
+        ttl: r.ttl,
+        priority: r.priority || undefined,
+      }));
+
+      // Write file
+      await bind9Service.writeZoneFile(
+        zone.filePath,
+        zone.domain,
+        zoneRecords,
+        serial,
+        { adminEmail: zone.adminEmail || undefined }
+      );
+
+      // Reload zone
+      await bind9Service.rndc(`reload ${zone.domain}`);
+      console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
+    } catch (error: any) {
+      console.error(`[bind9] Failed to sync zone file: ${error.message}`);
+      // Don't throw, just log. The DB is updated.
+    }
+  };
+
+  /**
+   * Automatically manage PTR records when A/AAAA records change
+   */
+  const updateReverseRecord = async (
+    action: "create" | "update" | "delete",
+    record: { name: string; type: string; value: string; zoneId: string },
+    oldRecord?: { name: string; type: string; value: string; zoneId: string }
+  ) => {
+    try {
+      // Only handle A/AAAA records
+      if (!["A", "AAAA"].includes(record.type)) return;
+
+      // Calculate reverse IP
+      let reverseIp = "";
+      if (record.type === "A") {
+        const parts = record.value.split(".");
+        if (parts.length === 4) {
+          reverseIp = `${parts[3]}.${parts[2]}.${parts[1]}.${parts[0]}.in-addr.arpa`;
+        }
+      } else if (record.type === "AAAA") {
+        // Simplified AAAA handling (often too complex given variations, but basic support)
+        // For now, let's focus on A records as requested by user context ("192.168...")
+        // TODO: Add full IPv6 expansion logic if needed
+        return;
+      }
+
+      if (!reverseIp) return;
+
+      // Find best matching reverse zone
+      const zones = await storage.getZones();
+      // Sort zones by length desc to find most specific match
+      const reverseZones = zones.filter(z => z.domain.endsWith(".arpa")).sort((a, b) => b.domain.length - a.domain.length);
+
+      const targetZone = reverseZones.find(z => reverseIp.endsWith(z.domain));
+      if (!targetZone) {
+        console.log(`[auto-reverse] No matching reverse zone found for ${reverseIp}`);
+        return;
+      }
+
+      // Calculate PTR name (relative to zone)
+      // e.g. reverseIp = 10.5.168.192.in-addr.arpa
+      // targetZone = 5.168.192.in-addr.arpa
+      // ptrName = 10
+      const ptrName = reverseIp.slice(0, reverseIp.length - targetZone.domain.length - 1); // -1 for dot
+      const sourceZone = zones.find(z => z.id === record.zoneId);
+
+      let fqdn = record.name;
+      if (sourceZone) {
+        fqdn = record.name === "@" ? sourceZone.domain : `${record.name}.${sourceZone.domain}`;
+      }
+
+      // Ensure FQDN ends with dot
+      const ptrValue = fqdn.endsWith(".") ? fqdn : `${fqdn}.`;
+
+      console.log(`[auto-reverse] ${action.toUpperCase()} PTR ${ptrName} in ${targetZone.domain} -> ${ptrValue}`);
+
+      const existingRecords = await storage.getRecords(targetZone.id);
+
+      if (action === "create") {
+        // Check specific PTR
+        const exists = existingRecords.find(r => r.name === ptrName && r.value === ptrValue && r.type === "PTR");
+        if (!exists) {
+          await storage.createRecord({
+            zoneId: targetZone.id,
+            name: ptrName,
+            type: "PTR",
+            value: ptrValue,
+            ttl: 3600,
+          });
+          await syncZoneFile(targetZone.id);
+        } else {
+          console.log(`[auto-reverse] PTR ${ptrName} -> ${ptrValue} already exists. Skipping.`);
+        }
+      } else if (action === "update") {
+        // If IP changed, delete old PTR and create new
+        if (oldRecord && oldRecord.value !== record.value) {
+          await updateReverseRecord("delete", oldRecord);
+          await updateReverseRecord("create", record);
+          return;
+        }
+
+        // If name changed, we need to find the OLD PTR record and update it
+        if (oldRecord && oldRecord.name !== record.name) {
+          const oldFqdn = sourceZone ? (oldRecord.name === "@" ? sourceZone.domain : `${oldRecord.name}.${sourceZone.domain}`) : oldRecord.name;
+          const oldPtrValue = oldFqdn.endsWith(".") ? oldFqdn : `${oldFqdn}.`;
+
+          const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR" && r.value === oldPtrValue);
+          if (targetRecord) {
+            await storage.updateRecord(targetRecord.id, { value: ptrValue });
+            await syncZoneFile(targetZone.id);
+          }
+        }
+      } else if (action === "delete") {
+        const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR" && r.value === ptrValue);
+        if (targetRecord) {
+          await storage.deleteRecord(targetRecord.id);
+          await syncZoneFile(targetZone.id);
+        }
+      }
+
+    } catch (e: any) {
+      console.error(`[auto-reverse] Failed: ${e.message}`);
+    }
+  };
+
   app.get("/api/zones/:id/records", async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
@@ -324,15 +615,17 @@ export async function registerRoutes(
       const data = insertDnsRecordSchema.parse({ ...req.body, zoneId: id });
       const record = await storage.createRecord(data);
 
-      const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
-        String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
-      await storage.updateZone(zone.id, { serial });
-
       await storage.insertLog({
         level: "INFO",
         source: "records",
         message: `Record ${record.name} ${record.type} ${record.value} added to ${zone.domain}`,
       });
+
+      // Sync changes to disk
+      await syncZoneFile(id);
+
+      // Auto-update reverse DNS
+      updateReverseRecord("create", record);
 
       res.status(201).json(record);
     } catch (error: any) {
@@ -348,7 +641,15 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
+
       const updated = await storage.updateRecord(id, req.body);
+
+      // Sync changes to disk
+      await syncZoneFile(record.zoneId);
+
+      // Auto-update reverse DNS
+      updateReverseRecord("update", updated, record);
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -360,7 +661,15 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
+
       await storage.deleteRecord(id);
+
+      // Sync changes to disk
+      await syncZoneFile(record.zoneId);
+
+      // Auto-update reverse DNS
+      updateReverseRecord("delete", record);
+
       res.json({ message: "Record deleted" });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -454,6 +763,17 @@ export async function registerRoutes(
         message: `ACL '${acl.name}' created with networks: ${acl.networks}`,
       });
 
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
       res.status(201).json(acl);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -469,6 +789,18 @@ export async function registerRoutes(
       const acl = await storage.getAcl(id);
       if (!acl) return res.status(404).json({ message: "ACL not found" });
       const updated = await storage.updateAcl(id, req.body);
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -487,6 +819,17 @@ export async function registerRoutes(
         source: "security",
         message: `ACL '${acl.name}' deleted`,
       });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
 
       res.json({ message: "ACL deleted" });
     } catch (error: any) {
@@ -520,6 +863,17 @@ export async function registerRoutes(
         message: `TSIG key '${key.name}' created (${key.algorithm})`,
       });
 
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allKeys = await storage.getKeys();
+          await bind9Service.writeKeysConf(allKeys);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync Keys: ${e.message}`);
+      }
+
       res.status(201).json({
         ...key,
         secret: key.secret.slice(0, 5) + "...[hidden]",
@@ -544,6 +898,17 @@ export async function registerRoutes(
         source: "security",
         message: `TSIG key '${key.name}' deleted`,
       });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allKeys = await storage.getKeys();
+          await bind9Service.writeKeysConf(allKeys);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync Keys: ${e.message}`);
+      }
 
       res.json({ message: "Key deleted" });
     } catch (error: any) {
