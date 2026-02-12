@@ -393,8 +393,6 @@ class Bind9Service {
         return `${minutes}m`;
     }
 
-    // ── Zone Sync ─────────────────────────────────────────────────
-
     /**
      * Parse named.conf.local (and included files) to extract zone declarations.
      * Returns array of { domain, type, filePath } found in BIND9 config.
@@ -410,54 +408,124 @@ class Bind9Service {
             let content: string;
             try {
                 content = await this.readRemoteFile(confPath);
-            } catch {
-                return; // File doesn't exist or can't be read
+            } catch (e: any) {
+                console.warn(`[bind9] Failed to read config file ${confPath}: ${e.message}`);
+                return;
             }
 
-            // Remove comments
-            const cleaned = content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+            // Remove comments (both // and /* ... */ and #)
+            const cleaned = content
+                .replace(/\/\/.*$/gm, "")
+                .replace(/#.*$/gm, "")
+                .replace(/\/\*[\s\S]*?\*\//g, "");
 
-            // Find include directives
+            // 1. Process 'include' directives
             const includeRegex = /include\s+"([^"]+)"\s*;/gi;
             let includeMatch;
             while ((includeMatch = includeRegex.exec(cleaned)) !== null) {
-                await parseFile(includeMatch[1]);
+                const includePath = includeMatch[1];
+                // Handle relative paths? BIND usually uses absolute or relative to directory option
+                // We'll trust it's either absolute or relative to BIND9_CONF_DIR if not absolute
+                let resolvedPath = includePath;
+                if (!path.isAbsolute(includePath)) {
+                    resolvedPath = path.posix.join(BIND9_CONF_DIR, includePath);
+                }
+                await parseFile(resolvedPath);
             }
 
-            // Find zone declarations
-            const zoneRegex = /zone\s+"([^"]+)"\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/gi;
-            let zoneMatch;
-            while ((zoneMatch = zoneRegex.exec(cleaned)) !== null) {
-                const domain = zoneMatch[1];
-                const body = zoneMatch[2];
+            // 2. Process 'zone' declarations using a brace tokenizer
+            let tokens = [];
+            let currentToken = "";
+            let inQuote = false;
 
-                // Skip built-in zones
-                if (domain === "." || domain === "localhost" || domain === "127.in-addr.arpa" ||
-                    domain === "0.in-addr.arpa" || domain === "255.in-addr.arpa") continue;
+            for (let i = 0; i < cleaned.length; i++) {
+                const char = cleaned[i];
+                if (char === '"') {
+                    inQuote = !inQuote;
+                    currentToken += char;
+                } else if (inQuote) {
+                    currentToken += char;
+                } else if (char === '{' || char === '}' || char === ';') {
+                    if (currentToken.trim()) tokens.push(currentToken.trim());
+                    tokens.push(char);
+                    currentToken = "";
+                } else if (/\s/.test(char)) {
+                    if (currentToken.trim()) {
+                        tokens.push(currentToken.trim());
+                        currentToken = "";
+                    }
+                } else {
+                    currentToken += char;
+                }
+            }
+            if (currentToken.trim()) tokens.push(currentToken.trim());
 
-                const typeMatch = body.match(/type\s+(master|slave|forward|primary|secondary|stub|hint)\s*;/i);
-                const fileMatch = body.match(/file\s+"([^"]+)"\s*;/i);
+            for (let i = 0; i < tokens.length; i++) {
+                if (tokens[i] === "zone" && tokens[i + 1]) {
+                    // zone "example.com" { ... };
+                    let domain = tokens[i + 1].replace(/^"|"$/g, "");
+                    if (tokens[i + 2] === "IN") { // zone "example.com" IN { ... };
+                        // Skip IN token if present
+                        i++;
+                    }
 
-                let type = typeMatch ? typeMatch[1].toLowerCase() : "master";
-                if (type === "primary") type = "master";
-                if (type === "secondary") type = "slave";
+                    if (tokens[i + 2] === "{") {
+                        let braceCount = 1;
+                        let j = i + 3;
+                        let zoneBodyTokens = [];
 
-                zones.push({
-                    domain,
-                    type,
-                    filePath: fileMatch ? fileMatch[1] : "",
-                });
+                        while (j < tokens.length && braceCount > 0) {
+                            if (tokens[j] === "{") braceCount++;
+                            if (tokens[j] === "}") braceCount--;
+                            if (braceCount > 0) zoneBodyTokens.push(tokens[j]);
+                            j++;
+                        }
+
+                        // Parse zone body tokens for type and file
+                        let type = "master";
+                        let filePath = "";
+
+                        for (let k = 0; k < zoneBodyTokens.length; k++) {
+                            if (zoneBodyTokens[k] === "type" && zoneBodyTokens[k + 1]) {
+                                type = zoneBodyTokens[k + 1].replace(/;$/, "");
+                            }
+                            if (zoneBodyTokens[k] === "file" && zoneBodyTokens[k + 1]) {
+                                filePath = zoneBodyTokens[k + 1].replace(/^"|"|;$/g, "");
+                            }
+                        }
+
+                        // Normalize type
+                        type = type.toLowerCase();
+                        if (type === "primary") type = "master";
+                        if (type === "secondary") type = "slave";
+
+                        // Log what we found
+                        console.log(`[bind9] Found zone: ${domain} (type: ${type}, file: ${filePath})`);
+
+                        zones.push({ domain, type, filePath });
+                    }
+                }
             }
         };
 
-        // Start with named.conf.local, then named.conf
+        // Start with named.conf.local, then named.conf (and named.conf.default-zones if we want, but usually filtered)
         const localConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
         const mainConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
 
+        console.log(`[bind9] Syncing zones starting from ${localConfPath}`);
         await parseFile(localConfPath);
+
+        // Also check main conf if local was empty or just to be safe, but usually local is included in main
+        // If main includes local, we might parse it twice due to duplicate check, which is fine
         await parseFile(mainConfPath);
 
-        return zones;
+        // Filter out built-in zones if needed, though the parser doesn't exclude them hardcoded anymore, 
+        // we can filter them here:
+        const ignoredZones = [".", "localhost", "127.in-addr.arpa", "0.in-addr.arpa", "255.in-addr.arpa", "local"];
+        const validZones = zones.filter(z => !ignoredZones.includes(z.domain));
+
+        console.log(`[bind9] Sync complete. Found ${validZones.length} valid zones.`);
+        return validZones;
     }
 
     // ── BIND9 Log Reading ───────────────────────────────────────────

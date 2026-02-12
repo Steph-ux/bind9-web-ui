@@ -47,52 +47,48 @@ export async function registerRoutes(
   // ── Auto-sync zones from BIND9 config on startup ──────────────
   try {
     if (await bind9Service.isAvailable()) {
+      console.log("[startup] Starting zone sync...");
       const configZones = await bind9Service.syncZonesFromConfig();
       let synced = 0;
-      for (const cz of configZones) {
-        const existing = await storage.getZones();
-        const found = existing.find(z => z.domain === cz.domain);
-        if (!found) {
-          const zone = await storage.createZone({
-            domain: cz.domain,
-            type: cz.type as any,
-          });
-          // Update filePath
-          await storage.updateZone(zone.id, { filePath: cz.filePath });
+      let errors = 0;
 
-          // Try to import records from zone file
-          if (cz.filePath) {
-            try {
-              const records = await bind9Service.readZoneFile(cz.filePath);
-              for (const rec of records) {
-                if (rec.type === "SOA") continue;
-                try {
-                  await storage.createRecord({
-                    zoneId: zone.id,
-                    name: rec.name,
-                    type: rec.type as any,
-                    value: rec.value,
-                    ttl: rec.ttl,
-                    priority: rec.priority,
-                  });
-                } catch { }
-              }
-            } catch { }
+      for (const cz of configZones) {
+        try {
+          // Check if supported type
+          if (!["master", "slave", "forward"].includes(cz.type)) {
+            console.log(`[startup] Skipping zone ${cz.domain}: unsupported type '${cz.type}'`);
+            continue;
           }
-          synced++;
+
+          const existing = await storage.getZones();
+          const found = existing.find(z => z.domain === cz.domain);
+
+          if (!found) {
+            const zone = await storage.createZone({
+              domain: cz.domain,
+              type: cz.type as any,
+            });
+            // Update filePath
+            await storage.updateZone(zone.id, { filePath: cz.filePath });
+            synced++;
+          }
+        } catch (err: any) {
+          console.error(`[startup] Failed to sync zone ${cz.domain}: ${err.message}`);
+          errors++;
         }
       }
-      if (synced > 0) {
-        console.log(`[startup] Synced ${synced} zones from BIND9 config`);
+
+      if (synced > 0 || errors > 0) {
+        console.log(`[startup] Sync result: ${synced} imported, ${errors} failed`);
         await storage.insertLog({
           level: "INFO",
           source: "zones",
-          message: `Auto-synced ${synced} zones from BIND9 configuration files`,
+          message: `Auto-sync: ${synced} imported, ${errors} failed`,
         });
       }
     }
   } catch (e: any) {
-    console.log(`[startup] Zone sync failed: ${e.message}`);
+    console.log(`[startup] Zone sync process failed: ${e.message}`);
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -167,59 +163,76 @@ export async function registerRoutes(
         return res.status(503).json({ message: "BIND9 is not available" });
       }
 
+      console.log("[api] Starting manual zone sync");
       const configZones = await bind9Service.syncZonesFromConfig();
       const existingZones = await storage.getZones();
       let synced = 0;
       let skipped = 0;
+      let errors = 0;
 
       for (const cz of configZones) {
-        const found = existingZones.find(z => z.domain === cz.domain);
-        if (found) {
-          skipped++;
-          continue;
-        }
+        try {
+          // Check if supported type
+          if (!["master", "slave", "forward"].includes(cz.type)) {
+            console.log(`[api] Skipping zone ${cz.domain}: unsupported type '${cz.type}'`);
+            skipped++;
+            continue;
+          }
 
-        const zone = await storage.createZone({
-          domain: cz.domain,
-          type: cz.type as any,
-        });
-        await storage.updateZone(zone.id, { filePath: cz.filePath });
+          const found = existingZones.find(z => z.domain === cz.domain);
+          if (found) {
+            skipped++;
+            continue;
+          }
 
-        // Import records from zone file
-        if (cz.filePath) {
-          try {
-            const records = await bind9Service.readZoneFile(cz.filePath);
-            for (const rec of records) {
-              if (rec.type === "SOA") continue;
-              try {
-                await storage.createRecord({
-                  zoneId: zone.id,
-                  name: rec.name,
-                  type: rec.type as any,
-                  value: rec.value,
-                  ttl: rec.ttl,
-                  priority: rec.priority,
-                });
-              } catch { }
+          const zone = await storage.createZone({
+            domain: cz.domain,
+            type: cz.type as any,
+          });
+          await storage.updateZone(zone.id, { filePath: cz.filePath });
+
+          // Import records from zone file - wrap in try/catch to not fail the zone creation execution if records fail
+          if (cz.filePath) {
+            try {
+              const records = await bind9Service.readZoneFile(cz.filePath);
+              for (const rec of records) {
+                if (rec.type === "SOA") continue;
+                try {
+                  await storage.createRecord({
+                    zoneId: zone.id,
+                    name: rec.name,
+                    type: rec.type as any,
+                    value: rec.value,
+                    ttl: rec.ttl,
+                    priority: rec.priority,
+                  });
+                } catch { }
+              }
+            } catch (recError: any) {
+              console.warn(`[api] Failed to read records for zone ${cz.domain}: ${recError.message}`);
             }
-          } catch { }
+          }
+          synced++;
+        } catch (zoneError: any) {
+          console.error(`[api] Failed to sync zone ${cz.domain}: ${zoneError.message}`);
+          errors++;
         }
-        synced++;
       }
 
       await storage.insertLog({
         level: "INFO",
         source: "zones",
-        message: `Zone sync: ${synced} imported, ${skipped} already exist, ${configZones.length} total in BIND9`,
+        message: `Zone sync: ${synced} imported, ${skipped} skipped, ${errors} failed, ${configZones.length} total found`,
       });
 
       res.json({
-        message: `Synced ${synced} zones, ${skipped} already existed`,
+        message: `Synced ${synced} zones, ${skipped} skipped (exist or unsupported), ${errors} failed`,
         total: configZones.length,
         synced,
         skipped,
       });
     } catch (error: any) {
+      console.error(`[api] Sync fatal error: ${error.message}`);
       res.status(500).json({ message: error.message });
     }
   });
