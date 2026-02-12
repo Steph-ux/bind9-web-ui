@@ -8,10 +8,107 @@ import { sshManager } from "./ssh-manager";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema } from "@shared/schema";
 import { z } from "zod";
 
+import { hashPassword } from "./auth";
+import { insertUserSchema } from "@shared/schema";
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // Middleware to ensure user is authenticated
+  const requireAuth = (req: Request, res: Response, next: Function) => {
+    // Exclude auth routes (handled by setupAuth)
+    if (req.path.startsWith("/api/auth")) return next();
+
+    if (req.isAuthenticated()) {
+      return next();
+    }
+    res.status(401).json({ message: "Unauthorized" });
+  };
+
+  // Middleware to ensure user is admin
+  const requireAdmin = (req: Request, res: Response, next: Function) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "Unauthorized" });
+    if ((req.user as any).role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    next();
+  };
+
+  // Protect all API routes defined below
+  app.use("/api", requireAuth);
+
+  // ── Users Management (Admin Only) ─────────────────────────────
+  app.get("/api/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const users = await storage.getUsers();
+      // Remove passwords
+      const safeUsers = users.map(u => {
+        const { password, ...rest } = u;
+        return rest;
+      });
+      res.json(safeUsers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const data = insertUserSchema.parse(req.body);
+      const existing = await storage.getUserByUsername(data.username);
+      if (existing) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const hashedPassword = await hashPassword(data.password);
+      const user = await storage.createUser({
+        ...data,
+        password: hashedPassword,
+      });
+
+      const { password, ...safeUser } = user;
+      res.status(201).json(safeUser);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const { password, role, ...rest } = req.body;
+
+      const updateData: any = {};
+      if (role) updateData.role = role;
+      if (password) {
+        updateData.password = await hashPassword(password);
+      }
+
+      const updated = await storage.updateUser(id, updateData);
+      // exclude password
+      const { password: _, ...safe } = updated;
+      res.json(safe);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      if (id === (req.user as any).id) {
+        return res.status(400).json({ message: "Cannot delete yourself" });
+      }
+      await storage.deleteUser(id);
+      res.json({ message: "User deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
 
   // ── Restore active SSH connection on startup ──────────────────
   try {

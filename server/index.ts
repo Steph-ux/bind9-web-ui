@@ -3,24 +3,21 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
+import { setupAuth } from "./auth";
+
 const app = express();
 const httpServer = createServer(app);
 
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
-}
-
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
+// ... (middleware)
 
 app.use(express.urlencoded({ extended: false }));
+
+// Setup Authentication
+setupAuth(app);
+
+// Register Routes
+// Register Routes
+// Routes registered in async startup block below
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

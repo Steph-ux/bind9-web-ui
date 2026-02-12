@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
+import { useAuth } from "@/lib/auth-provider";
 import {
   LayoutDashboard,
   Globe,
@@ -10,7 +11,9 @@ import {
   Terminal,
   Menu,
   Bell,
-  Plug
+  Plug,
+  Users,
+  LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +31,7 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [location] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { user, logout } = useAuth();
 
   const navItems = [
     { label: "Overview", icon: LayoutDashboard, href: "/" },
@@ -38,6 +42,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { label: "Server Status", icon: Server, href: "/status" },
     { label: "Connections", icon: Plug, href: "/connections" },
   ];
+
+  if (user?.role === "admin") {
+    navItems.push({ label: "Users", icon: Users, href: "/users" });
+  }
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-sidebar border-r border-border">
@@ -51,7 +59,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>
       </div>
 
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = location === item.href;
           return (
@@ -69,14 +77,19 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         })}
       </nav>
 
-      <div className="p-4 border-t border-border/40">
+      <div className="p-4 border-t border-border/40 space-y-4">
         <div className="bg-card/50 rounded-lg p-3 border border-border flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />
-          <div className="flex-1">
-            <div className="text-xs font-medium text-foreground">System Online</div>
-            <div className="text-[10px] text-muted-foreground font-mono">v9.18.12-stable</div>
+          <div className="flex-1 overflow-hidden">
+            <div className="text-xs font-medium text-foreground truncate">{user?.username || "System Online"}</div>
+            <div className="text-[10px] text-muted-foreground font-mono truncate">{user?.role || "v9.18.12"}</div>
           </div>
         </div>
+
+        <Button variant="outline" size="sm" className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground" onClick={() => logout()}>
+          <LogOut className="w-4 h-4" />
+          Logout
+        </Button>
       </div>
     </div>
   );
