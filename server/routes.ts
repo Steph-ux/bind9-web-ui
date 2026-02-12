@@ -1367,6 +1367,49 @@ export async function registerRoutes(
 
 
 
+  // ══════════════════════════════════════════════════════════════
+  //  FIREWALL MANAGEMENT
+  // ══════════════════════════════════════════════════════════════
+
+  app.get("/api/firewall/status", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const status = await firewallService.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/toggle", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { enable } = req.body;
+      await firewallService.toggle(enable);
+      res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/rules", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { toPort, proto, action, fromIp } = req.body;
+      await firewallService.addRule(toPort, proto, action, fromIp);
+      res.json({ message: "Rule added" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/firewall/rules/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id as string);
+      await firewallService.deleteRule(id);
+      res.json({ message: "Rule deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   return httpServer;
 }
 
