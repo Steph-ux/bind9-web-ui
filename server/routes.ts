@@ -1428,8 +1428,22 @@ export async function registerRoutes(
     message: "BIND9 Admin Panel server started",
   });
 
+  // ══════════════════════════════════════════════════════════════
+  //  BIND9 LOG MONITORING
+  // ══════════════════════════════════════════════════════════════
+  bind9Service.monitorLogFile(async (line) => {
+    // Basic parsing to extract level if possible, else default to INFO
+    let level: "INFO" | "WARN" | "ERROR" = "INFO";
+    if (/error|fail/i.test(line)) level = "ERROR";
+    else if (/warning/i.test(line)) level = "WARN";
 
-
+    // Insert into storage (which broadcasts via WS)
+    await storage.insertLog({
+      level,
+      source: "bind9",
+      message: line.substring(0, 500),
+    });
+  });
   // ══════════════════════════════════════════════════════════════
   //  FIREWALL MANAGEMENT
   // ══════════════════════════════════════════════════════════════
@@ -1501,8 +1515,16 @@ function getDefaultConfig(section: string): string {
     allow-transfer { none; };
     allow-recursion { trusted-clients; };
 
-    // Logging
-    querylog yes;
+    // Logging - Write to file for Admin Panel to read
+    logging {
+        channel default_file {
+            file "named.run" versions 3 size 5m;
+            severity dynamic;
+            print-time yes;
+        };
+        category default { default_file; };
+        category queries { default_file; };
+    };
 };`;
   }
   if (section === "local") {

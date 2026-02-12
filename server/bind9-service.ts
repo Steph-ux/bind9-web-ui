@@ -6,7 +6,8 @@
  */
 import { exec } from "child_process";
 import { promisify } from "util";
-import fs from "fs/promises";
+import fsPromises from "fs/promises";
+import fs from "fs";
 import os from "os";
 import path from "path";
 import { sshManager } from "./ssh-manager";
@@ -76,7 +77,7 @@ class Bind9Service {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             return sshManager.readFile(filePath);
         }
-        return fs.readFile(filePath, "utf-8");
+        return fsPromises.readFile(filePath, "utf-8");
     }
 
     /** Write a file (locally or via SSH/SFTP) */
@@ -84,7 +85,7 @@ class Bind9Service {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             return sshManager.writeFile(filePath, content);
         }
-        await fs.writeFile(filePath, content, "utf-8");
+        await fsPromises.writeFile(filePath, content, "utf-8");
     }
 
     /** Check if BIND9/rndc is available */
@@ -720,6 +721,45 @@ zone "${domain}" {
         // Sort by timestamp desc and limit
         logs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
         return logs.slice(0, limit);
+    }
+
+    /** Monitor BIND9 log file and trigger callback on new lines */
+    monitorLogFile(callback: (line: string) => void): void {
+        const logPath = path.posix.join(BIND9_ZONE_DIR, "named.run"); // Default debug log or configured log
+        console.log(`[bind9] Monitoring log file: ${logPath}`);
+
+        try {
+            if (!fs.existsSync(logPath)) {
+                fs.writeFileSync(logPath, ""); // Create if not exists
+            }
+
+            let currentSize = fs.statSync(logPath).size;
+
+            fs.watchFile(logPath, { interval: 1000 }, (curr, prev) => {
+                if (curr.mtime <= prev.mtime) return;
+
+                const newSize = curr.size;
+                if (newSize < currentSize) {
+                    currentSize = newSize; // File truncated
+                    return;
+                }
+
+                const stream = fs.createReadStream(logPath, {
+                    start: currentSize,
+                    end: newSize,
+                    encoding: "utf-8"
+                });
+
+                stream.on("data", (chunk) => {
+                    const lines = (chunk as string).split("\n").filter(Boolean);
+                    lines.forEach(line => callback(line));
+                });
+
+                currentSize = newSize;
+            });
+        } catch (error: any) {
+            console.error(`[bind9] Failed to monitor log file: ${error.message}`);
+        }
     }
 
 
