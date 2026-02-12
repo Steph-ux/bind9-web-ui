@@ -150,10 +150,15 @@ class Bind9Service {
     /** Read a zone file and parse into records */
     async readZoneFile(filePath: string): Promise<Array<{ name: string; type: string; value: string; ttl: number; priority?: number }>> {
         try {
+            console.log(`[bind9] Reading zone file: ${filePath}`);
             const content = await this.readRemoteFile(filePath);
+            console.log(`[bind9] Content length: ${content.length}`);
+            if (content.length < 500) console.log(`[bind9] Content preview:\n${content}`);
             return this.parseZoneFile(content);
         } catch (error: any) {
-            throw new Error(`Cannot read zone file ${filePath}: ${error.message}`);
+            console.error(`[bind9] Error reading zone file ${filePath}: ${error.message}`);
+            // Return empty if file not found or readable, to allow zone sync to proceed
+            return [];
         }
     }
 
