@@ -376,6 +376,106 @@ export async function registerRoutes(
     }
   };
 
+  /**
+   * Automatically manage PTR records when A/AAAA records change
+   */
+  const updateReverseRecord = async (
+    action: "create" | "update" | "delete",
+    record: { name: string; type: string; value: string; zoneId: string },
+    oldRecord?: { name: string; type: string; value: string; zoneId: string }
+  ) => {
+    try {
+      // Only handle A/AAAA records
+      if (!["A", "AAAA"].includes(record.type)) return;
+
+      // Calculate reverse IP
+      let reverseIp = "";
+      if (record.type === "A") {
+        const parts = record.value.split(".");
+        if (parts.length === 4) {
+          reverseIp = `${parts[3]}.${parts[2]}.${parts[1]}.${parts[0]}.in-addr.arpa`;
+        }
+      } else if (record.type === "AAAA") {
+        // Simplified AAAA handling (often too complex given variations, but basic support)
+        // For now, let's focus on A records as requested by user context ("192.168...")
+        // TODO: Add full IPv6 expansion logic if needed
+        return;
+      }
+
+      if (!reverseIp) return;
+
+      // Find best matching reverse zone
+      const zones = await storage.getZones();
+      // Sort zones by length desc to find most specific match
+      const reverseZones = zones.filter(z => z.domain.endsWith(".arpa")).sort((a, b) => b.domain.length - a.domain.length);
+
+      const targetZone = reverseZones.find(z => reverseIp.endsWith(z.domain));
+      if (!targetZone) {
+        console.log(`[auto-reverse] No matching reverse zone found for ${reverseIp}`);
+        return;
+      }
+
+      // Calculate PTR name (relative to zone)
+      // e.g. reverseIp = 10.5.168.192.in-addr.arpa
+      // targetZone = 5.168.192.in-addr.arpa
+      // ptrName = 10
+      const ptrName = reverseIp.slice(0, reverseIp.length - targetZone.domain.length - 1); // -1 for dot
+      const sourceZone = zones.find(z => z.id === record.zoneId);
+
+      let fqdn = record.name;
+      if (sourceZone) {
+        fqdn = record.name === "@" ? sourceZone.domain : `${record.name}.${sourceZone.domain}`;
+      }
+
+      // Ensure FQDN ends with dot
+      const ptrValue = fqdn.endsWith(".") ? fqdn : `${fqdn}.`;
+
+      console.log(`[auto-reverse] ${action.toUpperCase()} PTR ${ptrName} in ${targetZone.domain} -> ${ptrValue}`);
+
+      const existingRecords = await storage.getRecords(targetZone.id);
+
+      if (action === "create") {
+        const exists = existingRecords.find(r => r.name === ptrName && r.type === "PTR");
+        if (!exists) {
+          await storage.createRecord({
+            zoneId: targetZone.id,
+            name: ptrName,
+            type: "PTR",
+            value: ptrValue,
+            ttl: 3600,
+          });
+          await syncZoneFile(targetZone.id);
+        }
+      } else if (action === "update") {
+        // If IP changed, delete old PTR and create new
+        if (oldRecord && oldRecord.value !== record.value) {
+          await updateReverseRecord("delete", oldRecord);
+          await updateReverseRecord("create", record);
+          return;
+        }
+
+        // If name changed, update PTR value
+        const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR");
+        if (targetRecord) {
+          await storage.updateRecord(targetRecord.id, { value: ptrValue });
+          await syncZoneFile(targetZone.id);
+        }
+      } else if (action === "delete") {
+        const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR");
+        if (targetRecord) {
+          // Verify it points to us before deleting (safety check)
+          if (targetRecord.value === ptrValue) {
+            await storage.deleteRecord(targetRecord.id);
+            await syncZoneFile(targetZone.id);
+          }
+        }
+      }
+
+    } catch (e: any) {
+      console.error(`[auto-reverse] Failed: ${e.message}`);
+    }
+  };
+
   app.get("/api/zones/:id/records", async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
@@ -406,6 +506,9 @@ export async function registerRoutes(
       // Sync changes to disk
       await syncZoneFile(id);
 
+      // Auto-update reverse DNS
+      updateReverseRecord("create", record);
+
       res.status(201).json(record);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -426,6 +529,9 @@ export async function registerRoutes(
       // Sync changes to disk
       await syncZoneFile(record.zoneId);
 
+      // Auto-update reverse DNS
+      updateReverseRecord("update", updated, record);
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -442,6 +548,9 @@ export async function registerRoutes(
 
       // Sync changes to disk
       await syncZoneFile(record.zoneId);
+
+      // Auto-update reverse DNS
+      updateReverseRecord("delete", record);
 
       res.json({ message: "Record deleted" });
     } catch (error: any) {

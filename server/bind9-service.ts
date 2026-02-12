@@ -150,10 +150,7 @@ class Bind9Service {
     /** Read a zone file and parse into records */
     async readZoneFile(filePath: string): Promise<Array<{ name: string; type: string; value: string; ttl: number; priority?: number }>> {
         try {
-            console.log(`[bind9] Reading zone file: ${filePath}`);
             const content = await this.readRemoteFile(filePath);
-            console.log(`[bind9] Content length: ${content.length}`);
-            if (content.length < 500) console.log(`[bind9] Content preview:\n${content}`);
             return this.parseZoneFile(content);
         } catch (error: any) {
             console.error(`[bind9] Error reading zone file ${filePath}: ${error.message}`);
@@ -636,13 +633,11 @@ class Bind9Service {
             if (trimmed.startsWith("$ORIGIN")) {
                 const parts = trimmed.split(/\s+/);
                 if (parts[1]) currentOrigin = parts[1];
-                console.log(`[bind9] Set origin: ${currentOrigin}`);
                 continue;
             }
             if (trimmed.startsWith("$TTL")) {
                 const parts = trimmed.split(/\s+/);
                 if (parts[1]) currentTTL = parseInt(parts[1]) || 3600;
-                console.log(`[bind9] Set TTL: ${currentTTL}`);
                 continue;
             }
 
