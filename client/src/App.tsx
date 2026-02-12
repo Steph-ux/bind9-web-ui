@@ -15,6 +15,7 @@ import Status from "@/pages/status";
 import Connections from "@/pages/connections";
 import ZoneEditor from "@/pages/zone-editor";
 import UsersPage from "@/pages/users-page";
+import FirewallPage from "@/pages/firewall";
 
 function Router() {
   return (
@@ -29,6 +30,7 @@ function Router() {
       <ProtectedRoute path="/status" component={Status} />
       <ProtectedRoute path="/connections" component={Connections} />
       <ProtectedRoute path="/users" component={UsersPage} adminOnly />
+      <ProtectedRoute path="/firewall" component={FirewallPage} adminOnly />
       <Route component={NotFound} />
     </Switch>
   );

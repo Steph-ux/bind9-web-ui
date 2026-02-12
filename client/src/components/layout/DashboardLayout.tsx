@@ -13,7 +13,8 @@ import {
   Bell,
   Plug,
   Users,
-  LogOut
+  LogOut,
+  ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   ];
 
   if (user?.role === "admin") {
+    navItems.push({ label: "Firewall", icon: ShieldCheck, href: "/firewall" });
     navItems.push({ label: "Users", icon: Users, href: "/users" });
   }
 

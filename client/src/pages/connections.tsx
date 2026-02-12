@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
 import {
     getConnections, createConnection, deleteConnection,
@@ -19,6 +20,7 @@ export default function ConnectionsPage() {
     const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
     const [activating, setActivating] = useState<string | null>(null);
     const { toast } = useToast();
+    const { isAdmin } = useAuth();
 
     // Form state
     const [name, setName] = useState("");
@@ -138,9 +140,11 @@ export default function ConnectionsPage() {
                     <h1 className="text-2xl font-bold">SSH Connections</h1>
                     <p className="text-muted-foreground">Connect to a remote BIND9 server via SSH</p>
                 </div>
-                <Button onClick={() => setShowForm(!showForm)}>
-                    <Plus className="h-4 w-4 mr-2" /> Add Connection
-                </Button>
+                {isAdmin && (
+                    <Button onClick={() => setShowForm(!showForm)}>
+                        <Plus className="h-4 w-4 mr-2" /> Add Connection
+                    </Button>
+                )}
             </div>
 
             {/* Active connection indicator */}
@@ -157,9 +161,11 @@ export default function ConnectionsPage() {
                                     ({activeConn.host}:{activeConn.port})
                                 </span>
                             </div>
-                            <Button variant="outline" size="sm" onClick={handleDeactivate}>
-                                <ZapOff className="h-4 w-4 mr-1" /> Disconnect
-                            </Button>
+                            {isAdmin && (
+                                <Button variant="outline" size="sm" onClick={handleDeactivate}>
+                                    <ZapOff className="h-4 w-4 mr-1" /> Disconnect
+                                </Button>
+                            )}
                         </>
                     ) : (
                         <>
@@ -235,9 +241,11 @@ export default function ConnectionsPage() {
                         <p className="text-sm text-muted-foreground mb-4">
                             Add a SSH connection to manage a remote BIND9 server
                         </p>
-                        <Button onClick={() => setShowForm(true)}>
-                            <Plus className="h-4 w-4 mr-2" /> Add Connection
-                        </Button>
+                        {isAdmin && (
+                            <Button onClick={() => setShowForm(true)}>
+                                <Plus className="h-4 w-4 mr-2" /> Add Connection
+                            </Button>
+                        )}
                     </CardContent>
                 </Card>
             )}
@@ -248,7 +256,7 @@ export default function ConnectionsPage() {
                         <CardContent className="flex items-center gap-4 py-4">
                             {/* Status dot */}
                             <div className={`h-3 w-3 rounded-full flex-shrink-0 ${conn.lastStatus === "connected" ? "bg-green-500" :
-                                    conn.lastStatus === "failed" ? "bg-red-500" : "bg-yellow-500"
+                                conn.lastStatus === "failed" ? "bg-red-500" : "bg-yellow-500"
                                 }`} />
 
                             {/* Info */}
@@ -274,47 +282,49 @@ export default function ConnectionsPage() {
                             </div>
 
                             {/* Actions */}
-                            <div className="flex gap-2 flex-shrink-0">
-                                <Button
-                                    variant="outline" size="sm"
-                                    onClick={() => handleTest(conn.id)}
-                                    disabled={testing === conn.id}
-                                >
-                                    {testing === conn.id ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                        <TestTube className="h-4 w-4" />
-                                    )}
-                                    <span className="ml-1">Test</span>
-                                </Button>
-
-                                {!conn.isActive ? (
+                            {isAdmin && (
+                                <div className="flex gap-2 flex-shrink-0">
                                     <Button
-                                        variant="default" size="sm"
-                                        onClick={() => handleActivate(conn.id)}
-                                        disabled={activating === conn.id}
+                                        variant="outline" size="sm"
+                                        onClick={() => handleTest(conn.id)}
+                                        disabled={testing === conn.id}
                                     >
-                                        {activating === conn.id ? (
+                                        {testing === conn.id ? (
                                             <Loader2 className="h-4 w-4 animate-spin" />
                                         ) : (
-                                            <Zap className="h-4 w-4" />
+                                            <TestTube className="h-4 w-4" />
                                         )}
-                                        <span className="ml-1">Activate</span>
+                                        <span className="ml-1">Test</span>
                                     </Button>
-                                ) : (
-                                    <Button variant="outline" size="sm" onClick={handleDeactivate}>
-                                        <ZapOff className="h-4 w-4 mr-1" /> Disconnect
-                                    </Button>
-                                )}
 
-                                <Button
-                                    variant="ghost" size="sm"
-                                    onClick={() => handleDelete(conn.id)}
-                                    disabled={conn.isActive}
-                                >
-                                    <Trash2 className="h-4 w-4 text-red-500" />
-                                </Button>
-                            </div>
+                                    {!conn.isActive ? (
+                                        <Button
+                                            variant="default" size="sm"
+                                            onClick={() => handleActivate(conn.id)}
+                                            disabled={activating === conn.id}
+                                        >
+                                            {activating === conn.id ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Zap className="h-4 w-4" />
+                                            )}
+                                            <span className="ml-1">Activate</span>
+                                        </Button>
+                                    ) : (
+                                        <Button variant="outline" size="sm" onClick={handleDeactivate}>
+                                            <ZapOff className="h-4 w-4 mr-1" /> Disconnect
+                                        </Button>
+                                    )}
+
+                                    <Button
+                                        variant="ghost" size="sm"
+                                        onClick={() => handleDelete(conn.id)}
+                                        disabled={conn.isActive}
+                                    >
+                                        <Trash2 className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
                 ))}

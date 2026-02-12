@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
+import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ export default function Zones() {
   const [newAdmin, setNewAdmin] = useState("");
   const [syncing, setSyncing] = useState(false);
   const { toast } = useToast();
+  const { canManageDNS } = useAuth();
 
   const fetchZones = async () => {
     try {
@@ -89,85 +91,89 @@ export default function Zones() {
           <p className="text-muted-foreground mt-1">Configure authoritative zones and forwarders.</p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            className="gap-2"
-            disabled={syncing}
-            onClick={async () => {
-              setSyncing(true);
-              try {
-                const result = await syncZones();
-                toast({
-                  title: "Sync complete",
-                  description: `${result.synced} zones imported, ${result.skipped} already existed (${result.total} total in BIND9)`,
-                });
-                fetchZones();
-              } catch (e: any) {
-                toast({ title: "Sync failed", description: e.message, variant: "destructive" });
-              } finally {
-                setSyncing(false);
-              }
-            }}
-          >
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
-            Sync from BIND9
-          </Button>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
-                <Plus className="w-4 h-4" /> Add New Zone
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px] border-primary/20 bg-card/95 backdrop-blur-xl">
-              <DialogHeader>
-                <DialogTitle>Create Zone</DialogTitle>
-                <DialogDescription>
-                  Add a new master or slave zone to the configuration.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="domain" className="text-right">Domain</Label>
-                  <Input
-                    id="domain"
-                    placeholder="example.com"
-                    className="col-span-3 font-mono"
-                    value={newDomain}
-                    onChange={(e) => setNewDomain(e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="type" className="text-right">Type</Label>
-                  <Select value={newType} onValueChange={setNewType}>
-                    <SelectTrigger className="col-span-3">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="master">Master</SelectItem>
-                      <SelectItem value="slave">Slave</SelectItem>
-                      <SelectItem value="forward">Forward</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="admin" className="text-right">Admin Email</Label>
-                  <Input
-                    id="admin"
-                    placeholder="hostmaster@example.com"
-                    className="col-span-3"
-                    value={newAdmin}
-                    onChange={(e) => setNewAdmin(e.target.value)}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button onClick={handleCreate} disabled={creating}>
-                  {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Create Zone
+          {canManageDNS && (
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={syncing}
+              onClick={async () => {
+                setSyncing(true);
+                try {
+                  const result = await syncZones();
+                  toast({
+                    title: "Sync complete",
+                    description: `${result.synced} zones imported, ${result.skipped} already existed (${result.total} total in BIND9)`,
+                  });
+                  fetchZones();
+                } catch (e: any) {
+                  toast({ title: "Sync failed", description: e.message, variant: "destructive" });
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+            >
+              {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+              Sync from BIND9
+            </Button>
+          )}
+          {canManageDNS && (
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
+                  <Plus className="w-4 h-4" /> Add New Zone
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[500px] border-primary/20 bg-card/95 backdrop-blur-xl">
+                <DialogHeader>
+                  <DialogTitle>Create Zone</DialogTitle>
+                  <DialogDescription>
+                    Add a new master or slave zone to the configuration.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="domain" className="text-right">Domain</Label>
+                    <Input
+                      id="domain"
+                      placeholder="example.com"
+                      className="col-span-3 font-mono"
+                      value={newDomain}
+                      onChange={(e) => setNewDomain(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="type" className="text-right">Type</Label>
+                    <Select value={newType} onValueChange={setNewType}>
+                      <SelectTrigger className="col-span-3">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="master">Master</SelectItem>
+                        <SelectItem value="slave">Slave</SelectItem>
+                        <SelectItem value="forward">Forward</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="admin" className="text-right">Admin Email</Label>
+                    <Input
+                      id="admin"
+                      placeholder="hostmaster@example.com"
+                      className="col-span-3"
+                      value={newAdmin}
+                      onChange={(e) => setNewAdmin(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button onClick={handleCreate} disabled={creating}>
+                    {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    Create Zone
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
         <Card className="glass-panel border-primary/10">
@@ -194,7 +200,7 @@ export default function Zones() {
                 <TableHead>Records</TableHead>
                 <TableHead className="font-mono">Serial</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                {canManageDNS && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -236,23 +242,25 @@ export default function Zones() {
                         <span className="text-sm capitalize">{zone.status}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
-                            <FileEdit className="w-4 h-4" /> Edit Records
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => handleDelete(zone)}>
-                            <Trash2 className="w-4 h-4" /> Delete Zone
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+                    {canManageDNS && (
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
+                              <FileEdit className="w-4 h-4" /> Edit Records
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => handleDelete(zone)}>
+                              <Trash2 className="w-4 h-4" /> Delete Zone
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))
               )}

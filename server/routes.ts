@@ -5,6 +5,7 @@ import os from "os";
 import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
+import { firewallService } from "./firewall-service";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -34,8 +35,68 @@ export async function registerRoutes(
     next();
   };
 
+  // Middleware to ensure user is admin or operator
+  const requireOperator = (req: Request, res: Response, next: Function) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "Unauthorized" });
+    const role = (req.user as any).role;
+    if (role !== "admin" && role !== "operator") return res.status(403).json({ message: "Forbidden" });
+    next();
+  };
+
   // Protect all API routes defined below
   app.use("/api", requireAuth);
+
+  // ── Firewall Management (Admin Only) ──────────────────────────
+  app.get("/api/firewall/status", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const status = await firewallService.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/toggle", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { enable } = req.body;
+      await firewallService.toggle(enable);
+      res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/firewall/rules", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const { rules } = await firewallService.getStatus();
+      res.json(rules);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/rules", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { toPort, proto, action, fromIp } = req.body;
+      if (!toPort) return res.status(400).json({ message: "Port is required" });
+
+      await firewallService.addRule(toPort, proto || "tcp", action || "allow", fromIp || "any");
+      res.json({ message: "Rule added" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/firewall/rules/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(String(req.params.id));
+      await firewallService.deleteRule(id);
+      res.json({ message: "Rule deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
 
   // ── Users Management (Admin Only) ─────────────────────────────
   app.get("/api/users", requireAdmin, async (req: Request, res: Response) => {
@@ -108,6 +169,8 @@ export async function registerRoutes(
       res.status(500).json({ message: e.message });
     }
   });
+
+
 
 
   // ── Restore active SSH connection on startup ──────────────────
@@ -271,7 +334,7 @@ export async function registerRoutes(
 
   /** Sync zones from BIND9 config files into the database */
   /** Sync zones from BIND9 config files into the database */
-  app.post("/api/zones/sync", async (_req: Request, res: Response) => {
+  app.post("/api/zones/sync", requireOperator, async (_req: Request, res: Response) => {
     try {
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
@@ -382,7 +445,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/zones", async (req: Request, res: Response) => {
+  app.post("/api/zones", requireOperator, async (req: Request, res: Response) => {
     try {
       const data = insertZoneSchema.parse(req.body);
       const zone = await storage.createZone(data);
@@ -415,7 +478,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/zones/:id", async (req: Request, res: Response) => {
+  app.put("/api/zones/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -427,7 +490,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/zones/:id", async (req: Request, res: Response) => {
+  app.delete("/api/zones/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -606,7 +669,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/zones/:id/records", async (req: Request, res: Response) => {
+  app.post("/api/zones/:id/records", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -636,7 +699,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/records/:id", async (req: Request, res: Response) => {
+  app.put("/api/records/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
@@ -656,7 +719,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/records/:id", async (req: Request, res: Response) => {
+  app.delete("/api/records/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
@@ -705,7 +768,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/config/:section", async (req: Request, res: Response) => {
+  app.put("/api/config/:section", requireAdmin, async (req: Request, res: Response) => {
     try {
       const section = req.params.section as string;
       const { content } = req.body;
@@ -752,7 +815,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/acls", async (req: Request, res: Response) => {
+  app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
     try {
       const data = insertAclSchema.parse(req.body);
       const acl = await storage.createAcl(data);
@@ -783,7 +846,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/acls/:id", async (req: Request, res: Response) => {
+  app.put("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
@@ -807,7 +870,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/acls/:id", async (req: Request, res: Response) => {
+  app.delete("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
@@ -852,7 +915,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/keys", async (req: Request, res: Response) => {
+  app.post("/api/keys", requireOperator, async (req: Request, res: Response) => {
     try {
       const data = insertTsigKeySchema.parse(req.body);
       const key = await storage.createKey(data);
@@ -886,7 +949,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/keys/:id", async (req: Request, res: Response) => {
+  app.delete("/api/keys/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const key = await storage.getKey(id);
@@ -1059,7 +1122,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/connections", async (req: Request, res: Response) => {
+  app.post("/api/connections", requireAdmin, async (req: Request, res: Response) => {
     try {
       const data = insertConnectionSchema.parse(req.body);
       const conn = await storage.createConnection(data);
@@ -1083,7 +1146,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/connections/:id", async (req: Request, res: Response) => {
+  app.put("/api/connections/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1105,7 +1168,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/connections/:id", async (req: Request, res: Response) => {
+  app.delete("/api/connections/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1132,7 +1195,7 @@ export async function registerRoutes(
   });
 
   /** Test SSH connectivity */
-  app.post("/api/connections/:id/test", async (req: Request, res: Response) => {
+  app.post("/api/connections/:id/test", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1170,7 +1233,7 @@ export async function registerRoutes(
   });
 
   /** Test SSH connectivity with inline credentials (no saved connection) */
-  app.post("/api/connections/test", async (req: Request, res: Response) => {
+  app.post("/api/connections/test", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { host, port, username, authType, password, privateKey } = req.body;
       if (!host || !username) {
@@ -1193,7 +1256,7 @@ export async function registerRoutes(
   });
 
   /** Activate a connection — switches bind9-service to SSH mode */
-  app.put("/api/connections/:id/activate", async (req: Request, res: Response) => {
+  app.put("/api/connections/:id/activate", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1246,7 +1309,7 @@ export async function registerRoutes(
   });
 
   /** Deactivate — switch back to local mode */
-  app.put("/api/connections/deactivate", async (_req: Request, res: Response) => {
+  app.put("/api/connections/deactivate", requireAdmin, async (_req: Request, res: Response) => {
     try {
       sshManager.disconnect();
       sshManager.setConfig(null);
@@ -1301,6 +1364,8 @@ export async function registerRoutes(
     source: "general",
     message: "BIND9 Admin Panel server started",
   });
+
+
 
   return httpServer;
 }

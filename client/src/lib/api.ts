@@ -215,3 +215,26 @@ export const deactivateConnections = () =>
 // ── Zone Sync ──────────────────────────────────────────────
 export const syncZones = () =>
     request<{ message: string; total: number; synced: number; skipped: number }>("/zones/sync", { method: "POST" });
+
+// ── Firewall ──────────────────────────────────────────────
+export interface FirewallRule {
+    id: number;
+    to: string;
+    action: "ALLOW" | "DENY" | "REJECT" | "LIMIT";
+    from: string;
+    ipv6: boolean;
+    comment?: string;
+}
+
+export interface FirewallStatus {
+    active: boolean;
+    rules: FirewallRule[];
+}
+
+export const getFirewallStatus = () => request<FirewallStatus>("/firewall/status");
+export const toggleFirewall = (enable: boolean) => request<{ message: string }>("/firewall/toggle", { method: "POST", body: JSON.stringify({ enable }) });
+export const getFirewallRules = () => request<FirewallRule[]>("/firewall/rules");
+export const addFirewallRule = (data: { toPort: string; proto: string; action: string; fromIp: string }) =>
+    request<{ message: string }>("/firewall/rules", { method: "POST", body: JSON.stringify(data) });
+export const deleteFirewallRule = (id: number) =>
+    request<{ message: string }>(`/firewall/rules/${id}`, { method: "DELETE" });

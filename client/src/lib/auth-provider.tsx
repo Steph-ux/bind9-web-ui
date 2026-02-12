@@ -9,6 +9,9 @@ type AuthContextType = {
     error: Error | null;
     login: (data: Pick<InsertUser, "username" | "password">) => Promise<void>;
     logout: () => Promise<void>;
+    isAdmin: boolean;
+    canManageDNS: boolean;
+    isReadOnly: boolean;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -82,7 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, isLoading, error, login, logout }}>
+        <AuthContext.Provider value={{
+            user,
+            isLoading,
+            error,
+            login,
+            logout,
+            isAdmin: user?.role === "admin",
+            canManageDNS: user?.role === "admin" || user?.role === "operator",
+            isReadOnly: user?.role === "viewer"
+        }}>
             {children}
         </AuthContext.Provider>
     );
@@ -113,63 +125,30 @@ export function ProtectedRoute({
     }
 
     if (!user) {
-        // Redirect to login if not authenticated
-        // We can handle this by returning null and effecting, but Route expects a component? 
-        // Wait, wouter's Route renders conditionally. If we are here, we are matched.
-        // If we render a Redirect, it works.
-        // Ideally we invoke setLocation in useEffect, but returning generic Route from wouter is better.
-        // However, this component is used AS the component prop in Route? No, it wraps Route?
-        // Let's assume usage: <ProtectedRoute path="/" component={Dashboard} />
-
-        // Actually, wouter doesn't have a "Redirect" component standardly, use `setLocation`.
-        /* Using wouter logic inside a component specifically rendered by a Route is tricky if the Route itself does the matching.
-           Here we are creating a wrpper around Route. */
-
-        // But wait, the usage in App.tsx is <Route path="..." component={...} />
-        // So ProtectedRoute should likely return a Route or be used inside one.
-        // Let's make ProtectedRoute WRAP Route.
-
-        // But then we can't invoke hooks easily if not rendered.
-        // Better pattern:
+        // Redirect to login using a component wrapper for useEffect-like behavior isn't ideal inside render,
+        // but wouter doesn't allow many options. 
+        // We render a Route that checks condition.
         return (
             <Route path={path}>
                 {(params) => {
-                    if (!user) {
-                        setTimeout(() => setLocation("/auth"), 0);
-                        return null;
-                    }
-                    if (adminOnly && (user as any).role !== "admin") {
-                        setTimeout(() => setLocation("/"), 0); // or 403 page
-                        return null;
-                    }
-                    return <Component {...params} />;
+                    // Redirect logic
+                    if (location !== "/auth") setTimeout(() => setLocation("/auth"), 0);
+                    return null;
                 }}
             </Route>
         );
     }
 
-    // If user is present (and admin check passes logic above is slightly flawed because hook execution order), 
-    // actually hooks run before render.
-
-    // Let's fix loop and hook rules.
-    // The Route children function is good.
-
-    return (
-        <Route path={path}>
-            {(params) => {
-                if (isLoading) return <div>Loading...</div>;
-                if (!user) {
-                    // Redirect to login
-                    if (location !== "/auth") setTimeout(() => setLocation("/auth"), 0);
-                    return null;
-                }
-                if (adminOnly && user.role !== "admin") {
-                    // Redirect to home if forbidden
+    if (adminOnly && user.role !== "admin") {
+        return (
+            <Route path={path}>
+                {(params) => {
                     if (location !== "/") setTimeout(() => setLocation("/"), 0);
                     return null;
-                }
-                return <Component {...params} />;
-            }}
-        </Route>
-    );
+                }}
+            </Route>
+        );
+    }
+
+    return <Route path={path} component={Component} />;
 }

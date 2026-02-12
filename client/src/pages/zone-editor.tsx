@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
+import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ export default function ZoneEditor() {
     const [newPriority, setNewPriority] = useState("");
 
     const { toast } = useToast();
+    const { canManageDNS } = useAuth();
 
     const fetchData = async () => {
         if (!zoneId) return;
@@ -123,86 +125,88 @@ export default function ZoneEditor() {
                     <p className="text-muted-foreground ml-10">Manage DNS records for this zone.</p>
                 </div>
 
-                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
-                            <Plus className="w-4 h-4" /> Add Record
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-[500px] border-primary/20 bg-card/95 backdrop-blur-xl">
-                        <DialogHeader>
-                            <DialogTitle>Add DNS Record</DialogTitle>
-                            <DialogDescription>
-                                Add a new record to {zone?.domain}.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="grid gap-4 py-4">
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="type" className="text-right">Type</Label>
-                                <Select value={newType} onValueChange={setNewType}>
-                                    <SelectTrigger className="col-span-3">
-                                        <SelectValue placeholder="Select type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV"].map(t => (
-                                            <SelectItem key={t} value={t}>{t}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="name" className="text-right">Name</Label>
-                                <div className="col-span-3 flex items-center gap-2">
+                {canManageDNS && (
+                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
+                                <Plus className="w-4 h-4" /> Add Record
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[500px] border-primary/20 bg-card/95 backdrop-blur-xl">
+                            <DialogHeader>
+                                <DialogTitle>Add DNS Record</DialogTitle>
+                                <DialogDescription>
+                                    Add a new record to {zone?.domain}.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="type" className="text-right">Type</Label>
+                                    <Select value={newType} onValueChange={setNewType}>
+                                        <SelectTrigger className="col-span-3">
+                                            <SelectValue placeholder="Select type" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV"].map(t => (
+                                                <SelectItem key={t} value={t}>{t}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="name" className="text-right">Name</Label>
+                                    <div className="col-span-3 flex items-center gap-2">
+                                        <Input
+                                            id="name"
+                                            placeholder="@ or subdomain"
+                                            className="font-mono"
+                                            value={newName}
+                                            onChange={(e) => setNewName(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="value" className="text-right">Value</Label>
                                     <Input
-                                        id="name"
-                                        placeholder="@ or subdomain"
-                                        className="font-mono"
-                                        value={newName}
-                                        onChange={(e) => setNewName(e.target.value)}
+                                        id="value"
+                                        placeholder="IP address or domain"
+                                        className="col-span-3 font-mono"
+                                        value={newValue}
+                                        onChange={(e) => setNewValue(e.target.value)}
                                     />
                                 </div>
-                            </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="value" className="text-right">Value</Label>
-                                <Input
-                                    id="value"
-                                    placeholder="IP address or domain"
-                                    className="col-span-3 font-mono"
-                                    value={newValue}
-                                    onChange={(e) => setNewValue(e.target.value)}
-                                />
-                            </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="ttl" className="text-right">TTL</Label>
-                                <Input
-                                    id="ttl"
-                                    type="number"
-                                    className="col-span-3 font-mono"
-                                    value={newTTL}
-                                    onChange={(e) => setNewTTL(e.target.value)}
-                                />
-                            </div>
-                            {newType === "MX" && (
                                 <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label htmlFor="priority" className="text-right">Priority</Label>
+                                    <Label htmlFor="ttl" className="text-right">TTL</Label>
                                     <Input
-                                        id="priority"
+                                        id="ttl"
                                         type="number"
                                         className="col-span-3 font-mono"
-                                        value={newPriority}
-                                        onChange={(e) => setNewPriority(e.target.value)}
+                                        value={newTTL}
+                                        onChange={(e) => setNewTTL(e.target.value)}
                                     />
                                 </div>
-                            )}
-                        </div>
-                        <DialogFooter>
-                            <Button onClick={handleCreate} disabled={creating}>
-                                {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                                Add Record
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                                {newType === "MX" && (
+                                    <div className="grid grid-cols-4 items-center gap-4">
+                                        <Label htmlFor="priority" className="text-right">Priority</Label>
+                                        <Input
+                                            id="priority"
+                                            type="number"
+                                            className="col-span-3 font-mono"
+                                            value={newPriority}
+                                            onChange={(e) => setNewPriority(e.target.value)}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                            <DialogFooter>
+                                <Button onClick={handleCreate} disabled={creating}>
+                                    {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                                    Add Record
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                )}
             </div>
 
             <Card className="glass-panel border-primary/10">
@@ -228,7 +232,7 @@ export default function ZoneEditor() {
                             <TableHead>Type</TableHead>
                             <TableHead>Value</TableHead>
                             <TableHead>TTL</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                            {canManageDNS && <TableHead className="text-right">Actions</TableHead>}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -260,16 +264,18 @@ export default function ZoneEditor() {
                                         {rec.value}
                                     </TableCell>
                                     <TableCell className="text-muted-foreground font-mono text-sm">{rec.ttl}</TableCell>
-                                    <TableCell className="text-right">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                                            onClick={() => handleDelete(rec)}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    </TableCell>
+                                    {canManageDNS && (
+                                        <TableCell className="text-right">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                                                onClick={() => handleDelete(rec)}
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </TableCell>
+                                    )}
                                 </TableRow>
                             ))
                         )}

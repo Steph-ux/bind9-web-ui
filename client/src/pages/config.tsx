@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Save, AlertTriangle, ShieldCheck, Network, Loader2, CheckCircle2 } from "lucide-react";
 import { getConfig, saveConfig } from "@/lib/api";
+import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Config() {
@@ -29,6 +30,7 @@ export default function Config() {
   const [dnssecEnabled, setDnssecEnabled] = useState(true);
 
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     (async () => {
@@ -127,10 +129,14 @@ export default function Config() {
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Server Configuration</h1>
           <p className="text-muted-foreground mt-1">Global options for named.conf.</p>
         </div>
-        <Button onClick={handleSave} disabled={saving} className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          {saved ? "Saved!" : "Save Changes"}
-        </Button>
+        {isAdmin && (
+          <div className="flex justify-end sticky bottom-6 z-10">
+            <Button onClick={handleSave} disabled={saving} className="shadow-lg shadow-primary/20">
+              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : saved ? <CheckCircle2 className="w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+              {saved ? "Saved!" : "Save Changes"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
