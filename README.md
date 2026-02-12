@@ -149,6 +149,18 @@ npm run build
 npm start
 ```
 
+### 6. Premier Connexion
+
+Lors du premier lancement, un utilisateur administrateur est créé automatiquement :
+
+- **URL** : http://localhost:3001
+- **Utilisateur** : `admin`
+- **Mot de passe** : `admin`
+
+> **Note :** Si la connexion échoue, vous pouvez réinitialiser le mot de passe administrateur en exécutant le script de secours :
+> ```bash
+> npx tsx fix-admin.ts
+> ```
 ---
 
 ## Configuration
@@ -327,7 +339,9 @@ npx drizzle-kit studio
 > - Chiffrer les mots de passe en base
 > - Utiliser un coffre-fort de secrets (HashiCorp Vault, etc.)
 > - Privilégier l'authentification par clé SSH
-> - Ajouter une couche d'authentification au panneau (le système de sessions est préparé mais pas activé)
+> **Note :** Les mots de passe SSH sont stockés en base de données en clair.
+> - L'authentification par session et JWT est activée et sécurisée.
+> - Les mots de passe utilisateurs sont hachés (scrypt).
 
 ---
 
