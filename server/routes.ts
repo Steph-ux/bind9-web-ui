@@ -963,16 +963,19 @@ export async function registerRoutes(
     }
   });
 
+
   // ══════════════════════════════════════════════════════════════
   //  TSIG KEYS
   // ══════════════════════════════════════════════════════════════
   app.get("/api/keys", async (_req: Request, res: Response) => {
     try {
       const keys = await storage.getKeys();
-      res.json(keys.map(k => ({
+      // Hide secrets
+      const safeKeys = keys.map(k => ({
         ...k,
-        secret: k.secret.slice(0, 5) + "...[hidden]",
-      })));
+        secret: k.secret.slice(0, 5) + "...[hidden]"
+      }));
+      res.json(safeKeys);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -986,7 +989,7 @@ export async function registerRoutes(
       await storage.insertLog({
         level: "INFO",
         source: "security",
-        message: `TSIG key '${key.name}' created (${key.algorithm})`,
+        message: `TSIG key '${key.name}' created`,
       });
 
       // Sync to BIND9
@@ -1041,6 +1044,81 @@ export async function registerRoutes(
       res.status(500).json({ message: error.message });
     }
   });
+
+  // ══════════════════════════════════════════════════════════════
+  //  ACLs
+  // ══════════════════════════════════════════════════════════════
+  app.get("/api/acls", async (_req: Request, res: Response) => {
+    try {
+      const acls = await storage.getAcls();
+      res.json(acls);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const data = insertAclSchema.parse(req.body);
+      const acl = await storage.createAcl(data);
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "security",
+        message: `ACL '${acl.name}' created`,
+      });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
+      res.status(201).json(acl);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const acl = await storage.getAcl(id);
+      if (!acl) return res.status(404).json({ message: "ACL not found" });
+
+      await storage.deleteAcl(id);
+
+      await storage.insertLog({
+        level: "WARN",
+        source: "security",
+        message: `ACL '${acl.name}' deleted`,
+      });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
+      res.json({ message: "ACL deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
 
   // ══════════════════════════════════════════════════════════════
   //  LOGS
@@ -1391,6 +1469,7 @@ export async function registerRoutes(
     }
   });
 
+
   // ══════════════════════════════════════════════════════════════
   //  WEBSOCKET — Live Logs
   // ══════════════════════════════════════════════════════════════
@@ -1444,48 +1523,6 @@ export async function registerRoutes(
       message: line.substring(0, 500),
     });
   });
-  // ══════════════════════════════════════════════════════════════
-  //  FIREWALL MANAGEMENT
-  // ══════════════════════════════════════════════════════════════
-
-  app.get("/api/firewall/status", requireAdmin, async (_req: Request, res: Response) => {
-    try {
-      const status = await firewallService.getStatus();
-      res.json(status);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/firewall/toggle", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const { enable } = req.body;
-      await firewallService.toggle(enable);
-      res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/firewall/rules", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const { toPort, proto, action, fromIp } = req.body;
-      await firewallService.addRule(toPort, proto, action, fromIp);
-      res.json({ message: "Rule added" });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.delete("/api/firewall/rules/:id", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const id = parseInt(req.params.id as string);
-      await firewallService.deleteRule(id);
-      res.json({ message: "Rule deleted" });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
 
   return httpServer;
 }
@@ -1512,7 +1549,7 @@ function getDefaultConfig(section: string): string {
 
     // Access
     allow-query { localhost; 192.168.0.0/16; };
-    allow-transfer { none; };
+    allow-transfer { trusted-transfer; };
     allow-recursion { trusted-clients; };
 
     // Logging - Write to file for Admin Panel to read

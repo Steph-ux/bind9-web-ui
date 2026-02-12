@@ -13,6 +13,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getAcls, createAcl, updateAcl, deleteAcl, getKeys, createKey, deleteKey, type AclData, type KeyData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function ACLs() {
   const [aclList, setAclList] = useState<AclData[]>([]);
@@ -145,12 +146,21 @@ export default function ACLs() {
     );
   }
 
+  // ── Helper for Trusted Transfer ───────────────────────
+  const handleCreateTrustedTransfer = () => {
+    setAclName("trusted-transfer");
+    setAclNetworks("192.168.1.50; // IP of your NS2");
+    setAclComment("Allow zone transfers to secondary nameservers");
+    setEditingAcl(null); // Ensure we are creating new
+    setAclDialogOpen(true);
+  };
+
   return (
     <DashboardLayout>
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">ACLs & TSIG Keys</h1>
-          <p className="text-muted-foreground mt-1">Manage access control lists and transaction signatures.</p>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Security Settings</h1>
+          <p className="text-muted-foreground mt-1">Manage Access Control Lists and TSIG Keys for server security.</p>
         </div>
         <div className="flex gap-2">
           {canManageDNS && (
@@ -235,6 +245,22 @@ export default function ACLs() {
           )}
         </div>
       </div>
+
+      <Alert className="mb-6 glass-panel border-blue-500/30 bg-blue-500/10">
+        <Shield className="h-4 w-4 text-blue-400" />
+        <AlertTitle className="text-blue-400 ml-2">Zone Transfer Security</AlertTitle>
+        <AlertDescription className="text-blue-200/80 mt-2">
+          By default, Zone Transfers are blocked (`allow-transfer {"{ none; }"}`).
+          To authorize your secondary servers (NS2, NS3), create an ACL named
+          <code className="bg-black/30 px-1 py-0.5 rounded mx-1 text-yellow-400 font-mono">trusted-transfer</code>
+          containing their IPs.
+          <div className="mt-4">
+            <Button variant="outline" size="sm" onClick={handleCreateTrustedTransfer} className="border-blue-500/30 hover:bg-blue-500/20 text-blue-300">
+              <Plus className="w-3 h-3 mr-2" /> Setup "trusted-transfer" ACL
+            </Button>
+          </div>
+        </AlertDescription>
+      </Alert>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="glass-panel border-primary/10">
