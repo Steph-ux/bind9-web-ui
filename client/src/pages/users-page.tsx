@@ -5,7 +5,7 @@ import { User, InsertUser, insertUserSchema } from "@shared/schema";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, UserPlus, Loader2, Users, ShieldAlert } from "lucide-react";
+import { Trash2, UserPlus, Loader2, Users, ShieldAlert, Pencil } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 export default function UsersPage() {
@@ -20,6 +21,9 @@ export default function UsersPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [editRole, setEditRole] = useState<string>("viewer");
+  const [editPassword, setEditPassword] = useState<string>("");
 
   const { data: users, isLoading } = useQuery<User[]>({
     queryKey: ["users"],
@@ -56,6 +60,31 @@ export default function UsersPage() {
     },
     onError: (err: Error) => {
       toast({ variant: "destructive", title: "Failed to create user", description: err.message });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: { role?: string; password?: string } }) => {
+      const res = await fetch(`/api/users/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        let message = "Failed to update user";
+        try { const err = await res.json(); message = err.message || message; } catch {}
+        throw new Error(message);
+      }
+      try { return await res.json(); } catch { return null; }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setEditTarget(null);
+      setEditPassword("");
+      toast({ title: "User updated" });
+    },
+    onError: (err: Error) => {
+      toast({ variant: "destructive", title: "Failed to update user", description: err.message });
     },
   });
 
@@ -207,7 +236,16 @@ export default function UsersPage() {
                         <td className="px-4 py-3 text-muted-foreground text-sm">
                           {new Date(u.createdAt).toLocaleDateString()}
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-right flex gap-1 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => { setEditTarget(u); setEditRole(u.role); setEditPassword(""); }}
+                            title="Edit user"
+                          >
+                            <Pencil className="h-4 w-4 text-muted-foreground" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -228,6 +266,58 @@ export default function UsersPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit User Dialog */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User: {editTarget?.username}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Role</Label>
+              <Select value={editRole} onValueChange={setEditRole}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="operator">Operator</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>New Password <span className="text-muted-foreground font-normal">(leave blank to keep current)</span></Label>
+              <Input
+                type="password"
+                placeholder="••••••••"
+                value={editPassword}
+                onChange={e => setEditPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button
+              className="gap-2"
+              disabled={updateMutation.isPending}
+              onClick={() => {
+                if (!editTarget) return;
+                const data: { role?: string; password?: string } = {};
+                if (editRole !== editTarget.role) data.role = editRole;
+                if (editPassword) data.password = editPassword;
+                if (Object.keys(data).length === 0) {
+                  toast({ title: "No changes" });
+                  return;
+                }
+                updateMutation.mutate({ id: editTarget.id, data });
+              }}
+            >
+              {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
