@@ -64,9 +64,15 @@ class Bind9Service {
     }
 
     /** Execute a shell command (locally or via SSH) */
-    private async execCommand(command: string): Promise<{ stdout: string; stderr: string }> {
+    private async execCommand(command: string, useSudo = false): Promise<{ stdout: string; stderr: string }> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
-            const result = await sshManager.exec(command);
+            // Resolve rndc/named-checkconf to full paths for SSH (sudo blocks PATH env)
+            let resolvedCommand = command
+                .replace(/\brndc\b/g, "/usr/sbin/rndc")
+                .replace(/\bnamed-checkconf\b/g, "/usr/sbin/named-checkconf")
+                .replace(/\bnamed\b/g, "/usr/sbin/named");
+            if (useSudo) resolvedCommand = `sudo -n ${resolvedCommand}`;
+            const result = await sshManager.exec(resolvedCommand);
             return { stdout: result.stdout, stderr: result.stderr };
         }
         return execAsync(command);
@@ -92,7 +98,7 @@ class Bind9Service {
     async isAvailable(): Promise<boolean> {
         if (this.available !== null) return this.available;
         try {
-            await this.execCommand(`${RNDC_BIN} status`);
+            await this.execCommand(`${RNDC_BIN} status`, true);
             this.available = true;
         } catch {
             this.available = false;
@@ -103,7 +109,7 @@ class Bind9Service {
     /** Execute an rndc command */
     async rndc(command: string): Promise<string> {
         try {
-            const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`);
+            const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`, true);
             return stdout || stderr;
         } catch (error: any) {
             throw new Error(`rndc ${command} failed: ${error.message}`);
@@ -126,7 +132,7 @@ class Bind9Service {
 
         try {
             const output = await this.rndc("status");
-            const version = output.match(/version:\s*(.+)/)?.[1] || "unknown";
+            const version = output.match(/version:\s*BIND\s+(\d+[^\s]*)/)?.[1] || output.match(/version:\s*(.+)/)?.[1] || "unknown";
             const zonesCount = parseInt(output.match(/number of zones:\s*(\d+)/)?.[1] || "0");
             return {
                 running: true,
@@ -210,7 +216,7 @@ class Bind9Service {
             await this.writeRemoteFile(confPath, content);
             // Validate
             try {
-                await this.execCommand(`${NAMED_CHECKCONF} ${confPath}`);
+                await this.execCommand(`${NAMED_CHECKCONF} ${confPath}`, true);
             } catch (checkError: any) {
                 // Restore backup on validation failure
                 if (existing) {

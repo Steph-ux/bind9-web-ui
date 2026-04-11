@@ -113,12 +113,12 @@ class SSHManager {
         const client = await this.ensureConnected();
 
         return new Promise((resolve, reject) => {
-            // Add safety timeout (e.g. 30s) to prevent infinite hangs
+            // Add safety timeout to prevent infinite hangs
             const timeout = setTimeout(() => {
                 // We can't easily kill the remote process without a stream, 
                 // but we can reject the promise and maybe close connection
-                reject(new Error("SSH execution timed out (30s)"));
-            }, 30000);
+                reject(new Error("SSH execution timed out (60s)"));
+            }, 60000);
 
             client.exec(command, (err, stream) => {
                 if (err) {

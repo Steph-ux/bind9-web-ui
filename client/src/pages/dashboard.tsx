@@ -29,9 +29,11 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const intervalRef = useRef<any>(null);
 
-  const fetchData = async () => {
+  const fetchData = async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true);
     try {
       const d = await getDashboard();
       setData(d);
@@ -40,7 +42,36 @@ export default function Dashboard() {
       setError(e.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  const exportReport = () => {
+    if (!data) return;
+    const lines = [
+      `BIND9 Admin Report - ${new Date().toLocaleString()}`,
+      `==========================================`,
+      ``,
+      `Zones: ${data.zones.total} total, ${data.zones.active} active`,
+      `Records: ${data.records}`,
+      `BIND9: ${data.bind9.running ? 'Running' : 'Not Detected'}${data.bind9.running ? ` (v${data.bind9.version}, PID ${data.bind9.pid}, ${data.bind9.threads} threads)` : ''}`,
+      `Uptime: ${data.uptime}`,
+      `CPU: ${data.system.cpu.toFixed(1)}%`,
+      `Memory: ${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)}`,
+      ``,
+      `Record Distribution:`,
+      ...data.typeDistribution.map(t => `  ${t.name}: ${t.value}`),
+      ``,
+      `Recent Logs:`,
+      ...data.recentLogs.map(l => `  [${new Date(l.timestamp).toLocaleString()}] ${l.level} ${l.source}: ${l.message}`),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bind9-report-${new Date().toISOString().slice(0,10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -65,7 +96,7 @@ export default function Dashboard() {
         <div className="flex flex-col items-center justify-center gap-3" style={{ height: "60vh" }}>
           <WifiOff className="h-12 w-12 text-destructive" />
           <p className="text-destructive">{error}</p>
-          <Button onClick={fetchData}>Retry</Button>
+          <Button onClick={() => fetchData()}>Retry</Button>
         </div>
       </DashboardLayout>
     );
@@ -92,11 +123,12 @@ export default function Dashboard() {
           <p className="text-muted-foreground">Real-time DNS metrics and server performance.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" className="gap-2" onClick={exportReport} disabled={!data}>
             <Download className="h-4 w-4" /> Export Report
           </Button>
-          <Button onClick={fetchData} className="gap-2">
-            <Activity className="h-4 w-4" /> Refresh
+          <Button onClick={() => fetchData(true)} className="gap-2" disabled={refreshing}>
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
+            {refreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
         </div>
       </div>

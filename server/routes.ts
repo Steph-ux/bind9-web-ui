@@ -66,6 +66,18 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/firewall/backend", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { backend } = req.body;
+      if (!backend) return res.status(400).json({ message: "Backend is required" });
+      firewallService.setBackend(backend);
+      const status = await firewallService.getStatus();
+      res.json({ message: `Switched to ${backend}`, status });
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  });
+
   app.get("/api/firewall/rules", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const { rules } = await firewallService.getStatus();

@@ -230,14 +230,19 @@ export interface FirewallRule {
     comment?: string;
 }
 
+export type FirewallBackend = "ufw" | "firewalld" | "iptables" | "nftables" | "none";
+
 export interface FirewallStatus {
     active: boolean;
     rules: FirewallRule[];
     installed: boolean;
+    backend: FirewallBackend;
+    availableBackends: FirewallBackend[];
 }
 
 export const getFirewallStatus = () => request<FirewallStatus>("/firewall/status");
 export const toggleFirewall = (enable: boolean) => request<{ message: string }>("/firewall/toggle", { method: "POST", body: JSON.stringify({ enable }) });
+export const switchFirewallBackend = (backend: FirewallBackend) => request<{ message: string; status: FirewallStatus }>("/firewall/backend", { method: "POST", body: JSON.stringify({ backend }) });
 export const getFirewallRules = () => request<FirewallRule[]>("/firewall/rules");
 export const addFirewallRule = (data: { toPort: string; proto: string; action: string; fromIp: string }) =>
     request<{ message: string }>("/firewall/rules", { method: "POST", body: JSON.stringify(data) });

@@ -4,7 +4,8 @@ import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import {
     getFirewallStatus, toggleFirewall, addFirewallRule, deleteFirewallRule,
-    type FirewallStatus
+    switchFirewallBackend,
+    type FirewallStatus, type FirewallBackend
 } from "@/lib/api";
 import { Shield, ShieldAlert, ShieldCheck, Plus, Trash2, Loader2, AlertTriangle, ArrowRight, Activity, Ban, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
 
 export default function FirewallPage() {
-    const [status, setStatus] = useState<FirewallStatus>({ active: false, rules: [], installed: true });
+    const [status, setStatus] = useState<FirewallStatus>({ active: false, rules: [], installed: true, backend: "none", availableBackends: [] });
     const [loading, setLoading] = useState(true);
     const [toggling, setToggling] = useState(false);
     const [showModal, setShowModal] = useState(false);
@@ -122,7 +123,12 @@ export default function FirewallPage() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
                 <div>
                     <h2 className="text-2xl font-bold tracking-tight">Firewall</h2>
-                    <p className="text-muted-foreground">Manage system network security (UFW).</p>
+                    <p className="text-muted-foreground">
+                        Manage system network security
+                        {status.backend !== "none" && (
+                            <span className="ml-1">using <Badge variant="secondary" className="font-mono text-xs ml-1">{status.backend.toUpperCase()}</Badge></span>
+                        )}
+                    </p>
                 </div>
             </div>
 
@@ -136,8 +142,14 @@ export default function FirewallPage() {
                         <div>
                             <h5 className="font-bold mb-1">Firewall Not Detected</h5>
                             <p className="text-muted-foreground mb-2">
-                                The <code className="rounded bg-muted px-1">ufw</code> command was not found on this system. Please install UFW to use this feature:
+                                No firewall backend was found on this system. Install one of the supported backends:
                             </p>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                                <Badge variant="outline">UFW</Badge>
+                                <Badge variant="outline">firewalld</Badge>
+                                <Badge variant="outline">nftables</Badge>
+                                <Badge variant="outline">iptables</Badge>
+                            </div>
                             <code className="block bg-zinc-900 dark:bg-zinc-900 text-zinc-100 dark:text-zinc-100 rounded p-2 text-sm">
                                 sudo apt-get install ufw
                             </code>
@@ -168,6 +180,31 @@ export default function FirewallPage() {
                                         ? "Your system is protected. Incoming connections are blocked unless explicitly allowed."
                                         : "Your system is currently exposed to all incoming traffic. Enable the firewall to secure your network."}
                                 </p>
+                                {status.availableBackends.length > 1 && (
+                                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                        <span className="text-xs text-muted-foreground">Backend:</span>
+                                        {status.availableBackends.map(b => (
+                                            <Badge
+                                                key={b}
+                                                variant={b === status.backend ? "default" : "outline"}
+                                                className="text-[10px] font-mono cursor-pointer hover:bg-primary/20"
+                                                onClick={async () => {
+                                                    if (b !== status.backend) {
+                                                        try {
+                                                            const res = await switchFirewallBackend(b);
+                                                            setStatus(res.status);
+                                                            toast({ title: `Switched to ${b === "nftables" ? "nft" : b.toUpperCase()}` });
+                                                        } catch (e: any) {
+                                                            toast({ title: "Error", description: e.message, variant: "destructive" });
+                                                        }
+                                                    }
+                                                }}
+                                            >
+                                                {b === "nftables" ? "nft" : b.toUpperCase()}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -194,7 +231,7 @@ export default function FirewallPage() {
             {/* Rules Section */}
             <div className="flex items-center justify-between mb-4">
                 <h5 className="flex items-center gap-2 font-semibold">
-                    <Activity className="h-4 w-4 text-primary" /> Active Rules
+                    <Activity className="h-4 w-4 text-primary" /> {status.active ? "Active Rules" : "Configured Rules"}
                 </h5>
                 <Button className="gap-2" onClick={() => setShowModal(true)}>
                     <Plus className="h-4 w-4" /> Add New Rule

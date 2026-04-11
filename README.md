@@ -23,7 +23,7 @@
 - **ACLs** — Gestion des listes de contrôle d'accès pour sécuriser les requêtes et transferts
 - **Zone Transfers** — Configuration simplifiée pour autoriser les transferts vers les serveurs esclaves (Secondary NS)
 - **TSIG Keys** — Gestion des clés d'authentification (hmac-sha256, etc.) avec support des fichiers `.key` inclus
-- **Firewall (UFW)** — Interface de gestion du pare-feu : ouverture/fermeture de ports, règles par IP
+- **Firewall** — Gestion du pare-feu avec auto-détection du backend (UFW, firewalld, nftables, iptables), ouverture/fermeture de ports, règles par IP, switch de backend en un clic
 - **RBAC** — Gestion des rôles utilisateurs (Admin, Operator, Viewer)
 
 ### Configuration
@@ -40,6 +40,7 @@
 ### Connexion SSH distante
 - **Multi-serveur** — Gérez plusieurs serveurs BIND9 depuis un seul panneau
 - **Détection automatique** — Auto-détection des chemins BIND9 sur le serveur distant (Debian, CentOS, FreeBSD)
+- **Auto-détection Firewall** — Détection automatique du backend pare-feu actif et des backends disponibles sur le serveur distant
 - **Test de connexion** — Vérification SSH avec affichage des infos serveur (OS, version BIND9, état)
 - **Basculement** — Passage transparent entre mode local et SSH
 - **Reconnexion** — Restauration automatique de la connexion active au démarrage
@@ -85,7 +86,7 @@ Bind-Config/
 │   ├── index.ts                 # Point d'entrée serveur
 │   ├── routes.ts                # Tous les endpoints REST + WebSocket
 │   ├── bind9-service.ts         # Service BIND9 (local + SSH)
-│   ├── firewall-service.ts      # Service Pare-feu (UFW)
+│   ├── firewall-service.ts      # Service Pare-feu (UFW/firewalld/nftables/iptables)
 │   ├── ssh-manager.ts           # Gestionnaire de connexions SSH
 │   ├── storage.ts               # Couche d'accès aux données (Drizzle)
 │   ├── db.ts                    # Initialisation SQLite
@@ -281,11 +282,16 @@ Commandes autorisées : `reload`, `flush`, `status`, `stats`, `reconfig`, `dumpd
 ### Firewall
 | Méthode | Endpoint | Description |
 |---------|----------|-------------|
-| GET | `/api/firewall/status` | État du pare-feu (actif/inactif) |
+| GET | `/api/firewall/status` | État du pare-feu (actif/inactif, backend détecté, backends disponibles, règles) |
 | GET | `/api/firewall/rules` | Lister les règles |
 | POST | `/api/firewall/rules` | Ajouter une règle (allow/deny) |
 | DELETE | `/api/firewall/rules/:id` | Supprimer une règle |
 | POST | `/api/firewall/toggle` | Activer/Désactiver le pare-feu |
+| POST | `/api/firewall/backend` | Changer le backend pare-feu (`{ backend: "ufw"\|"firewalld"\|"nftables"\|"iptables" }`) |
+
+> **Backends supportés :** UFW (Debian/Ubuntu), firewalld (RHEL/CentOS/Fedora), nftables, iptables.
+> L'auto-détection s'exécute en un seul appel SSH (~0.5s) et identifie le backend actif ainsi que tous les backends installés.
+> Les règles configurées sont visibles même si le pare-feu est inactif.
 
 ---
 
@@ -372,9 +378,19 @@ npx drizzle-kit studio
 > - Chiffrer les mots de passe en base
 > - Utiliser un coffre-fort de secrets (HashiCorp Vault, etc.)
 > - Privilégier l'authentification par clé SSH
-> **Note :** Les mots de passe SSH sont stockés en base de données en clair.
 > - L'authentification par session et JWT est activée et sécurisée.
 > - Les mots de passe utilisateurs sont hachés (scrypt).
+
+### Configuration sudoers pour SSH distant
+
+Pour que les commandes BIND9 et pare-feu fonctionnent sans mot de passe sudo sur le serveur distant, ajoutez cette entrée dans `/etc/sudoers.d/bind9` :
+
+```bash
+echo "<utilisateur> ALL=(ALL) NOPASSWD: /usr/sbin/rndc, /usr/sbin/named, /usr/sbin/named-checkconf, /usr/sbin/ufw, /usr/sbin/nft, /usr/sbin/iptables, /usr/sbin/iptables-save, /usr/bin/firewall-cmd, /usr/bin/systemctl" > /etc/sudoers.d/bind9
+chmod 440 /etc/sudoers.d/bind9
+```
+
+> **Important :** Sans cette configuration, les opérations pare-feu et rndc via SSH renverront une erreur "sudo: a password is required".
 
 ---
 

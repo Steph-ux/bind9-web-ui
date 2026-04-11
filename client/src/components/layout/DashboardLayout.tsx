@@ -96,7 +96,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   useEffect(() => {
     getLogs({ limit: 5 }).then((logs) => {
       setNotifications(logs);
-      setUnreadCount(logs.length);
+      // Compare with last seen log ID stored in localStorage
+      const lastSeenId = localStorage.getItem("lastSeenLogId");
+      const newCount = lastSeenId ? logs.findIndex((l) => l.id === lastSeenId) : logs.length;
+      setUnreadCount(newCount === -1 ? logs.length : newCount);
     }).catch(console.error);
   }, []);
 
@@ -219,7 +222,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </DropdownMenu>
 
           {/* Notifications */}
-          <Button variant="ghost" size="icon" className="relative" onClick={() => setNotifOpen(true)}>
+          <Button variant="ghost" size="icon" className="relative" onClick={() => { setNotifOpen(true); setUnreadCount(0); if (notifications.length > 0) localStorage.setItem("lastSeenLogId", notifications[0].id); }}>
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
               <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-[10px] flex items-center justify-center" variant="destructive">
@@ -316,13 +319,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* ── Notifications Sheet ── */}
       <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
-        <SheetContent side="right" className="w-80 p-0">
-          <SheetHeader className="border-b px-4 py-3">
+        <SheetContent side="right" className="w-80 !w-80 sm:!max-w-80 p-0 flex flex-col">
+          <SheetHeader className="border-b px-4 py-3 flex-shrink-0">
             <SheetTitle className="flex items-center gap-2">
               <Bell className="h-5 w-5" /> Notifications
             </SheetTitle>
           </SheetHeader>
-          <ScrollArea className="flex-1 h-[calc(100vh-60px)]">
+          <ScrollArea className="flex-1 min-h-0">
             {notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <Bell className="h-10 w-10 mb-2 opacity-40" />
@@ -334,7 +337,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   <div key={log.id} className="flex items-start gap-3 p-4 hover:bg-muted/50 transition-colors">
                     {levelIcon(log.level)}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium leading-tight truncate">{log.message}</p>
+                      <p className="text-sm font-medium leading-snug">{log.message}</p>
                       <p className="text-xs text-muted-foreground mt-1">
                         {log.source} &middot; {new Date(log.timestamp).toLocaleTimeString()}
                       </p>

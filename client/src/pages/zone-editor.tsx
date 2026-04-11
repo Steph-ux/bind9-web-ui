@@ -14,9 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Trash2, ArrowLeft, Loader2, Copy, ShieldCheck } from "lucide-react";
+import { Plus, Search, Trash2, Pencil, ArrowLeft, Loader2, Copy, ShieldCheck } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getZone, getRecords, createRecord, deleteRecord, type ZoneDetail, type RecordData } from "@/lib/api";
+import { getZone, getRecords, createRecord, updateRecord, deleteRecord, type ZoneDetail, type RecordData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -32,6 +32,13 @@ export default function ZoneEditor() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [creating, setCreating] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<RecordData | null>(null);
+    const [editTarget, setEditTarget] = useState<RecordData | null>(null);
+    const [editName, setEditName] = useState("");
+    const [editType, setEditType] = useState("A");
+    const [editValue, setEditValue] = useState("");
+    const [editTTL, setEditTTL] = useState("3600");
+    const [editPriority, setEditPriority] = useState("");
+    const [saving, setSaving] = useState(false);
 
     // New record form
     const [newName, setNewName] = useState("");
@@ -106,6 +113,40 @@ export default function ZoneEditor() {
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
             setCreating(false);
+        }
+    };
+
+    const openEdit = (record: RecordData) => {
+        setEditTarget(record);
+        setEditName(record.name);
+        setEditType(record.type);
+        setEditValue(record.value);
+        setEditTTL(String(record.ttl));
+        setEditPriority(record.priority != null ? String(record.priority) : "");
+    };
+
+    const handleEdit = async () => {
+        if (!editTarget) return;
+        if (!editName.trim() || !editValue.trim()) {
+            toast({ title: "Validation Error", description: "Name and Value are required", variant: "destructive" });
+            return;
+        }
+        try {
+            setSaving(true);
+            await updateRecord(editTarget.id, {
+                name: editName,
+                type: editType as RecordData["type"],
+                value: editValue,
+                ttl: parseInt(editTTL) || 3600,
+                priority: editPriority ? parseInt(editPriority) : null,
+            });
+            toast({ title: "Success", description: "Record updated successfully" });
+            setEditTarget(null);
+            fetchData();
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -257,9 +298,14 @@ export default function ZoneEditor() {
                                                 <TableCell>{record.ttl}</TableCell>
                                                 <TableCell>
                                                     {record.type !== 'SOA' && canManageDNS && (
-                                                        <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(record)}>
-                                                            <Trash2 className="w-4 h-4 text-destructive" />
-                                                        </Button>
+                                                        <div className="flex gap-1">
+                                                            <Button variant="ghost" size="icon" onClick={() => openEdit(record)}>
+                                                                <Pencil className="w-4 h-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(record)}>
+                                                                <Trash2 className="w-4 h-4 text-destructive" />
+                                                            </Button>
+                                                        </div>
                                                     )}
                                                 </TableCell>
                                             </TableRow>
@@ -351,6 +397,53 @@ export default function ZoneEditor() {
                     </TabsContent>
                 </Tabs>
             </div>
+        {/* Edit Record Dialog */}
+        <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Edit DNS Record</DialogTitle>
+                    <DialogDescription>Modify record in {zone?.domain}</DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">Name</Label>
+                        <Input value={editName} onChange={e => setEditName(e.target.value)} className="col-span-3" />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">Type</Label>
+                        <Select value={editType} onValueChange={setEditType}>
+                            <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                {["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "PTR"].map(t => (
+                                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">Value</Label>
+                        <Input value={editValue} onChange={e => setEditValue(e.target.value)} className="col-span-3" />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">TTL</Label>
+                        <Input value={editTTL} onChange={e => setEditTTL(e.target.value)} className="col-span-3" />
+                    </div>
+                    {editType === "MX" && (
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label className="text-right">Priority</Label>
+                            <Input value={editPriority} onChange={e => setEditPriority(e.target.value)} className="col-span-3" placeholder="10" />
+                        </div>
+                    )}
+                </div>
+                <DialogFooter>
+                    <Button onClick={handleEdit} disabled={saving}>
+                        {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Save Changes
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
         {/* Delete Confirmation */}
         <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
             <AlertDialogContent>
