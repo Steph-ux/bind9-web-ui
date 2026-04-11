@@ -10,6 +10,7 @@ import {
   type LogEntry, type InsertLogEntry,
   type ConfigSnapshot,
   type Connection, type InsertConnection,
+  rpzEntries, type RpzEntry, type InsertRpzEntry,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -51,6 +52,10 @@ export interface IStorage {
   getKey(id: string): Promise<TsigKey | undefined>;
   createKey(key: InsertTsigKey): Promise<TsigKey>;
   deleteKey(id: string): Promise<void>;
+  // RPZ
+  getRpzEntries(): Promise<RpzEntry[]>;
+  createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
+  deleteRpzEntry(id: string): Promise<void>;
   // Logs
   getLogs(filter?: LogFilter): Promise<LogEntry[]>;
   insertLog(entry: InsertLogEntry): Promise<LogEntry>;
@@ -322,6 +327,23 @@ export class DatabaseStorage implements IStorage {
 
   async deactivateAllConnections(): Promise<void> {
     await db.update(connections).set({ isActive: false });
+  }
+
+  // ── RPZ ──────────────────────────────────────────────
+  async getRpzEntries(): Promise<RpzEntry[]> {
+    return db.select().from(rpzEntries).orderBy(rpzEntries.name);
+  }
+
+  async createRpzEntry(insertEntry: InsertRpzEntry): Promise<RpzEntry> {
+    const [entry] = await db.insert(rpzEntries).values({
+      ...insertEntry,
+      createdAt: new Date().toISOString(),
+    }).returning();
+    return entry;
+  }
+
+  async deleteRpzEntry(id: string): Promise<void> {
+    await db.delete(rpzEntries).where(eq(rpzEntries.id, id));
   }
 }
 

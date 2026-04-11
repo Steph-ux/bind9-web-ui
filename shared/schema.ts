@@ -156,3 +156,22 @@ export const insertLogEntrySchema = createInsertSchema(logEntries).pick({
 });
 export type InsertLogEntry = z.infer<typeof insertLogEntrySchema>;
 export type LogEntry = typeof logEntries.$inferSelect;
+
+// ── RPZ Entries (DNS Firewall) ───────────────────────────────────
+export const rpzEntries = sqliteTable("rpz_entries", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull().unique(), // The domain to block, e.g. "badconfig.com"
+  type: text("type", { enum: ["nxdomain", "nodata", "redirect"] }).notNull().default("nxdomain"),
+  target: text("target").default(""), // IP or CNAME if redirect
+  comment: text("comment").default(""),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export const insertRpzEntrySchema = createInsertSchema(rpzEntries).pick({
+  name: true,
+  type: true,
+  target: true,
+  comment: true,
+});
+export type InsertRpzEntry = z.infer<typeof insertRpzEntrySchema>;
+export type RpzEntry = typeof rpzEntries.$inferSelect;

@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -117,43 +115,78 @@
   --sidebar-ring: 217.2 91.2% 59.8%;
 }
 
-/* Force dark mode styles or use .dark class if toggling supported */
-@media (prefers-color-scheme: dark), (min-width: 0px) {
-  :root {
-    --background: 224 71% 4%; /* Very Dark Blue/Black */
+/* Dark mode styles - activated via .dark class on <html> */
+.dark {
+  --background: 224 71% 4%; /* Very Dark Blue/Black */
+  --foreground: 210 20% 98%;
+  
+  --card: 224 71% 6%; /* Slightly lighter than bg */
+  --card-foreground: 210 20% 98%;
+  
+  --popover: 224 71% 6%;
+  --popover-foreground: 210 20% 98%;
+  
+  --primary: 180 100% 50%; /* Cyber Cyan */
+  --primary-foreground: 224 71% 4%;
+  
+  --secondary: 215 27.9% 16.9%;
+  --secondary-foreground: 210 20% 98%;
+  
+  --muted: 215 27.9% 16.9%;
+  --muted-foreground: 217.9 10.6% 64.9%;
+  
+  --accent: 180 100% 50%; /* Cyan accent */
+  --accent-foreground: 224 71% 4%;
+  
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 20% 98%;
+  
+  --border: 215 27.9% 16.9%;
+  --input: 215 27.9% 16.9%;
+  --ring: 180 100% 50%;
+  
+  --chart-1: 180 100% 50%; /* Cyan */
+  --chart-2: 280 100% 60%; /* Purple */
+  --chart-3: 320 100% 60%; /* Pink */
+  --chart-4: 120 100% 50%; /* Green */
+  --chart-5: 40 100% 50%;  /* Yellow */
+
+  --sidebar: 224 71% 4%;
+  --sidebar-foreground: 240 4.8% 95.9%;
+  --sidebar-primary: 224.3 76.3% 48%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 240 3.7% 15.9%;
+  --sidebar-accent-foreground: 240 4.8% 95.9%;
+  --sidebar-border: 240 3.7% 15.9%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.dark):not(.light) {
+    --background: 224 71% 4%;
     --foreground: 210 20% 98%;
-    
-    --card: 224 71% 6%; /* Slightly lighter than bg */
+    --card: 224 71% 6%;
     --card-foreground: 210 20% 98%;
-    
     --popover: 224 71% 6%;
     --popover-foreground: 210 20% 98%;
-    
-    --primary: 180 100% 50%; /* Cyber Cyan */
+    --primary: 180 100% 50%;
     --primary-foreground: 224 71% 4%;
-    
     --secondary: 215 27.9% 16.9%;
     --secondary-foreground: 210 20% 98%;
-    
     --muted: 215 27.9% 16.9%;
     --muted-foreground: 217.9 10.6% 64.9%;
-    
-    --accent: 180 100% 50%; /* Cyan accent */
+    --accent: 180 100% 50%;
     --accent-foreground: 224 71% 4%;
-    
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 20% 98%;
-    
     --border: 215 27.9% 16.9%;
     --input: 215 27.9% 16.9%;
     --ring: 180 100% 50%;
-    
-    --chart-1: 180 100% 50%; /* Cyan */
-    --chart-2: 280 100% 60%; /* Purple */
-    --chart-3: 320 100% 60%; /* Pink */
-    --chart-4: 120 100% 50%; /* Green */
-    --chart-5: 40 100% 50%;  /* Yellow */
-
+    --chart-1: 180 100% 50%;
+    --chart-2: 280 100% 60%;
+    --chart-3: 320 100% 60%;
+    --chart-4: 120 100% 50%;
+    --chart-5: 40 100% 50%;
     --sidebar: 224 71% 4%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;

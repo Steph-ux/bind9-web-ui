@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
 import { firewallService } from "./firewall-service";
-import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema } from "@shared/schema";
+import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
 import { z } from "zod";
 
 import { hashPassword } from "./auth";
@@ -92,6 +92,68 @@ export async function registerRoutes(
       const id = parseInt(String(req.params.id));
       await firewallService.deleteRule(id);
       res.json({ message: "Rule deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ── DNS Firewall (RPZ) ────────────────────────────────────────
+  app.get("/api/rpz", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const entries = await storage.getRpzEntries();
+      res.json(entries);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/rpz", requireOperator, async (req: Request, res: Response) => {
+    try {
+      // Validate input
+      const data = insertRpzEntrySchema.parse(req.body);
+
+      // Create in DB
+      const entry = await storage.createRpzEntry(data);
+
+      // Sync to BIND9
+      const allEntries = await storage.getRpzEntries();
+      const zoneEntries = allEntries.map(e => ({
+        name: e.name,
+        type: e.type,
+        target: e.target || undefined
+      }));
+
+      await bind9Service.ensureRpzConfigured(); // Ensure config exists
+      await bind9Service.writeRpzZone("rpz.intra", zoneEntries);
+      await bind9Service.reload();
+
+      res.json(entry);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/rpz/:id", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const id = String(req.params.id);
+      await storage.deleteRpzEntry(id);
+
+      // Sync to BIND9
+      const allEntries = await storage.getRpzEntries();
+      const zoneEntries = allEntries.map(e => ({
+        name: e.name,
+        type: e.type,
+        target: e.target || undefined
+      }));
+
+      await bind9Service.ensureRpzConfigured();
+      await bind9Service.writeRpzZone("rpz.intra", zoneEntries);
+      await bind9Service.reload();
+
+      res.json({ message: "Entry deleted" });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

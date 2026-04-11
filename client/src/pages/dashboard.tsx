@@ -1,31 +1,28 @@
 import { useEffect, useState, useRef } from "react";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
-  BarChart,
-  Bar
+  Tooltip,
+  ResponsiveContainer
 } from "recharts";
 import {
   Globe,
   Activity,
   AlertTriangle,
   CheckCircle2,
-  ArrowUpRight,
   Server,
   Download,
-  Upload,
+  Cpu,
   Loader2,
   WifiOff
 } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { getDashboard, type DashboardData } from "@/lib/api";
 
 export default function Dashboard() {
@@ -48,15 +45,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    intervalRef.current = setInterval(fetchData, 10000); // Refresh every 10s
+    intervalRef.current = setInterval(fetchData, 10000);
     return () => clearInterval(intervalRef.current);
   }, []);
 
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-[60vh]">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className="flex items-center justify-center" style={{ height: "60vh" }}>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </DashboardLayout>
     );
@@ -65,8 +62,8 @@ export default function Dashboard() {
   if (error && !data) {
     return (
       <DashboardLayout>
-        <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
-          <WifiOff className="w-12 h-12 text-destructive" />
+        <div className="flex flex-col items-center justify-center gap-3" style={{ height: "60vh" }}>
+          <WifiOff className="h-12 w-12 text-destructive" />
           <p className="text-destructive">{error}</p>
           <Button onClick={fetchData}>Retry</Button>
         </div>
@@ -86,199 +83,175 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-end justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
+          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             System Overview
-            <span className={`flex h-2 w-2 rounded-full ${data?.bind9.running ? 'bg-green-500' : 'bg-yellow-500'} animate-pulse`} />
-          </h1>
-          <p className="text-muted-foreground mt-1">Real-time DNS metrics and server performance.</p>
+            <span className={`inline-block h-2 w-2 rounded-full ${data?.bind9.running ? 'bg-green-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`} />
+          </h2>
+          <p className="text-muted-foreground">Real-time DNS metrics and server performance.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2 border-primary/20 hover:bg-primary/10 hover:text-primary">
-            <Download className="w-4 h-4" /> Export Report
+          <Button variant="outline" className="gap-2">
+            <Download className="h-4 w-4" /> Export Report
           </Button>
-          <Button onClick={fetchData} className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)] hover:shadow-[0_0_25px_rgba(0,240,255,0.5)] transition-shadow">
-            <Activity className="w-4 h-4" /> Refresh
+          <Button onClick={fetchData} className="gap-2">
+            <Activity className="h-4 w-4" /> Refresh
           </Button>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card className="glass-panel bg-card/40 border-primary/10 hover:border-primary/30 transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Zones</CardTitle>
-            <Globe className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-foreground">{data?.zones.total || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-              <span className="text-green-500 flex items-center"><CheckCircle2 className="w-3 h-3" /> {data?.zones.active || 0}</span>
-              active zones
-            </p>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold">{data?.zones.total || 0}</h3>
+                <span className="text-sm text-muted-foreground">Total Zones</span>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Globe className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <span className="text-sm text-green-600 inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> {data?.zones.active || 0}</span>
+              <span className="text-sm text-muted-foreground ml-2">active zones</span>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="glass-panel bg-card/40 border-primary/10 hover:border-primary/30 transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Records</CardTitle>
-            <Activity className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-foreground">{data?.records || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-              DNS entries across all zones
-            </p>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold">{data?.records || 0}</h3>
+                <span className="text-sm text-muted-foreground">Total Records</span>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Activity className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <span className="text-sm text-muted-foreground">DNS entries across all zones</span>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="glass-panel bg-card/40 border-primary/10 hover:border-primary/30 transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Server Uptime</CardTitle>
-            <Server className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-foreground">{data?.uptime || "N/A"}</div>
-            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold">{data?.uptime || "N/A"}</h3>
+                <span className="text-sm text-muted-foreground">Server Uptime</span>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Server className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-3">
               {data?.bind9.running ? (
-                <><CheckCircle2 className="w-3 h-3 text-green-500" /> BIND9 Running</>
+                <span className="text-sm text-green-600 inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> BIND9 Running</span>
               ) : (
-                <><AlertTriangle className="w-3 h-3 text-yellow-500" /> BIND9 Not Detected</>
+                <span className="text-sm text-yellow-600 inline-flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> BIND9 Not Detected</span>
               )}
-            </p>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="glass-panel bg-card/40 border-primary/10 hover:border-primary/30 transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">CPU / Memory</CardTitle>
-            <Upload className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-foreground">{data?.system.cpu.toFixed(1)}%</div>
-            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-              RAM: {formatBytes(data?.system.memory.used || 0)} / {formatBytes(data?.system.memory.total || 0)}
-            </p>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold">{data?.system.cpu.toFixed(1)}%</h3>
+                <span className="text-sm text-muted-foreground">CPU Usage</span>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Cpu className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <span className="text-sm text-muted-foreground">Memory: {formatBytes(data?.system.memory.used || 0)} / {formatBytes(data?.system.memory.total || 0)}</span>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-7 mb-8">
-        {/* Record Distribution */}
-        <Card className="col-span-4 glass-panel border-primary/10">
+      <div className="grid gap-4 lg:grid-cols-8 mb-6">
+        <Card className="lg:col-span-5">
           <CardHeader>
             <CardTitle>Record Distribution</CardTitle>
-            <CardDescription>DNS record types across all zones</CardDescription>
           </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[300px]">
+          <CardContent>
+            <div style={{ height: "300px" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={typeData} layout="vertical" margin={{ left: 0 }}>
                   <XAxis type="number" hide />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                    width={50}
-                  />
-                  <Tooltip
-                    cursor={{ fill: 'hsl(var(--accent)/0.1)' }}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--popover))",
-                      borderColor: "hsl(var(--border))",
-                      borderRadius: "var(--radius)",
-                    }}
-                  />
-                  <Bar
-                    dataKey="value"
-                    fill="hsl(var(--primary))"
-                    radius={[0, 4, 4, 0]}
-                    barSize={32}
-                    className="hover:opacity-80 transition-opacity"
-                  />
+                  <YAxis dataKey="name" type="category" stroke="#888" fontSize={12} tickLine={false} axisLine={false} width={50} />
+                  <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} />
+                  <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} barSize={32} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
 
-        {/* BIND9 Info */}
-        <Card className="col-span-3 glass-panel border-primary/10">
+        <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle>BIND9 Status</CardTitle>
-            <CardDescription>DNS Server Information</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 rounded-lg bg-card/30 border border-border/40">
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Status</span>
-                <Badge className={data?.bind9.running
-                  ? "bg-green-500/10 text-green-500 border-green-500/20"
-                  : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
-                }>
+                <Badge variant={data?.bind9.running ? "default" : "secondary"}>
                   {data?.bind9.running ? "RUNNING" : "NOT DETECTED"}
                 </Badge>
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-card/30 border border-border/40">
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Version</span>
-                <span className="text-sm font-mono">{data?.bind9.version || "N/A"}</span>
+                <span className="text-sm font-medium">{data?.bind9.version || "N/A"}</span>
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-card/30 border border-border/40">
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Uptime</span>
-                <span className="text-sm font-mono">{data?.uptime || "N/A"}</span>
+                <span className="text-sm font-medium">{data?.uptime || "N/A"}</span>
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-card/30 border border-border/40">
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">PID</span>
-                <span className="text-sm font-mono">{data?.bind9.pid || "N/A"}</span>
+                <span className="text-sm font-medium">{data?.bind9.pid || "N/A"}</span>
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-card/30 border border-border/40">
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Threads</span>
-                <span className="text-sm font-mono">{data?.bind9.threads || "N/A"}</span>
+                <span className="text-sm font-medium">{data?.bind9.threads || "N/A"}</span>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Logs Panel */}
-      <Card className="glass-panel border-primary/10 overflow-hidden">
+      <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Recent System Logs</CardTitle>
-            <CardDescription>Latest events from the admin panel</CardDescription>
-          </div>
-          <Badge variant="outline" className="font-mono text-xs">LIVE</Badge>
+          <CardTitle>Recent System Logs</CardTitle>
+          <Badge variant="outline">LIVE</Badge>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="bg-black/40 font-mono text-sm p-4 max-h-[300px] overflow-y-auto border-t border-border/40 space-y-2">
-            {data?.recentLogs && data.recentLogs.length > 0 ? (
-              data.recentLogs.map((log) => (
-                <div key={log.id} className="flex gap-3 hover:bg-white/5 p-1 rounded transition-colors group">
-                  <span className="text-muted-foreground shrink-0 select-none">
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span className={`shrink-0 uppercase w-16 text-center text-[10px] font-bold border rounded px-1 py-0.5 h-fit
-                    ${log.level === 'INFO' ? 'border-blue-900/50 text-blue-400 bg-blue-900/10' : ''}
-                    ${log.level === 'WARN' ? 'border-yellow-900/50 text-yellow-400 bg-yellow-900/10' : ''}
-                    ${log.level === 'ERROR' ? 'border-red-900/50 text-red-400 bg-red-900/10' : ''}
-                  `}>
-                    {log.level}
-                  </span>
-                  <span className="text-primary/70 shrink-0 w-20">{log.source}</span>
-                  <span className="text-gray-300 break-all group-hover:text-white transition-colors">
-                    {log.message}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-muted-foreground text-center py-4">No log entries yet. Activity will appear here.</div>
-            )}
-            <div className="animate-pulse text-primary/50 text-xs mt-2">_ awaiting new events...</div>
-          </div>
+          <ScrollArea className="h-[300px]">
+            <div className="bg-zinc-950 dark:bg-zinc-950 text-zinc-100 dark:text-zinc-100 p-4 font-mono text-sm">
+              {data?.recentLogs && data.recentLogs.length > 0 ? (
+                data.recentLogs.map((log) => (
+                  <div key={log.id} className="flex gap-3 mb-2 pb-2 border-b border-zinc-800 dark:border-zinc-800">
+                    <span className="text-zinc-500 dark:text-zinc-500 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                    <span className={`shrink-0 text-center font-bold w-12 ${log.level === 'INFO' ? 'text-blue-400' : log.level === 'WARN' ? 'text-yellow-400' : 'text-red-400'}`}>
+                      {log.level}
+                    </span>
+                    <span className="text-cyan-400 dark:text-cyan-400 shrink-0 w-20 truncate">{log.source}</span>
+                    <span className="text-zinc-200 dark:text-zinc-200 break-all">{log.message}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-zinc-500 dark:text-zinc-500 text-center py-8">No log entries yet. Activity will appear here.</div>
+              )}
+            </div>
+          </ScrollArea>
         </CardContent>
       </Card>
     </DashboardLayout>

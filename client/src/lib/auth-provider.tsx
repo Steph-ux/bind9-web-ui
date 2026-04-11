@@ -28,8 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             try {
                 const res = await fetch("/api/auth/me");
                 if (res.ok) {
-                    const data = await res.json();
-                    setUser(data);
+                    try {
+                        const data = await res.json();
+                        setUser(data);
+                    } catch {
+                        setUser(null);
+                    }
                 } else {
                     setUser(null);
                 }
@@ -51,11 +55,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
 
             if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.message || "Login failed");
+                let message = "Login failed";
+                try {
+                    const err = await res.json();
+                    message = err.message || message;
+                } catch {}
+                throw new Error(message);
             }
 
-            const user = await res.json();
+            let user;
+            try {
+                user = await res.json();
+            } catch {
+                throw new Error("Server returned an invalid response. Please ensure the backend is running.");
+            }
             setUser(user);
             toast({ title: "Welcome back!", description: `Logged in as ${user.username}` });
             setLocation("/");
@@ -108,6 +121,12 @@ export function useAuth() {
     return context;
 }
 
+function Redirect({ to }: { to: string }) {
+    const [_, setLocation] = useLocation();
+    useEffect(() => { setLocation(to); }, [to, setLocation]);
+    return null;
+}
+
 export function ProtectedRoute({
     path,
     component: Component,
@@ -118,36 +137,17 @@ export function ProtectedRoute({
     adminOnly?: boolean;
 }) {
     const { user, isLoading } = useAuth();
-    const [location, setLocation] = useLocation();
 
     if (isLoading) {
         return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
     }
 
     if (!user) {
-        // Redirect to login using a component wrapper for useEffect-like behavior isn't ideal inside render,
-        // but wouter doesn't allow many options. 
-        // We render a Route that checks condition.
-        return (
-            <Route path={path}>
-                {(params) => {
-                    // Redirect logic
-                    if (location !== "/auth") setTimeout(() => setLocation("/auth"), 0);
-                    return null;
-                }}
-            </Route>
-        );
+        return <Redirect to="/auth" />;
     }
 
     if (adminOnly && user.role !== "admin") {
-        return (
-            <Route path={path}>
-                {(params) => {
-                    if (location !== "/") setTimeout(() => setLocation("/"), 0);
-                    return null;
-                }}
-            </Route>
-        );
+        return <Redirect to="/" />;
     }
 
     return <Route path={path} component={Component} />;

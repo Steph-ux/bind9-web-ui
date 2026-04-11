@@ -1,66 +1,102 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-provider";
-import { getStatus, getLogs, type LogData } from "@/lib/api";
+import { getLogs, type LogData } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
+import {
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@/components/ui/command";
 import {
   LayoutDashboard,
   Globe,
   Settings,
-  Activity,
   Shield,
   Server,
   Terminal,
-  Menu,
-  Bell,
   Plug,
   Users,
   LogOut,
   ShieldCheck,
-  User,
-  UserCog,
-  Eye,
-  CheckCircle2,
+  ShieldAlert,
+  Bell,
+  Search,
+  Menu,
+  Sun,
+  Moon,
+  Monitor,
+  PanelLeftClose,
+  PanelLeft,
+  AlertCircle,
   AlertTriangle,
-  Info
+  Info,
+  CheckCircle2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger
-} from "@/components/ui/sheet";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import networkBg from "../../assets/network-bg.png";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const [location] = useLocation();
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
 
-  // Dynamic System Info
-  const [hostname, setHostname] = useState("loading...");
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("theme") || "light"
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem("sidebarExpanded") === "false"
+  );
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("theme", theme);
+    const root = document.documentElement;
+    root.classList.remove("dark", "light");
+    if (theme === "auto") {
+      const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.classList.add(isDark ? "dark" : "light");
+    } else {
+      root.classList.add(theme);
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("sidebarExpanded", sidebarCollapsed ? "false" : "true");
+  }, [sidebarCollapsed]);
+
+  // Cmd+K shortcut
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setCommandOpen((o) => !o);
+      }
+    };
+    document.addEventListener("keydown", down);
+    return () => document.removeEventListener("keydown", down);
+  }, []);
+
+  // Notifications
   const [notifications, setNotifications] = useState<LogData[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    // Fetch Hostname
-    getStatus().then(data => setHostname(data.hostname)).catch(() => setHostname("bind9-server"));
-
-    // Fetch Notifications (Recent Logs)
-    getLogs({ limit: 5 }).then(logs => {
+    getLogs({ limit: 5 }).then((logs) => {
       setNotifications(logs);
-      setUnreadCount(logs.length > 0 ? logs.length : 0);
+      setUnreadCount(logs.length);
     }).catch(console.error);
   }, []);
 
@@ -76,190 +112,240 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   if (user?.role === "admin") {
     navItems.push({ label: "Firewall", icon: ShieldCheck, href: "/firewall" });
+    navItems.push({ label: "DNS Firewall", icon: ShieldAlert, href: "/firewall-rpz" });
     navItems.push({ label: "Users", icon: Users, href: "/users" });
   }
 
-  // Role-based UI helpers
-  const getRoleIcon = () => {
-    switch (user?.role) {
-      case "admin": return <UserCog className="w-5 h-5 text-red-500" />;
-      case "operator": return <User className="w-5 h-5 text-blue-500" />;
-      default: return <Eye className="w-5 h-5 text-gray-500" />;
+  const runCommand = useCallback((command: () => void) => {
+    setCommandOpen(false);
+    command();
+  }, []);
+
+  const levelIcon = (level: string) => {
+    switch (level) {
+      case "ERROR": return <AlertCircle className="h-4 w-4 text-destructive shrink-0" />;
+      case "WARN": return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />;
+      case "INFO": return <Info className="h-4 w-4 text-blue-500 shrink-0" />;
+      default: return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
     }
   };
-
-  const getRoleColor = () => {
-    switch (user?.role) {
-      case "admin": return "text-red-500 bg-red-500/10 border-red-500/20";
-      case "operator": return "text-blue-500 bg-blue-500/10 border-blue-500/20";
-      default: return "text-gray-500 bg-gray-500/10 border-gray-500/20";
-    }
-  };
-
-  const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-sidebar border-r border-border">
-      <div className="p-6 flex items-center gap-3 border-b border-border/40">
-        <div className="w-8 h-8 rounded bg-primary/20 flex items-center justify-center border border-primary/50 shadow-[0_0_10px_rgba(0,240,255,0.3)]">
-          <Activity className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="font-bold tracking-tight text-lg">BIND9<span className="text-primary">Admin</span></h1>
-          <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Control Panel</p>
-        </div>
-      </div>
-
-      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive = location === item.href;
-          return (
-            <Link key={item.href} href={item.href} className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-200 group
-                ${isActive
-                ? "bg-primary/10 text-primary border border-primary/20 shadow-[0_0_15px_rgba(0,240,255,0.1)]"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <item.icon className={`w-4 h-4 ${isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"}`} />
-              <span className="font-medium">{item.label}</span>
-              {isActive && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_5px_var(--color-primary)] animate-pulse" />}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="p-4 border-t border-border/40 space-y-4">
-        <div className={`rounded-lg p-3 border flex items-center gap-3 ${getRoleColor()}`}>
-          <div className="bg-background/50 p-1.5 rounded-full">
-            {getRoleIcon()}
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <div className="text-xs font-bold uppercase tracking-wider truncate">{user?.role || "Guest"}</div>
-            <div className="text-[10px] opacity-70 truncate">v9.18.28</div>
-          </div>
-        </div>
-
-        <Button variant="outline" size="sm" className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground" onClick={() => logout()}>
-          <LogOut className="w-4 h-4" />
-          Logout
-        </Button>
-      </div>
-    </div>
-  );
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30 relative overflow-hidden">
-      {/* Background Effect */}
-      <div className="fixed inset-0 z-0 pointer-events-none opacity-20">
-        <img src={networkBg} alt="" className="w-full h-full object-cover mix-blend-screen" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-transparent" />
-      </div>
+    <div className="flex h-screen overflow-hidden bg-background">
+      {/* ── Desktop Sidebar ── */}
+      <aside className={`hidden lg:flex flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-300 ${sidebarCollapsed ? "w-16" : "w-60"}`}>
+        {/* Brand */}
+        <div className="flex items-center h-14 px-4 border-b">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-sm">B</div>
+            {!sidebarCollapsed && <span className="font-semibold text-base">BIND9Admin</span>}
+          </Link>
+        </div>
 
-      <div className="relative z-10 flex h-screen overflow-hidden">
-        {/* Desktop Sidebar */}
-        <aside className="hidden md:block w-64 flex-shrink-0 z-20">
-          <SidebarContent />
-        </aside>
+        {/* Nav */}
+        <ScrollArea className="flex-1 py-2">
+          <div className="px-3 py-2">
+            {!sidebarCollapsed && (
+              <p className="mb-1 px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Control Panel</p>
+            )}
+            <Separator className="my-2" />
+          </div>
+          <nav className="flex flex-col gap-1 px-2">
+            {navItems.map((item) => {
+              const isActive = location === item.href;
+              return (
+                <Link key={item.href} href={item.href}>
+                  <button
+                    className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+                    } ${sidebarCollapsed ? "justify-center" : ""}`}
+                    title={sidebarCollapsed ? item.label : undefined}
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {!sidebarCollapsed && <span>{item.label}</span>}
+                  </button>
+                </Link>
+              );
+            })}
+          </nav>
+        </ScrollArea>
+      </aside>
 
-        {/* Mobile Sidebar */}
-        <Sheet open={isMobileOpen} onOpenChange={setIsMobileOpen}>
-          <SheetContent side="left" className="p-0 w-64 border-r border-border bg-sidebar">
-            <SidebarContent />
-          </SheetContent>
-        </Sheet>
+      {/* ── Main content area ── */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* ── Top bar ── */}
+        <header className="flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+          {/* Mobile menu toggle */}
+          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
+            <Menu className="h-5 w-5" />
+          </Button>
 
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          {/* Header */}
-          <header className="h-16 border-b border-border/40 bg-background/50 backdrop-blur-sm flex items-center justify-between px-6 shrink-0 z-20">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" className="md:hidden text-muted-foreground" onClick={() => setIsMobileOpen(true)}>
-                <Menu className="w-5 h-5" />
+          {/* Desktop sidebar toggle */}
+          <Button variant="ghost" size="icon" className="hidden lg:flex" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
+            {sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+          </Button>
+
+          <div className="flex-1" />
+
+          {/* Search */}
+          <Button variant="outline" size="sm" className="hidden sm:flex gap-2 text-muted-foreground" onClick={() => setCommandOpen(true)}>
+            <Search className="h-4 w-4" />
+            <span className="text-xs">⌘K</span>
+          </Button>
+          <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => setCommandOpen(true)}>
+            <Search className="h-5 w-5" />
+          </Button>
+
+          {/* Theme toggle */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                {theme === "dark" ? <Moon className="h-5 w-5" /> : theme === "light" ? <Sun className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
               </Button>
-              <div className="hidden md:flex items-center gap-2 text-sm text-muted-foreground bg-black/20 px-3 py-1.5 rounded-md border border-white/5">
-                <Terminal className="w-4 h-4 text-primary" />
-                <span className="font-mono text-xs opacity-90 text-primary">
-                  {user?.username || "user"}@{hostname}
-                </span>
-              </div>
-            </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem className="gap-2" onClick={() => setTheme("light")}>
+                <Sun className="h-4 w-4" /> Light
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2" onClick={() => setTheme("dark")}>
+                <Moon className="h-4 w-4" /> Dark
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2" onClick={() => setTheme("auto")}>
+                <Monitor className="h-4 w-4" /> Auto
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-            <div className="flex items-center gap-4">
-              {/* Notifications Popover */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary relative">
-                    <Bell className="w-5 h-5" />
-                    {unreadCount > 0 && (
-                      <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-destructive rounded-full border border-background shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse"></span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0 glass-panel border-primary/20" align="end">
-                  <div className="p-3 border-b border-border/40 flex justify-between items-center bg-muted/20">
-                    <h3 className="font-semibold text-sm">System Events</h3>
-                    {unreadCount > 0 && <Badge variant="outline" className="text-xs">{unreadCount} new</Badge>}
-                  </div>
-                  <ScrollArea className="h-[300px]">
-                    {notifications.length === 0 ? (
-                      <div className="p-8 text-center text-muted-foreground text-sm">
-                        <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                        No recent notifications
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        {notifications.map((notif) => (
-                          <div key={notif.id} className="p-3 border-b border-border/10 hover:bg-muted/30 transition-colors text-sm">
-                            <div className="flex items-start gap-3">
-                              {notif.level === "ERROR" ? <AlertTriangle className="w-4 h-4 text-destructive mt-0.5" /> :
-                                notif.level === "WARN" ? <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5" /> :
-                                  <Info className="w-4 h-4 text-blue-500 mt-0.5" />}
-                              <div>
-                                <p className="font-medium text-foreground">{notif.message}</p>
-                                <p className="text-xs text-muted-foreground mt-1 flex justify-between">
-                                  <span>{notif.source}</span>
-                                  <span>{new Date(notif.timestamp).toLocaleTimeString()}</span>
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </PopoverContent>
-              </Popover>
+          {/* Notifications */}
+          <Button variant="ghost" size="icon" className="relative" onClick={() => setNotifOpen(true)}>
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-[10px] flex items-center justify-center" variant="destructive">
+                {unreadCount}
+              </Badge>
+            )}
+          </Button>
 
-              <div className="h-6 w-px bg-border/60 mx-1"></div>
-
-              {/* User Avatar */}
-              <div className="flex items-center gap-3">
-                <div className="text-right hidden sm:block">
-                  <div className="text-sm font-medium text-foreground">{user?.username || "Guest"}</div>
-                  <div className="text-xs text-muted-foreground capitalize">
-                    {user?.role === "admin" ? "System Administrator" :
-                      user?.role === "operator" ? "DNS Operator" : "Viewer"}
-                  </div>
-                </div>
-                <Avatar className={`h-8 w-8 border ring-2 ring-offset-2 ring-offset-background transition-all hover:scale-105 ${user?.role === "admin" ? "border-red-500/30 ring-red-500/10" :
-                    user?.role === "operator" ? "border-blue-500/30 ring-blue-500/10" :
-                      "border-gray-500/30 ring-gray-500/10"
-                  }`}>
-                  <AvatarImage src={`https://ui-avatars.com/api/?name=${user?.username}&background=${user?.role === 'admin' ? 'ef4444' : user?.role === 'operator' ? '3b82f6' : '6b7280'}&color=fff`} />
-                  <AvatarFallback className="bg-muted">
+          {/* User menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                     {user?.username?.substring(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-              </div>
-            </div>
-          </header>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="flex items-center gap-3">
+                <Avatar className="h-9 w-9">
+                  <AvatarFallback className="bg-primary text-primary-foreground">
+                    {user?.username?.substring(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="text-sm font-medium">{user?.username}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => logout()}>
+                <LogOut className="h-4 w-4" /> Logout
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
 
-          {/* Page Content */}
-          <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent">
-            <div className="container mx-auto p-6 max-w-7xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {children}
-            </div>
-          </div>
+        {/* ── Page content ── */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          {children}
         </main>
       </div>
+
+      {/* ── Mobile Sidebar (Sheet) ── */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="w-60 p-0">
+          <SheetHeader className="border-b px-4 py-3">
+            <SheetTitle className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-sm">B</div>
+              BIND9Admin
+            </SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="flex-1">
+            <nav className="flex flex-col gap-1 p-2">
+              {navItems.map((item) => {
+                const isActive = location === item.href;
+                return (
+                  <Link key={item.href} href={item.href} onClick={() => setSidebarOpen(false)}>
+                    <button
+                      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        isActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+                      }`}
+                    >
+                      <item.icon className="h-5 w-5" />
+                      <span>{item.label}</span>
+                    </button>
+                  </Link>
+                );
+              })}
+            </nav>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Command Search (⌘K) ── */}
+      <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
+        <CommandInput placeholder="Search zones, records, configs..." />
+        <CommandList>
+          <CommandEmpty>No results found.</CommandEmpty>
+          <CommandGroup heading="Navigation">
+            {navItems.map((item) => (
+              <CommandItem key={item.href} onSelect={() => runCommand(() => setLocation(item.href))}>
+                <item.icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+
+      {/* ── Notifications Sheet ── */}
+      <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
+        <SheetContent side="right" className="w-80 p-0">
+          <SheetHeader className="border-b px-4 py-3">
+            <SheetTitle className="flex items-center gap-2">
+              <Bell className="h-5 w-5" /> Notifications
+            </SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="flex-1 h-[calc(100vh-60px)]">
+            {notifications.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Bell className="h-10 w-10 mb-2 opacity-40" />
+                <p className="text-sm">No notifications yet</p>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {notifications.map((log) => (
+                  <div key={log.id} className="flex items-start gap-3 p-4 hover:bg-muted/50 transition-colors">
+                    {levelIcon(log.level)}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium leading-tight truncate">{log.message}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {log.source} &middot; {new Date(log.timestamp).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

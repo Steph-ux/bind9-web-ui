@@ -11,7 +11,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
         const err = await res.json().catch(() => ({ message: res.statusText }));
         throw new Error(err.message || `HTTP ${res.status}`);
     }
-    return res.json();
+    try {
+        return await res.json();
+    } catch {
+        throw new Error("Server returned an invalid response. Please ensure the backend is running.");
+    }
 }
 
 // ── Dashboard ──────────────────────────────────────────────

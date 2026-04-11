@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { Server, Cpu, Database, Network, Activity, Clock, Loader2, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Server, Cpu, Database, Network, Activity, Clock, Loader2 } from "lucide-react";
 import { getStatus, type StatusData } from "@/lib/api";
 
 export default function Status() {
@@ -24,19 +24,9 @@ export default function Status() {
 
   useEffect(() => {
     fetchStatus();
-    intervalRef.current = setInterval(fetchStatus, 5000); // Refresh every 5s
+    intervalRef.current = setInterval(fetchStatus, 5000);
     return () => clearInterval(intervalRef.current);
   }, []);
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-[60vh]">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   const formatBytes = (bytes: number) => {
     if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
@@ -44,128 +34,128 @@ export default function Status() {
     return `${(bytes / 1024).toFixed(0)} KB`;
   };
 
-  const memUsedPct = data ? (data.system.memory.used / data.system.memory.total) * 100 : 0;
+  const memUsedPct = data ? Math.round((data.system.memory.used / data.system.memory.total) * 100) : 0;
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center" style={{ height: "60vh" }}>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">Server Status</h1>
-          <p className="text-muted-foreground mt-1">Hardware utilization and daemon health.</p>
+          <h2 className="text-2xl font-bold tracking-tight">Server Status</h2>
+          <p className="text-muted-foreground">Hardware utilization and daemon health.</p>
         </div>
-        <Badge className={`px-3 py-1 text-sm font-mono tracking-wider ${data?.bind9.running
-          ? "bg-green-500/10 text-green-500 border-green-500/20"
-          : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
-          }`}>
-          {data?.bind9.running ? "RUNNING" : "BIND9 NOT DETECTED"}
+        <Badge variant={data?.bind9.running ? "default" : "secondary"} className="px-3 py-1.5 text-sm rounded-full">
+          {data?.bind9.running ? "● BIND9 RUNNING" : <span className="inline-flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> BIND9 NOT DETECTED</span>}
         </Badge>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3 mb-8">
-        <Card className="glass-panel border-primary/10">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-primary" /> CPU Usage
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold mb-4 font-mono">{data?.system.cpu.total.toFixed(1)}%</div>
-            <Progress value={data?.system.cpu.total || 0} className="h-2 bg-primary/10" />
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-              <div>User: {data?.system.cpu.user.toFixed(1)}%</div>
-              <div>System: {data?.system.cpu.system.toFixed(1)}%</div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mb-6">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 text-muted-foreground mb-3 text-sm">
+              <Cpu className="h-4 w-4 text-primary" /> CPU Usage
+            </div>
+            <div className="font-bold font-mono text-3xl mb-3">
+              {data?.system.cpu.total.toFixed(1)}%
+            </div>
+            <Progress value={data?.system.cpu.total || 0} className="h-1.5 mb-3" />
+            <div className="flex justify-between text-muted-foreground text-xs">
+              <span>User: {data?.system.cpu.user.toFixed(1)}%</span>
+              <span>System: {data?.system.cpu.system.toFixed(1)}%</span>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="glass-panel border-primary/10">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Database className="w-4 h-4 text-primary" /> Memory
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold mb-4 font-mono">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 text-muted-foreground mb-3 text-sm">
+              <Database className="h-4 w-4 text-primary" /> Memory
+            </div>
+            <div className="font-bold font-mono text-3xl mb-1">
               {formatBytes(data?.system.memory.used || 0)}
-              <span className="text-sm font-normal text-muted-foreground"> / {formatBytes(data?.system.memory.total || 0)}</span>
             </div>
-            <Progress value={memUsedPct} className="h-2 bg-primary/10" />
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-              <div>Used: {memUsedPct.toFixed(1)}%</div>
-              <div>Free: {formatBytes((data?.system.memory.total || 0) - (data?.system.memory.used || 0))}</div>
+            <div className="text-muted-foreground mb-3 text-sm">
+              / {formatBytes(data?.system.memory.total || 0)}
+            </div>
+            <Progress value={memUsedPct} className="h-1.5 mb-3" />
+            <div className="flex justify-between text-muted-foreground text-xs">
+              <span>Used: {memUsedPct}%</span>
+              <span>Free: {formatBytes((data?.system.memory.total || 0) - (data?.system.memory.used || 0))}</span>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="glass-panel border-primary/10">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Activity className="w-4 h-4 text-primary" /> System Uptime
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold mb-4 font-mono">{data?.uptime || "N/A"}</div>
-            <div className="mt-4 text-xs text-muted-foreground">
-              <div>Hostname: {data?.hostname || "unknown"}</div>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 text-muted-foreground mb-3 text-sm">
+              <Activity className="h-4 w-4 text-primary" /> System Uptime
+            </div>
+            <div className="font-bold font-mono text-3xl mb-3">
+              {data?.uptime || "N/A"}
+            </div>
+            <div className="text-muted-foreground text-sm">
+              Hostname: <span className="font-mono">{data?.hostname || "unknown"}</span>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="glass-panel border-primary/10 mb-8">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Network className="w-5 h-5 text-primary" /> Interface Statistics
-          </CardTitle>
+      <Card className="mb-6">
+        <CardHeader className="border-b flex items-center gap-2">
+          <Network className="h-4 w-4 text-primary" />
+          <CardTitle>Interface Statistics</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-6">
-            {data?.system.interfaces && data.system.interfaces.length > 0 ? (
-              data.system.interfaces.map((iface) => (
-                <div key={iface.name} className="space-y-2">
-                  <div className="flex items-center justify-between">
+        <CardContent className="pt-4">
+          {data?.system.interfaces && data.system.interfaces.length > 0 ? (
+            <div className="flex flex-col gap-4">
+              {data.system.interfaces.map((iface) => (
+                <div key={iface.name}>
+                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
                       <Badge variant="secondary" className="font-mono">{iface.name}</Badge>
-                      <span className="text-sm font-mono text-muted-foreground">{iface.ip}</span>
+                      <span className="text-muted-foreground font-mono text-sm">{iface.ip}</span>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      RX: {iface.rx} | TX: {iface.tx}
+                    <div className="text-muted-foreground text-xs">
+                      ↓ {iface.rx} &nbsp;|&nbsp; ↑ {iface.tx}
                     </div>
                   </div>
-                  <Progress value={iface.ip === "127.0.0.1" ? 2 : 30} className="h-1 bg-primary/5" />
+                  <Progress value={iface.ip === "127.0.0.1" ? 2 : 30} className="h-1" />
                 </div>
-              ))
-            ) : (
-              <div className="text-center text-muted-foreground py-4">No interface data available</div>
-            )}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-muted-foreground py-8">No interface data available</div>
+          )}
         </CardContent>
       </Card>
 
-      <Card className="glass-panel border-primary/10">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-primary" /> BIND9 Process Information
-          </CardTitle>
+      <Card>
+        <CardHeader className="border-b flex items-center gap-2">
+          <Clock className="h-4 w-4 text-primary" />
+          <CardTitle>BIND9 Process Information</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <div className="p-4 rounded-lg bg-card/30 border border-border/40">
-              <div className="text-xs text-muted-foreground uppercase mb-1">PID</div>
-              <div className="text-xl font-mono">{data?.bind9.pid || "N/A"}</div>
-            </div>
-            <div className="p-4 rounded-lg bg-card/30 border border-border/40">
-              <div className="text-xs text-muted-foreground uppercase mb-1">Status</div>
-              <div className="text-xl font-mono">{data?.bind9.running ? "Active" : "Inactive"}</div>
-            </div>
-            <div className="p-4 rounded-lg bg-card/30 border border-border/40">
-              <div className="text-xs text-muted-foreground uppercase mb-1">Threads</div>
-              <div className="text-xl font-mono">{data?.bind9.threads}</div>
-            </div>
-            <div className="p-4 rounded-lg bg-card/30 border border-border/40">
-              <div className="text-xs text-muted-foreground uppercase mb-1">Version</div>
-              <div className="text-xl font-mono truncate">{data?.bind9.version || "N/A"}</div>
-            </div>
+        <CardContent className="pt-4">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: "PID", value: data?.bind9.pid || "N/A" },
+              { label: "Status", value: data?.bind9.running ? "Active" : "Inactive" },
+              { label: "Threads", value: data?.bind9.threads ?? "N/A" },
+              { label: "Version", value: data?.bind9.version || "N/A" },
+            ].map(({ label, value }) => (
+              <div key={label} className="p-3 rounded-md border bg-muted/30">
+                <div className="text-muted-foreground uppercase mb-1 text-[10px] tracking-widest">{label}</div>
+                <div className="font-bold font-mono truncate">{String(value)}</div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
