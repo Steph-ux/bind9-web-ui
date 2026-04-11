@@ -6,7 +6,8 @@
  */
 import { exec } from "child_process";
 import { promisify } from "util";
-import fs from "fs/promises";
+import fsPromises from "fs/promises";
+import fs from "fs";
 import os from "os";
 import path from "path";
 import { sshManager } from "./ssh-manager";
@@ -63,9 +64,15 @@ class Bind9Service {
     }
 
     /** Execute a shell command (locally or via SSH) */
-    private async execCommand(command: string): Promise<{ stdout: string; stderr: string }> {
+    private async execCommand(command: string, useSudo = false): Promise<{ stdout: string; stderr: string }> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
-            const result = await sshManager.exec(command);
+            // Resolve rndc/named-checkconf to full paths for SSH (sudo blocks PATH env)
+            let resolvedCommand = command
+                .replace(/\brndc\b/g, "/usr/sbin/rndc")
+                .replace(/\bnamed-checkconf\b/g, "/usr/sbin/named-checkconf")
+                .replace(/\bnamed\b/g, "/usr/sbin/named");
+            if (useSudo) resolvedCommand = `sudo -n ${resolvedCommand}`;
+            const result = await sshManager.exec(resolvedCommand);
             return { stdout: result.stdout, stderr: result.stderr };
         }
         return execAsync(command);
@@ -76,7 +83,7 @@ class Bind9Service {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             return sshManager.readFile(filePath);
         }
-        return fs.readFile(filePath, "utf-8");
+        return fsPromises.readFile(filePath, "utf-8");
     }
 
     /** Write a file (locally or via SSH/SFTP) */
@@ -84,14 +91,14 @@ class Bind9Service {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             return sshManager.writeFile(filePath, content);
         }
-        await fs.writeFile(filePath, content, "utf-8");
+        await fsPromises.writeFile(filePath, content, "utf-8");
     }
 
     /** Check if BIND9/rndc is available */
     async isAvailable(): Promise<boolean> {
         if (this.available !== null) return this.available;
         try {
-            await this.execCommand(`${RNDC_BIN} status`);
+            await this.execCommand(`${RNDC_BIN} status`, true);
             this.available = true;
         } catch {
             this.available = false;
@@ -102,7 +109,7 @@ class Bind9Service {
     /** Execute an rndc command */
     async rndc(command: string): Promise<string> {
         try {
-            const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`);
+            const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`, true);
             return stdout || stderr;
         } catch (error: any) {
             throw new Error(`rndc ${command} failed: ${error.message}`);
@@ -125,7 +132,7 @@ class Bind9Service {
 
         try {
             const output = await this.rndc("status");
-            const version = output.match(/version:\s*(.+)/)?.[1] || "unknown";
+            const version = output.match(/version:\s*BIND\s+(\d+[^\s]*)/)?.[1] || output.match(/version:\s*(.+)/)?.[1] || "unknown";
             const zonesCount = parseInt(output.match(/number of zones:\s*(\d+)/)?.[1] || "0");
             return {
                 running: true,
@@ -209,7 +216,7 @@ class Bind9Service {
             await this.writeRemoteFile(confPath, content);
             // Validate
             try {
-                await this.execCommand(`${NAMED_CHECKCONF} ${confPath}`);
+                await this.execCommand(`${NAMED_CHECKCONF} ${confPath}`, true);
             } catch (checkError: any) {
                 // Restore backup on validation failure
                 if (existing) {
@@ -250,6 +257,65 @@ class Bind9Service {
         }
         const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.keys");
         await this.writeRemoteFile(confPath, content);
+    }
+
+    /** Add a zone to named.conf.local */
+    async addZoneToConfig(domain: string, type: "master" | "slave" | "forward", file: string): Promise<void> {
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                content = "// Local zone definitions\n";
+            }
+
+            // Check if zone already exists to avoid duplicates
+            if (content.includes(`zone "${domain}"`)) {
+                console.log(`[bind9] Zone ${domain} already in config, skipping add.`);
+                return;
+            }
+
+            const newBlock = `
+zone "${domain}" {
+    type ${type};
+    file "${file}";
+};
+`;
+            await this.writeRemoteFile(confPath, content + newBlock);
+            console.log(`[bind9] Added zone ${domain} to named.conf.local`);
+        } catch (error: any) {
+            throw new Error(`Failed to add zone to config: ${error.message}`);
+        }
+    }
+
+    /** Remove a zone from named.conf.local */
+    async removeZoneFromConfig(domain: string): Promise<void> {
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                return; // File doesn't exist, nothing to remove
+            }
+
+            // Regex to match the zone block: zone "domain" { ... };
+            // We use [\s\S]*? to match across newlines non-greedily until the first closing brace followed by semi-colon
+            // This is a basic parser; for complex nested braces it might be fragile but standard BIND format is usually clean.
+            const regex = new RegExp(`zone\\s+"${domain}"\\s*{[\\s\\S]*?};\\s*`, "g");
+
+            if (!regex.test(content)) {
+                console.log(`[bind9] Zone ${domain} not found in config, skipping remove.`);
+                return;
+            }
+
+            const newContent = content.replace(regex, "");
+            await this.writeRemoteFile(confPath, newContent.trim() + "\n");
+            console.log(`[bind9] Removed zone ${domain} from named.conf.local`);
+        } catch (error: any) {
+            throw new Error(`Failed to remove zone from config: ${error.message}`);
+        }
     }
 
     /** Ensure named.conf includes acls and keys configs */
@@ -596,6 +662,115 @@ class Bind9Service {
         return validZones;
     }
 
+    /**
+     * Parse named.conf.acls to extract existing ACLs.
+     * Returns array of { name, networks }
+     */
+    async syncAclsFromConfig(): Promise<Array<{ name: string; networks: string }>> {
+        const acls: Array<{ name: string; networks: string }> = [];
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                console.log("[bind9] named.conf.acls not found, skipping import.");
+                return [];
+            }
+
+            // Simple regex parser for: acl "name" { 1.2.3.4; ... };
+            // Matches: acl "NAME" { CONTENT };
+            const aclRegex = /acl\s+"([^"]+)"\s*{([^}]+)};/g;
+            let match;
+
+            while ((match = aclRegex.exec(content)) !== null) {
+                const name = match[1];
+                const cleanContent = match[2]
+                    .replace(/\/\/.*$/gm, "") // remove comments
+                    .replace(/\s+/g, " ")     // normalize whitespace
+                    .split(";")               // split by semi-colon
+                    .map(s => s.trim())
+                    .filter(s => s);          // remove empty strings
+
+                const networks = cleanContent.join("; ");
+                if (name && networks) {
+                    acls.push({ name, networks: networks + ";" });
+                }
+            }
+            console.log(`[bind9] Found ${acls.length} ACLs in config`);
+            return acls;
+
+        } catch (error: any) {
+            console.error(`[bind9] Failed to sync ACLs from config: ${error.message}`);
+            return [];
+        }
+    }
+
+    /**
+     * Parse named.conf recursively to extract TSIG Keys.
+     * Returns array of { name, algorithm, secret }
+     */
+    async syncKeysFromConfig(): Promise<Array<{ name: string; algorithm: string; secret: string }>> {
+        const keys: Array<{ name: string; algorithm: string; secret: string }> = [];
+        const visited = new Set<string>();
+
+        const parseFile = async (confPath: string) => {
+            if (visited.has(confPath)) return;
+            visited.add(confPath);
+
+            let content: string;
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch { return; }
+
+            // Remove comments
+            const cleaned = content
+                .replace(/\/\/.*$/gm, "")
+                .replace(/#.*$/gm, "")
+                .replace(/\/\*[\s\S]*?\*\//g, "");
+
+            // 1. Process 'include' directives
+            const includeRegex = /include\s+"([^"]+)"\s*;/gi;
+            let includeMatch;
+            while ((includeMatch = includeRegex.exec(cleaned)) !== null) {
+                const includePath = includeMatch[1];
+                let resolvedPath = includePath;
+                if (!path.isAbsolute(includePath)) {
+                    resolvedPath = path.posix.join(BIND9_CONF_DIR, includePath);
+                }
+                await parseFile(resolvedPath);
+            }
+
+            // 2. Parse keys: key "name" { algorithm ...; secret ...; };
+            // Simple regex for standard formatted keys
+            const keyRegex = /key\s+"([^"]+)"\s*{([\s\S]*?)};/g;
+            let match;
+            while ((match = keyRegex.exec(cleaned)) !== null) {
+                const name = match[1];
+                const body = match[2];
+
+                const algoMatch = body.match(/algorithm\s+([^;]+);/);
+                const secretMatch = body.match(/secret\s+"([^"]+)";/);
+
+                if (name && algoMatch && secretMatch) {
+                    keys.push({
+                        name,
+                        algorithm: algoMatch[1].trim(),
+                        secret: secretMatch[1].trim()
+                    });
+                }
+            }
+        };
+
+        // Start from main named.conf to catch all includes
+        const mainConfPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
+        console.log(`[bind9] Syncing keys starting from ${mainConfPath}`);
+        await parseFile(mainConfPath);
+
+        console.log(`[bind9] Sync complete. Found ${keys.length} keys.`);
+        return keys;
+    }
+
     // ── BIND9 Log Reading ───────────────────────────────────────────
 
     /**
@@ -661,6 +836,45 @@ class Bind9Service {
         // Sort by timestamp desc and limit
         logs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
         return logs.slice(0, limit);
+    }
+
+    /** Monitor BIND9 log file and trigger callback on new lines */
+    monitorLogFile(callback: (line: string) => void): void {
+        const logPath = path.posix.join(BIND9_ZONE_DIR, "named.run"); // Default debug log or configured log
+        console.log(`[bind9] Monitoring log file: ${logPath}`);
+
+        try {
+            if (!fs.existsSync(logPath)) {
+                fs.writeFileSync(logPath, ""); // Create if not exists
+            }
+
+            let currentSize = fs.statSync(logPath).size;
+
+            fs.watchFile(logPath, { interval: 1000 }, (curr, prev) => {
+                if (curr.mtime <= prev.mtime) return;
+
+                const newSize = curr.size;
+                if (newSize < currentSize) {
+                    currentSize = newSize; // File truncated
+                    return;
+                }
+
+                const stream = fs.createReadStream(logPath, {
+                    start: currentSize,
+                    end: newSize,
+                    encoding: "utf-8"
+                });
+
+                stream.on("data", (chunk) => {
+                    const lines = (chunk as string).split("\n").filter(Boolean);
+                    lines.forEach(line => callback(line));
+                });
+
+                currentSize = newSize;
+            });
+        } catch (error: any) {
+            console.error(`[bind9] Failed to monitor log file: ${error.message}`);
+        }
     }
 
 
@@ -790,6 +1004,88 @@ class Bind9Service {
         return records;
     }
 
+    /** Ensure named.conf.options includes response-policy */
+    async ensureRpzConfigured(zoneName: string = "rpz.intra"): Promise<void> {
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.options");
+            let content = "";
+            try {
+                content = await this.readRemoteFile(confPath);
+            } catch {
+                console.warn("[bind9] named.conf.options not found, skipping RPZ config.");
+                return;
+            }
+
+            // Check if response-policy is already defined
+            if (!content.includes("response-policy")) {
+                const optionsEndIndex = content.lastIndexOf("};");
+                if (optionsEndIndex !== -1) {
+                    const rpzConfig = `    response-policy { zone "${zoneName}"; };\n`;
+                    const newContent = content.slice(0, optionsEndIndex) + rpzConfig + content.slice(optionsEndIndex);
+                    // Use writeNamedConf to assume backup/restore safety
+                    await this.writeNamedConf("options", newContent);
+                    console.log(`[bind9] Added response-policy to named.conf.options`);
+                } else {
+                    console.warn("[bind9] Could not find options block in named.conf.options to add RPZ.");
+                }
+            }
+
+            // Ensure the zone is defined in named.conf.local
+            // We use a dedicated file for RPZ
+            await this.addZoneToConfig(zoneName, "master", path.posix.join(BIND9_ZONE_DIR, `db.${zoneName}`));
+
+        } catch (error: any) {
+            console.error(`[bind9] Failed to ensure RPZ config: ${error.message}`);
+        }
+    }
+
+    /** Write RPZ zone file */
+    async writeRpzZone(zoneName: string, entries: Array<{ name: string; type: string; target?: string }>): Promise<void> {
+        const filePath = path.posix.join(BIND9_ZONE_DIR, `db.${zoneName}`);
+        const serial = this.generateSerial();
+
+        const lines: string[] = [
+            `; RPZ Firewall Zone: ${zoneName}`,
+            `; Generated by BIND9 Admin Panel`,
+            `$TTL 604800`,
+            `@ IN SOA localhost. root.localhost. (`,
+            `    ${serial} ; Serial`,
+            `    604800     ; Refresh`,
+            `    86400      ; Retry`,
+            `    2419200    ; Expire`,
+            `    604800 )   ; Negative Cache TTL`,
+            `;`,
+            `@ IN NS localhost.`,
+            ``
+        ];
+
+        for (const entry of entries) {
+            const name = entry.name;
+
+            if (entry.type === "nxdomain") {
+                lines.push(`${name}    CNAME   .`);
+                if (!name.startsWith("*.")) lines.push(`*.${name}  CNAME   .`);
+            } else if (entry.type === "nodata") {
+                lines.push(`${name}    CNAME   *.`);
+                if (!name.startsWith("*.")) lines.push(`*.${name}  CNAME   *.`);
+            } else if (entry.type === "redirect" && entry.target) {
+                const isIp = /^\d+\.\d+\.\d+\.\d+$/.test(entry.target);
+                if (isIp) {
+                    lines.push(`${name}    A   ${entry.target}`);
+                    if (!name.startsWith("*.")) lines.push(`*.${name}  A   ${entry.target}`);
+                } else {
+                    const target = entry.target.endsWith(".") ? entry.target : `${entry.target}.`;
+                    lines.push(`${name}    CNAME   ${target}`);
+                    if (!name.startsWith("*.")) lines.push(`*.${name}  CNAME   ${target}`);
+                }
+            }
+        }
+
+        await this.writeRemoteFile(filePath, lines.join("\n") + "\n");
+    }
+
+
+
     private generateZoneFile(
         domain: string,
         records: Array<{ name: string; type: string; value: string; ttl: number; priority?: number }>,
@@ -851,6 +1147,74 @@ class Bind9Service {
         const match = output.match(/worker threads:\s*(\d+)/i);
         return match ? parseInt(match[1]) : os.cpus().length;
     }
+
+    /**
+     * Get DNSSEC information for a zone
+     * Scans BIND9_ZONE_DIR for keys and DS records
+     */
+    async getDnssecInfo(zoneName: string): Promise<{ enabled: boolean; keys: any[]; ds_record?: string }> {
+        try {
+            const files = await this.execCommand(`ls -1 ${BIND9_ZONE_DIR}`);
+            const fileList = files.stdout.split("\n").map(f => f.trim()).filter(f => f);
+
+            // Find key files: Kexample.com.+013+12345.key
+            const keyFiles = fileList.filter(f => f.startsWith(`K${zoneName}.`) && f.endsWith(".key"));
+
+            const keys = [];
+            for (const keyFile of keyFiles) {
+                try {
+                    const content = await this.readRemoteFile(path.posix.join(BIND9_ZONE_DIR, keyFile));
+                    // Check for SEP flag (KSK has 257, ZSK has 256)
+                    const isKsk = content.includes(" 257 ");
+                    // Extract tag from filename: Kdomain.+algo+TAG.key
+                    const tagMatch = keyFile.match(/\+(\d+)\.key$/);
+                    const tag = tagMatch ? tagMatch[1] : "Unknown";
+
+                    // Extract Algo from filename: Kdomain.+ALGO+tag.key
+                    const algoMatch = keyFile.match(/\+0*(\d+)\+\d+\.key$/);
+                    const algo = algoMatch ? algoMatch[1] : "Unknown";
+
+                    keys.push({
+                        id: tag,
+                        type: isKsk ? "KSK" : "ZSK",
+                        algorithm: algo,
+                        file: keyFile,
+                        active: true // Assumption
+                    });
+                } catch (e) {
+                    console.error(`Failed to read key file ${keyFile}:`, e);
+                }
+            }
+
+            // Find DS record file: dsset-example.com.
+            let dsRecord = undefined;
+            const dsFile = `dsset-${zoneName}.`;
+            if (fileList.includes(dsFile)) {
+                try {
+                    const content = await this.readRemoteFile(path.posix.join(BIND9_ZONE_DIR, dsFile));
+                    // DS record format: example.com. IN DS 12345 13 2 XXXXX...
+                    // We only want the data part usually, but let's return the full line for now
+                    const lines = content.split("\n").filter(l => l.includes(" IN DS "));
+                    if (lines.length > 0) {
+                        dsRecord = lines[0].trim();
+                    }
+                } catch (e) {
+                    console.error(`Failed to read DS file ${dsFile}:`, e);
+                }
+            }
+
+            return {
+                enabled: keys.length > 0,
+                keys,
+                ds_record: dsRecord
+            };
+
+        } catch (error: any) {
+            console.error(`[bind9] Failed to get DNSSEC info for ${zoneName}: ${error.message}`);
+            return { enabled: false, keys: [] };
+        }
+    }
+
 }
 
 export const bind9Service = new Bind9Service();

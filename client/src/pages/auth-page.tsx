@@ -2,115 +2,132 @@ import { useAuth } from "@/lib/auth-provider";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { InsertUser } from "@shared/schema";
-import {
-    Form,
-    FormControl,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useLocation } from "wouter";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Loader2, Server, Globe, Shield } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 
 const loginSchema = z.object({
-    username: z.string().min(1, "Username is required"),
-    password: z.string().min(1, "Password is required"),
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
 });
 
 export default function AuthPage() {
-    const { user, login } = useAuth();
-    const [_, setLocation] = useLocation();
+  const { user, login } = useAuth();
+  const [_, setLocation] = useLocation();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (user) {
-            setLocation("/");
-        }
-    }, [user, setLocation]);
+  useEffect(() => {
+    if (user) setLocation("/");
+  }, [user, setLocation]);
 
-    const form = useForm<z.infer<typeof loginSchema>>({
-        resolver: zodResolver(loginSchema),
-        defaultValues: {
-            username: "",
-            password: "",
-        },
-    });
+  const form = useForm<z.infer<typeof loginSchema>>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { username: "", password: "" },
+  });
 
-    const onSubmit = async (data: z.infer<typeof loginSchema>) => {
-        try {
-            await login(data);
-        } catch (error) {
-            // toast handled in login
-        }
-    };
+  const onSubmit = async (data: z.infer<typeof loginSchema>) => {
+    try {
+      setError(null);
+      setLoading(true);
+      await login(data);
+    } catch (err: any) {
+      setError(err?.message || "Invalid credentials");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return (
-        <div className="min-h-screen grid lg:grid-cols-2">
-            <div className="flex items-center justify-center p-8 bg-zinc-950 text-zinc-50">
-                <div className="max-w-md w-full space-y-4">
-                    <div className="flex items-center gap-2 mb-8">
-                        <div className="h-8 w-8 bg-indigo-500 rounded-lg flex items-center justify-center font-bold text-white">B</div>
-                        <h1 className="text-2xl font-bold tracking-tight">BIND9 Admin</h1>
-                    </div>
-
-                    <Card className="border-zinc-800 bg-zinc-900 text-zinc-50">
-                        <CardHeader>
-                            <CardTitle>Welcome back</CardTitle>
-                            <CardDescription className="text-zinc-400">
-                                Enter your credentials to access the admin panel via user: admin pass: admin
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <Form {...form}>
-                                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                                    <FormField
-                                        control={form.control}
-                                        name="username"
-                                        render={({ field }) => (
-                                            <FormItem>
-                                                <FormLabel>Username</FormLabel>
-                                                <FormControl>
-                                                    <Input className="bg-zinc-950 border-zinc-800" {...field} />
-                                                </FormControl>
-                                                <FormMessage />
-                                            </FormItem>
-                                        )}
-                                    />
-                                    <FormField
-                                        control={form.control}
-                                        name="password"
-                                        render={({ field }) => (
-                                            <FormItem>
-                                                <FormLabel>Password</FormLabel>
-                                                <FormControl>
-                                                    <Input type="password" className="bg-zinc-950 border-zinc-800" {...field} />
-                                                </FormControl>
-                                                <FormMessage />
-                                            </FormItem>
-                                        )}
-                                    />
-                                    <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700">
-                                        Login
-                                    </Button>
-                                </form>
-                            </Form>
-                        </CardContent>
-                    </Card>
-                </div>
+  return (
+    <div className="flex min-h-screen bg-background">
+      {/* ── Left panel – Login form ─── */}
+      <div className="flex items-center justify-center p-6 lg:p-10 w-full lg:w-[480px] lg:max-w-[480px] shrink-0">
+        <Card className="w-full max-w-[400px] shadow-lg border-border/50">
+          <CardHeader className="pb-4">
+            {/* Logo */}
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-lg">B</div>
+              <span className="font-bold text-xl tracking-tight">BIND9Admin</span>
             </div>
-            <div className="hidden lg:block bg-zinc-900 relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/20 to-purple-900/20" />
-                <div className="absolute inset-0 flex items-center justify-center p-12">
-                    <div className="text-zinc-400 max-w-md">
-                        <h2 className="text-3xl font-bold text-zinc-100 mb-4">DNS Management Made Simple</h2>
-                        <p>Manage your BIND9 zones, records, ACLs, and TSIG keys through a modern, secure interface.</p>
-                    </div>
+            <h2 className="font-bold text-2xl tracking-tight">Welcome back</h2>
+            <CardDescription>Sign in to access the DNS management panel.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {error && (
+              <div className="mb-4 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+            )}
+
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="admin"
+                  {...form.register("username")}
+                />
+                {form.formState.errors.username && (
+                  <p className="text-sm text-destructive">{form.formState.errors.username.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  {...form.register("password")}
+                />
+                {form.formState.errors.password && (
+                  <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
+                )}
+              </div>
+
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                {loading ? "Signing in..." : "Sign In"}
+              </Button>
+            </form>
+
+            <p className="text-muted-foreground text-center mt-6 text-xs">
+              Default credentials: <code className="rounded bg-muted px-1.5 py-0.5">admin</code> / <code className="rounded bg-muted px-1.5 py-0.5">admin</code>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Right panel – Branding ─── */}
+      <div className="hidden lg:flex flex-col items-center justify-center p-10 flex-1 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white">
+        <div className="max-w-[480px]">
+          <h1 className="font-bold mb-3 text-4xl tracking-tight leading-tight">DNS Management<br />Made Simple</h1>
+          <p className="mb-8 opacity-75 text-lg">
+            Manage your BIND9 zones, records, ACLs, and TSIG keys through a modern, secure interface.
+          </p>
+
+          <div className="flex flex-col gap-5">
+            {[
+              { icon: Globe, title: "Zone Management", desc: "Create and edit DNS zones and records with ease" },
+              { icon: Shield, title: "Security Controls", desc: "ACLs, TSIG keys and firewall RPZ rules" },
+              { icon: Server, title: "Server Monitoring", desc: "Real-time CPU, memory and BIND9 process stats" },
+            ].map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg shrink-0 bg-white/10">
+                  <Icon className="h-5 w-5" />
                 </div>
-            </div>
+                <div>
+                  <div className="font-semibold">{title}</div>
+                  <div className="opacity-60 text-sm">{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-    );
+      </div>
+    </div>
+  );
 }

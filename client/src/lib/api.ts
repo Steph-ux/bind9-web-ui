@@ -11,7 +11,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
         const err = await res.json().catch(() => ({ message: res.statusText }));
         throw new Error(err.message || `HTTP ${res.status}`);
     }
-    return res.json();
+    try {
+        return await res.json();
+    } catch {
+        throw new Error("Server returned an invalid response. Please ensure the backend is running.");
+    }
 }
 
 // ── Dashboard ──────────────────────────────────────────────
@@ -47,7 +51,7 @@ export interface ZoneDetail extends Omit<ZoneData, "records"> {
 
 export const getZones = () => request<ZoneData[]>("/zones");
 export const getZone = (id: string) => request<ZoneDetail>(`/zones/${id}`);
-export const createZone = (data: { domain: string; type: string; adminEmail?: string }) =>
+export const createZone = (data: { domain: string; type: string; adminEmail?: string; autoReverse?: boolean; network?: string }) =>
     request<ZoneData>("/zones", { method: "POST", body: JSON.stringify(data) });
 export const updateZone = (id: string, data: Partial<ZoneData>) =>
     request<ZoneData>(`/zones/${id}`, { method: "PUT", body: JSON.stringify(data) });
@@ -215,3 +219,32 @@ export const deactivateConnections = () =>
 // ── Zone Sync ──────────────────────────────────────────────
 export const syncZones = () =>
     request<{ message: string; total: number; synced: number; skipped: number }>("/zones/sync", { method: "POST" });
+
+// ── Firewall ──────────────────────────────────────────────
+export interface FirewallRule {
+    id: number;
+    to: string;
+    action: "ALLOW" | "DENY" | "REJECT" | "LIMIT";
+    from: string;
+    ipv6: boolean;
+    comment?: string;
+}
+
+export type FirewallBackend = "ufw" | "firewalld" | "iptables" | "nftables" | "none";
+
+export interface FirewallStatus {
+    active: boolean;
+    rules: FirewallRule[];
+    installed: boolean;
+    backend: FirewallBackend;
+    availableBackends: FirewallBackend[];
+}
+
+export const getFirewallStatus = () => request<FirewallStatus>("/firewall/status");
+export const toggleFirewall = (enable: boolean) => request<{ message: string }>("/firewall/toggle", { method: "POST", body: JSON.stringify({ enable }) });
+export const switchFirewallBackend = (backend: FirewallBackend) => request<{ message: string; status: FirewallStatus }>("/firewall/backend", { method: "POST", body: JSON.stringify({ backend }) });
+export const getFirewallRules = () => request<FirewallRule[]>("/firewall/rules");
+export const addFirewallRule = (data: { toPort: string; proto: string; action: string; fromIp: string }) =>
+    request<{ message: string }>("/firewall/rules", { method: "POST", body: JSON.stringify(data) });
+export const deleteFirewallRule = (id: number) =>
+    request<{ message: string }>(`/firewall/rules/${id}`, { method: "DELETE" });

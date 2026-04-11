@@ -16,9 +16,7 @@ app.use(express.urlencoded({ extended: false }));
 // Setup Authentication
 setupAuth(app);
 
-// Register Routes
-// Register Routes
-// Routes registered in async startup block below
+// Register Routes (in async startup block below)
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

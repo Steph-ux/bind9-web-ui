@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect x="4" y="4" width="56" height="56" rx="12" ry="12" fill="url(#bg)"/>
+  <!-- Globe circle -->
+  <circle cx="32" cy="28" r="16" fill="none" stroke="white" stroke-width="2.5" opacity="0.9"/>
+  <!-- Globe horizontal lines -->
+  <ellipse cx="32" cy="28" rx="16" ry="6" fill="none" stroke="white" stroke-width="1.5" opacity="0.6"/>
+  <ellipse cx="32" cy="28" rx="16" ry="11" fill="none" stroke="white" stroke-width="1.5" opacity="0.6"/>
+  <!-- Globe vertical line -->
+  <line x1="32" y1="12" x2="32" y2="44" stroke="white" stroke-width="1.5" opacity="0.6"/>
+  <!-- DNS nodes -->
+  <circle cx="32" cy="12" r="3" fill="#60a5fa"/>
+  <circle cx="48" cy="28" r="3" fill="#60a5fa"/>
+  <circle cx="16" cy="28" r="3" fill="#60a5fa"/>
+  <circle cx="32" cy="44" r="3" fill="#60a5fa"/>
+  <!-- "9" text -->
+  <text x="32" y="57" text-anchor="middle" font-family="Inter,system-ui,sans-serif" font-weight="700" font-size="14" fill="white" opacity="0.95">9</text>
+</svg>

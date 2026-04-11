@@ -16,11 +16,15 @@
 - **Zones** — Création, modification et suppression de zones DNS (master, slave, forward)
 - **Enregistrements** — CRUD complet pour A, AAAA, CNAME, MX, TXT, NS, SOA, PTR, SRV
 - **Fichiers de zone** — Génération et parsing automatique des fichiers de zone BIND9
-- **Vérification** — Validation de la configuration via `named-checkconf` avant application
+- **Reverse DNS Auto** — Création automatique des zones et enregistrements PTR lors de l'ajout de records A
+- **Existing Config Import** — Importation automatique des zones, ACLs et clés depuis `named.conf` (y compris les fichiers inclus)
 
-### Sécurité
-- **ACLs** — Gestion des listes de contrôle d'accès réseau
-- **TSIG Keys** — Création et gestion des clés d'authentification DNS (hmac-sha256, hmac-sha512, hmac-md5)
+### Sécurité & Réseau
+- **ACLs** — Gestion des listes de contrôle d'accès pour sécuriser les requêtes et transferts
+- **Zone Transfers** — Configuration simplifiée pour autoriser les transferts vers les serveurs esclaves (Secondary NS)
+- **TSIG Keys** — Gestion des clés d'authentification (hmac-sha256, etc.) avec support des fichiers `.key` inclus
+- **Firewall** — Gestion du pare-feu avec auto-détection du backend (UFW, firewalld, nftables, iptables), ouverture/fermeture de ports, règles par IP, switch de backend en un clic
+- **RBAC** — Gestion des rôles utilisateurs (Admin, Operator, Viewer)
 
 ### Configuration
 - **Éditeur de configuration** — Édition de `named.conf.options` et `named.conf.local` avec sauvegarde automatique
@@ -30,12 +34,13 @@
 ### Monitoring
 - **Dashboard** — Vue d'ensemble temps réel (zones, records, CPU, mémoire, logs récents)
 - **Server Status** — Métriques système détaillées (CPU, RAM, interfaces réseau, fichiers ouverts)
-- **Logs en temps réel** — Streaming WebSocket des logs avec filtrage et recherche
-- **Commandes rndc** — Exécution directe de commandes rndc (reload, flush, status, stats, reconfig, dumpdb, querylog)
+- **Logs en temps réel** — Streaming WebSocket des logs BIND9 et système avec filtrage
+- **Commandes rndc** — Exécution directe de commandes rndc (reload, flush, status, stats, reconfig, querylog)
 
 ### Connexion SSH distante
 - **Multi-serveur** — Gérez plusieurs serveurs BIND9 depuis un seul panneau
 - **Détection automatique** — Auto-détection des chemins BIND9 sur le serveur distant (Debian, CentOS, FreeBSD)
+- **Auto-détection Firewall** — Détection automatique du backend pare-feu actif et des backends disponibles sur le serveur distant
 - **Test de connexion** — Vérification SSH avec affichage des infos serveur (OS, version BIND9, état)
 - **Basculement** — Passage transparent entre mode local et SSH
 - **Reconnexion** — Restauration automatique de la connexion active au démarrage
@@ -71,7 +76,8 @@ Bind-Config/
 │       │   ├── acls.tsx                  # ACLs & TSIG Keys
 │       │   ├── logs.tsx                  # Logs temps réel (WebSocket)
 │       │   ├── status.tsx                # Métriques serveur
-│       │   └── connections.tsx           # Connexions SSH distantes
+│       │   ├── connections.tsx           # Connexions SSH distantes
+│       │   └── firewall.tsx              # Gestion du pare-feu
 │       ├── lib/
 │       │   └── api.ts                    # Client API typé
 │       └── App.tsx                       # Router
@@ -80,6 +86,7 @@ Bind-Config/
 │   ├── index.ts                 # Point d'entrée serveur
 │   ├── routes.ts                # Tous les endpoints REST + WebSocket
 │   ├── bind9-service.ts         # Service BIND9 (local + SSH)
+│   ├── firewall-service.ts      # Service Pare-feu (UFW/firewalld/nftables/iptables)
 │   ├── ssh-manager.ts           # Gestionnaire de connexions SSH
 │   ├── storage.ts               # Couche d'accès aux données (Drizzle)
 │   ├── db.ts                    # Initialisation SQLite
@@ -110,8 +117,8 @@ Bind-Config/
 ### 1. Cloner le projet
 
 ```bash
-git clone https://github.com/Steph-ux/bind9.git
-cd bind9
+git clone https://github.com/Steph-ux/bind9-web-ui.git
+cd bind9-web-ui
 ```
 
 ### 2. Prérequis Linux (compilation du module SQLite natif)
@@ -272,6 +279,38 @@ Commandes autorisées : `reload`, `flush`, `status`, `stats`, `reconfig`, `dumpd
 | PUT | `/api/connections/:id/activate` | Activer (bascule en mode SSH) |
 | PUT | `/api/connections/deactivate` | Désactiver (retour mode local) |
 
+### Firewall
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/firewall/status` | État du pare-feu (actif/inactif, backend détecté, backends disponibles, règles) |
+| GET | `/api/firewall/rules` | Lister les règles |
+| POST | `/api/firewall/rules` | Ajouter une règle (allow/deny) |
+| DELETE | `/api/firewall/rules/:id` | Supprimer une règle |
+| POST | `/api/firewall/toggle` | Activer/Désactiver le pare-feu |
+| POST | `/api/firewall/backend` | Changer le backend pare-feu (`{ backend: "ufw"\|"firewalld"\|"nftables"\|"iptables" }`) |
+
+> **Backends supportés :** UFW (Debian/Ubuntu), firewalld (RHEL/CentOS/Fedora), nftables, iptables.
+> L'auto-détection s'exécute en un seul appel SSH (~0.5s) et identifie le backend actif ainsi que tous les backends installés.
+> Les règles configurées sont visibles même si le pare-feu est inactif.
+
+---
+
+## Importation de configuration existante
+
+L'application est conçue pour s'adapter à une installation BIND9 existante sans tout écraser.
+
+### Au démarrage
+1. **Détection récursive** : L'app analyse `named.conf` et suit tous les fichiers `include`.
+2. **Zones** : Les zones définies dans `named.conf.local` sont importées en base de données.
+3. **ACLs** : Les ACLs définies dans `named.conf.acls` sont importées.
+4. **Clés TSIG** : Les clés définies dans `named.conf.keys` **ET** dans tout autre fichier inclus (ex: `/etc/bind/transfert.key`) sont importées.
+
+### Gestion des conflits
+- Les données existantes sont préservées.
+- Si une clé (ex: `transfert-key`) est importée, elle apparaîtra dans le dashboard.
+- L'application écrira ensuite cette clé dans `named.conf.keys`.
+- **Recommandation** : Une fois la clé visible dans le dashboard, supprimez l'ancien `include "transfert.key";` de votre `named.conf` pour éviter les avertissements de duplication au redémarrage de BIND9.
+
 ---
 
 ## Base de Données
@@ -339,9 +378,19 @@ npx drizzle-kit studio
 > - Chiffrer les mots de passe en base
 > - Utiliser un coffre-fort de secrets (HashiCorp Vault, etc.)
 > - Privilégier l'authentification par clé SSH
-> **Note :** Les mots de passe SSH sont stockés en base de données en clair.
 > - L'authentification par session et JWT est activée et sécurisée.
 > - Les mots de passe utilisateurs sont hachés (scrypt).
+
+### Configuration sudoers pour SSH distant
+
+Pour que les commandes BIND9 et pare-feu fonctionnent sans mot de passe sudo sur le serveur distant, ajoutez cette entrée dans `/etc/sudoers.d/bind9` :
+
+```bash
+echo "<utilisateur> ALL=(ALL) NOPASSWD: /usr/sbin/rndc, /usr/sbin/named, /usr/sbin/named-checkconf, /usr/sbin/ufw, /usr/sbin/nft, /usr/sbin/iptables, /usr/sbin/iptables-save, /usr/bin/firewall-cmd, /usr/bin/systemctl" > /etc/sudoers.d/bind9
+chmod 440 /etc/sudoers.d/bind9
+```
+
+> **Important :** Sans cette configuration, les opérations pare-feu et rndc via SSH renverront une erreur "sudo: a password is required".
 
 ---
 

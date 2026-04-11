@@ -5,7 +5,8 @@ import os from "os";
 import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
-import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema } from "@shared/schema";
+import { firewallService } from "./firewall-service";
+import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
 import { z } from "zod";
 
 import { hashPassword } from "./auth";
@@ -34,8 +35,142 @@ export async function registerRoutes(
     next();
   };
 
+  // Middleware to ensure user is admin or operator
+  const requireOperator = (req: Request, res: Response, next: Function) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "Unauthorized" });
+    const role = (req.user as any).role;
+    if (role !== "admin" && role !== "operator") return res.status(403).json({ message: "Forbidden" });
+    next();
+  };
+
   // Protect all API routes defined below
   app.use("/api", requireAuth);
+
+  // ── Firewall Management (Admin Only) ──────────────────────────
+  app.get("/api/firewall/status", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const status = await firewallService.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/toggle", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { enable } = req.body;
+      await firewallService.toggle(enable);
+      res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/backend", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { backend } = req.body;
+      if (!backend) return res.status(400).json({ message: "Backend is required" });
+      firewallService.setBackend(backend);
+      const status = await firewallService.getStatus();
+      res.json({ message: `Switched to ${backend}`, status });
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/firewall/rules", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const { rules } = await firewallService.getStatus();
+      res.json(rules);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/firewall/rules", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { toPort, proto, action, fromIp } = req.body;
+      if (!toPort) return res.status(400).json({ message: "Port is required" });
+
+      await firewallService.addRule(toPort, proto || "tcp", action || "allow", fromIp || "any");
+      res.json({ message: "Rule added" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/firewall/rules/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(String(req.params.id));
+      await firewallService.deleteRule(id);
+      res.json({ message: "Rule deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ── DNS Firewall (RPZ) ────────────────────────────────────────
+  app.get("/api/rpz", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const entries = await storage.getRpzEntries();
+      res.json(entries);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/rpz", requireOperator, async (req: Request, res: Response) => {
+    try {
+      // Validate input
+      const data = insertRpzEntrySchema.parse(req.body);
+
+      // Create in DB
+      const entry = await storage.createRpzEntry(data);
+
+      // Sync to BIND9
+      const allEntries = await storage.getRpzEntries();
+      const zoneEntries = allEntries.map(e => ({
+        name: e.name,
+        type: e.type,
+        target: e.target || undefined
+      }));
+
+      await bind9Service.ensureRpzConfigured(); // Ensure config exists
+      await bind9Service.writeRpzZone("rpz.intra", zoneEntries);
+      await bind9Service.reload();
+
+      res.json(entry);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/rpz/:id", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const id = String(req.params.id);
+      await storage.deleteRpzEntry(id);
+
+      // Sync to BIND9
+      const allEntries = await storage.getRpzEntries();
+      const zoneEntries = allEntries.map(e => ({
+        name: e.name,
+        type: e.type,
+        target: e.target || undefined
+      }));
+
+      await bind9Service.ensureRpzConfigured();
+      await bind9Service.writeRpzZone("rpz.intra", zoneEntries);
+      await bind9Service.reload();
+
+      res.json({ message: "Entry deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
 
   // ── Users Management (Admin Only) ─────────────────────────────
   app.get("/api/users", requireAdmin, async (req: Request, res: Response) => {
@@ -110,6 +245,8 @@ export async function registerRoutes(
   });
 
 
+
+
   // ── Restore active SSH connection on startup ──────────────────
   try {
     const activeConn = await storage.getActiveConnection();
@@ -145,8 +282,42 @@ export async function registerRoutes(
   try {
     if (await bind9Service.isAvailable()) {
       console.log("[startup] Syncing ACLs and Keys...");
+
+      // 1. Import existing ACLs from file if DB is empty or missing them
+      const existingAcls = await bind9Service.syncAclsFromConfig();
+      const currentDbAcls = await storage.getAcls();
+
+      for (const fileAcl of existingAcls) {
+        if (!currentDbAcls.find(a => a.name === fileAcl.name)) {
+          console.log(`[startup] Importing ACL '${fileAcl.name}' from named.conf.acls`);
+          await storage.createAcl({
+            name: fileAcl.name,
+            networks: fileAcl.networks,
+            comment: "Imported from named.conf.acls"
+          });
+        }
+      }
+
+      // 2. Write back to ensuring loose consistency
       const allAcls = await storage.getAcls();
       await bind9Service.writeAclsConf(allAcls);
+
+      // 3. Import existing Keys from file (recursively) if DB is empty or missing them
+      const existingKeys = await bind9Service.syncKeysFromConfig();
+      const currentDbKeys = await storage.getKeys();
+
+      for (const fileKey of existingKeys) {
+        if (!currentDbKeys.find(k => k.name === fileKey.name)) {
+          console.log(`[startup] Importing Key '${fileKey.name}' from config`);
+          await storage.createKey({
+            name: fileKey.name,
+            algorithm: fileKey.algorithm as any,
+            secret: fileKey.secret
+          });
+        }
+      }
+
+      // 4. Write back keys
       const allKeys = await storage.getKeys();
       await bind9Service.writeKeysConf(allKeys);
       await bind9Service.ensureConfigIncludes();
@@ -271,7 +442,7 @@ export async function registerRoutes(
 
   /** Sync zones from BIND9 config files into the database */
   /** Sync zones from BIND9 config files into the database */
-  app.post("/api/zones/sync", async (_req: Request, res: Response) => {
+  app.post("/api/zones/sync", requireOperator, async (_req: Request, res: Response) => {
     try {
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
@@ -382,15 +553,24 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/zones", async (req: Request, res: Response) => {
+  app.post("/api/zones", requireOperator, async (req: Request, res: Response) => {
     try {
+      // Validate schema (allowing extra fields not in DB schema)
       const data = insertZoneSchema.parse(req.body);
+
+      // Extract extra fields
+      const { autoReverse, network } = req.body;
+
+      // 1. Create the requested zone
       const zone = await storage.createZone(data);
 
       try {
         if (await bind9Service.isAvailable()) {
+          // Write empty zone file
           await bind9Service.writeZoneFile(zone.filePath, zone.domain, [], zone.serial);
-          await bind9Service.reload();
+
+          // Add to named.conf.local
+          await bind9Service.addZoneToConfig(zone.domain, zone.type, zone.filePath);
         }
       } catch (e: any) {
         await storage.insertLog({
@@ -406,6 +586,50 @@ export async function registerRoutes(
         message: `Zone ${zone.domain} created (type: ${zone.type})`,
       });
 
+      // 2. Handle Auto-Reverse Zone
+      if (autoReverse && network && zone.type === "master") {
+        try {
+          // Calculate reverse domain: 192.168.1 -> 1.168.192.in-addr.arpa
+          const parts = network.split(".").filter(Boolean);
+          const reverseDomain = parts.reverse().join(".") + ".in-addr.arpa";
+
+          // Check if already exists
+          const existing = await storage.getZones();
+          if (!existing.find(z => z.domain === reverseDomain)) {
+
+            const reverseZone = await storage.createZone({
+              domain: reverseDomain,
+              type: "master",
+              adminEmail: zone.adminEmail,
+            });
+
+            if (await bind9Service.isAvailable()) {
+              // Write empty zone file for reverse
+              await bind9Service.writeZoneFile(reverseZone.filePath, reverseZone.domain, [], reverseZone.serial);
+              // Add to named.conf.local
+              await bind9Service.addZoneToConfig(reverseZone.domain, "master", reverseZone.filePath);
+            }
+
+            await storage.insertLog({
+              level: "INFO",
+              source: "zones",
+              message: `Auto-created reverse zone ${reverseDomain} for network ${network}`,
+            });
+          }
+        } catch (revError: any) {
+          await storage.insertLog({
+            level: "WARN",
+            source: "zones",
+            message: `Failed to auto-create reverse zone: ${revError.message}`,
+          });
+        }
+      }
+
+      // Reload BIND9 once at the end
+      if (await bind9Service.isAvailable()) {
+        await bind9Service.reload();
+      }
+
       res.status(201).json(zone);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -415,7 +639,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/zones/:id", async (req: Request, res: Response) => {
+  app.put("/api/zones/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -427,12 +651,22 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/zones/:id", async (req: Request, res: Response) => {
+  app.delete("/api/zones/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
       await storage.deleteZone(id);
+
+      // Remove from named.conf.local
+      try {
+        if (await bind9Service.isAvailable()) {
+          await bind9Service.removeZoneFromConfig(zone.domain);
+          await bind9Service.reload();
+        }
+      } catch (e: any) {
+        console.error(`[api] Failed to remove zone from config: ${e.message}`);
+      }
 
       await storage.insertLog({
         level: "WARN",
@@ -606,7 +840,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/zones/:id/records", async (req: Request, res: Response) => {
+  app.post("/api/zones/:id/records", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -636,7 +870,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/records/:id", async (req: Request, res: Response) => {
+  app.put("/api/records/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
@@ -656,7 +890,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/records/:id", async (req: Request, res: Response) => {
+  app.delete("/api/records/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
@@ -705,7 +939,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/config/:section", async (req: Request, res: Response) => {
+  app.put("/api/config/:section", requireAdmin, async (req: Request, res: Response) => {
     try {
       const section = req.params.section as string;
       const { content } = req.body;
@@ -752,7 +986,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/acls", async (req: Request, res: Response) => {
+  app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
     try {
       const data = insertAclSchema.parse(req.body);
       const acl = await storage.createAcl(data);
@@ -783,7 +1017,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/acls/:id", async (req: Request, res: Response) => {
+  app.put("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
@@ -807,7 +1041,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/acls/:id", async (req: Request, res: Response) => {
+  app.delete("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
@@ -837,22 +1071,25 @@ export async function registerRoutes(
     }
   });
 
+
   // ══════════════════════════════════════════════════════════════
   //  TSIG KEYS
   // ══════════════════════════════════════════════════════════════
   app.get("/api/keys", async (_req: Request, res: Response) => {
     try {
       const keys = await storage.getKeys();
-      res.json(keys.map(k => ({
+      // Hide secrets
+      const safeKeys = keys.map(k => ({
         ...k,
-        secret: k.secret.slice(0, 5) + "...[hidden]",
-      })));
+        secret: k.secret.slice(0, 5) + "...[hidden]"
+      }));
+      res.json(safeKeys);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });
 
-  app.post("/api/keys", async (req: Request, res: Response) => {
+  app.post("/api/keys", requireOperator, async (req: Request, res: Response) => {
     try {
       const data = insertTsigKeySchema.parse(req.body);
       const key = await storage.createKey(data);
@@ -860,7 +1097,7 @@ export async function registerRoutes(
       await storage.insertLog({
         level: "INFO",
         source: "security",
-        message: `TSIG key '${key.name}' created (${key.algorithm})`,
+        message: `TSIG key '${key.name}' created`,
       });
 
       // Sync to BIND9
@@ -886,7 +1123,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/keys/:id", async (req: Request, res: Response) => {
+  app.delete("/api/keys/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const key = await storage.getKey(id);
@@ -915,6 +1152,81 @@ export async function registerRoutes(
       res.status(500).json({ message: error.message });
     }
   });
+
+  // ══════════════════════════════════════════════════════════════
+  //  ACLs
+  // ══════════════════════════════════════════════════════════════
+  app.get("/api/acls", async (_req: Request, res: Response) => {
+    try {
+      const acls = await storage.getAcls();
+      res.json(acls);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const data = insertAclSchema.parse(req.body);
+      const acl = await storage.createAcl(data);
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "security",
+        message: `ACL '${acl.name}' created`,
+      });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
+      res.status(201).json(acl);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const acl = await storage.getAcl(id);
+      if (!acl) return res.status(404).json({ message: "ACL not found" });
+
+      await storage.deleteAcl(id);
+
+      await storage.insertLog({
+        level: "WARN",
+        source: "security",
+        message: `ACL '${acl.name}' deleted`,
+      });
+
+      // Sync to BIND9
+      try {
+        if (await bind9Service.isAvailable()) {
+          const allAcls = await storage.getAcls();
+          await bind9Service.writeAclsConf(allAcls);
+          await bind9Service.rndc("reconfig");
+        }
+      } catch (e: any) {
+        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      }
+
+      res.json({ message: "ACL deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
 
   // ══════════════════════════════════════════════════════════════
   //  LOGS
@@ -1059,7 +1371,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/connections", async (req: Request, res: Response) => {
+  app.post("/api/connections", requireAdmin, async (req: Request, res: Response) => {
     try {
       const data = insertConnectionSchema.parse(req.body);
       const conn = await storage.createConnection(data);
@@ -1083,7 +1395,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/connections/:id", async (req: Request, res: Response) => {
+  app.put("/api/connections/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1105,7 +1417,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/connections/:id", async (req: Request, res: Response) => {
+  app.delete("/api/connections/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1132,7 +1444,7 @@ export async function registerRoutes(
   });
 
   /** Test SSH connectivity */
-  app.post("/api/connections/:id/test", async (req: Request, res: Response) => {
+  app.post("/api/connections/:id/test", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1170,7 +1482,7 @@ export async function registerRoutes(
   });
 
   /** Test SSH connectivity with inline credentials (no saved connection) */
-  app.post("/api/connections/test", async (req: Request, res: Response) => {
+  app.post("/api/connections/test", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { host, port, username, authType, password, privateKey } = req.body;
       if (!host || !username) {
@@ -1193,7 +1505,7 @@ export async function registerRoutes(
   });
 
   /** Activate a connection — switches bind9-service to SSH mode */
-  app.put("/api/connections/:id/activate", async (req: Request, res: Response) => {
+  app.put("/api/connections/:id/activate", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const conn = await storage.getConnection(id);
@@ -1246,7 +1558,7 @@ export async function registerRoutes(
   });
 
   /** Deactivate — switch back to local mode */
-  app.put("/api/connections/deactivate", async (_req: Request, res: Response) => {
+  app.put("/api/connections/deactivate", requireAdmin, async (_req: Request, res: Response) => {
     try {
       sshManager.disconnect();
       sshManager.setConfig(null);
@@ -1264,6 +1576,7 @@ export async function registerRoutes(
       res.status(500).json({ message: error.message });
     }
   });
+
 
   // ══════════════════════════════════════════════════════════════
   //  WEBSOCKET — Live Logs
@@ -1302,6 +1615,23 @@ export async function registerRoutes(
     message: "BIND9 Admin Panel server started",
   });
 
+  // ══════════════════════════════════════════════════════════════
+  //  BIND9 LOG MONITORING
+  // ══════════════════════════════════════════════════════════════
+  bind9Service.monitorLogFile(async (line) => {
+    // Basic parsing to extract level if possible, else default to INFO
+    let level: "INFO" | "WARN" | "ERROR" = "INFO";
+    if (/error|fail/i.test(line)) level = "ERROR";
+    else if (/warning/i.test(line)) level = "WARN";
+
+    // Insert into storage (which broadcasts via WS)
+    await storage.insertLog({
+      level,
+      source: "bind9",
+      message: line.substring(0, 500),
+    });
+  });
+
   return httpServer;
 }
 
@@ -1327,11 +1657,19 @@ function getDefaultConfig(section: string): string {
 
     // Access
     allow-query { localhost; 192.168.0.0/16; };
-    allow-transfer { none; };
+    allow-transfer { trusted-transfer; };
     allow-recursion { trusted-clients; };
 
-    // Logging
-    querylog yes;
+    // Logging - Write to file for Admin Panel to read
+    logging {
+        channel default_file {
+            file "named.run" versions 3 size 5m;
+            severity dynamic;
+            print-time yes;
+        };
+        category default { default_file; };
+        category queries { default_file; };
+    };
 };`;
   }
   if (section === "local") {

@@ -1,26 +1,25 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
+import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Card } from "@/components/ui/card";
+import { Plus, Search, FileEdit, Trash2, Globe, RefreshCcw, Loader2, LayoutGrid, List as ListIcon, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow
-} from "@/components/ui/table";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, FileEdit, Trash2, Globe, RefreshCcw, Loader2 } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { getZones, createZone, deleteZone, syncZones, type ZoneData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Zones() {
   const [, setLocation] = useLocation();
   const [zones, setZones] = useState<ZoneData[]>([]);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -28,8 +27,12 @@ export default function Zones() {
   const [newDomain, setNewDomain] = useState("");
   const [newType, setNewType] = useState("master");
   const [newAdmin, setNewAdmin] = useState("");
+  const [autoReverse, setAutoReverse] = useState(false);
+  const [network, setNetwork] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ZoneData | null>(null);
   const { toast } = useToast();
+  const { canManageDNS } = useAuth();
 
   const fetchZones = async () => {
     try {
@@ -56,12 +59,20 @@ export default function Zones() {
     }
     try {
       setCreating(true);
-      await createZone({ domain: newDomain.trim(), type: newType, adminEmail: newAdmin.trim() || undefined });
+      await createZone({
+        domain: newDomain.trim(),
+        type: newType,
+        adminEmail: newAdmin.trim() || undefined,
+        autoReverse: newType === "master" ? autoReverse : undefined,
+        network: newType === "master" && autoReverse ? network.trim() : undefined
+      });
       toast({ title: "Success", description: `Zone ${newDomain} created` });
       setIsDialogOpen(false);
       setNewDomain("");
       setNewType("master");
       setNewAdmin("");
+      setAutoReverse(false);
+      setNetwork("");
       fetchZones();
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -71,195 +82,298 @@ export default function Zones() {
   };
 
   const handleDelete = async (zone: ZoneData) => {
-    if (!confirm(`Delete zone ${zone.domain}? This action cannot be undone.`)) return;
     try {
       await deleteZone(zone.id);
       toast({ title: "Deleted", description: `Zone ${zone.domain} removed` });
+      setDeleteTarget(null);
       fetchZones();
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     }
   };
 
+  const statusColor = (status: string) =>
+    status === 'active' ? 'bg-green-500' : status === 'syncing' ? 'bg-yellow-500' : 'bg-red-500';
+
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">Zone Management</h1>
-          <p className="text-muted-foreground mt-1">Configure authoritative zones and forwarders.</p>
+          <h2 className="text-2xl font-bold tracking-tight">Zone Management</h2>
+          <p className="text-muted-foreground">Configure authoritative zones and forwarders.</p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            className="gap-2"
-            disabled={syncing}
-            onClick={async () => {
-              setSyncing(true);
-              try {
-                const result = await syncZones();
-                toast({
-                  title: "Sync complete",
-                  description: `${result.synced} zones imported, ${result.skipped} already existed (${result.total} total in BIND9)`,
-                });
-                fetchZones();
-              } catch (e: any) {
-                toast({ title: "Sync failed", description: e.message, variant: "destructive" });
-              } finally {
-                setSyncing(false);
-              }
-            }}
-          >
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
-            Sync from BIND9
-          </Button>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2 shadow-[0_0_15px_rgba(0,240,255,0.3)]">
-                <Plus className="w-4 h-4" /> Add New Zone
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px] border-primary/20 bg-card/95 backdrop-blur-xl">
-              <DialogHeader>
-                <DialogTitle>Create Zone</DialogTitle>
-                <DialogDescription>
-                  Add a new master or slave zone to the configuration.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="domain" className="text-right">Domain</Label>
-                  <Input
-                    id="domain"
-                    placeholder="example.com"
-                    className="col-span-3 font-mono"
-                    value={newDomain}
-                    onChange={(e) => setNewDomain(e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="type" className="text-right">Type</Label>
-                  <Select value={newType} onValueChange={setNewType}>
-                    <SelectTrigger className="col-span-3">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="master">Master</SelectItem>
-                      <SelectItem value="slave">Slave</SelectItem>
-                      <SelectItem value="forward">Forward</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="admin" className="text-right">Admin Email</Label>
-                  <Input
-                    id="admin"
-                    placeholder="hostmaster@example.com"
-                    className="col-span-3"
-                    value={newAdmin}
-                    onChange={(e) => setNewAdmin(e.target.value)}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button onClick={handleCreate} disabled={creating}>
-                  {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Create Zone
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          {canManageDNS && (
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={syncing}
+              onClick={async () => {
+                setSyncing(true);
+                try {
+                  const result = await syncZones();
+                  toast({
+                    title: "Sync complete",
+                    description: `${result.synced} zones imported, ${result.skipped} already existed (${result.total} total in BIND9)`,
+                  });
+                  fetchZones();
+                } catch (e: any) {
+                  toast({ title: "Sync failed", description: e.message, variant: "destructive" });
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+            >
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              Sync from BIND9
+            </Button>
+          )}
+          {canManageDNS && (
+            <Button className="gap-2" onClick={() => setIsDialogOpen(true)}>
+              <Plus className="h-4 w-4" /> Add New Zone
+            </Button>
+          )}
         </div>
+      </div>
 
-        <Card className="glass-panel border-primary/10">
-          <div className="p-4 border-b border-border/40 flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Search zones..."
-                className="pl-9 bg-background/50 border-primary/10 focus:border-primary/50"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
+      <Card>
+        <CardHeader className="p-4 border-b flex flex-row items-center justify-between gap-3 flex-wrap">
+          <div className="relative flex-1" style={{ maxWidth: "300px" }}>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              className="pl-9"
+              placeholder="Search zones..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-2">
             <Button variant="outline" size="icon" title="Refresh" onClick={fetchZones} disabled={loading}>
               <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
+            <div className="flex rounded-md border">
+              <Button
+                variant={viewMode === "grid" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("grid")}
+                title="Grid View"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === "list" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("list")}
+                title="List View"
+              >
+                <ListIcon className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-          <Table>
-            <TableHeader className="bg-muted/30">
-              <TableRow className="hover:bg-transparent border-border/40">
-                <TableHead className="w-[300px]">Zone Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Records</TableHead>
-                <TableHead className="font-mono">Serial</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading && zones.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" />
-                  </TableCell>
-                </TableRow>
-              ) : filteredZones.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    {searchTerm ? "No zones match your search" : "No zones configured. Click 'Add New Zone' to get started."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredZones.map((zone) => (
-                  <TableRow key={zone.id} className="hover:bg-primary/5 border-border/40 transition-colors">
-                    <TableCell className="font-medium">
+        </CardHeader>
+
+        {loading && zones.length === 0 ? (
+          <div className="p-8 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+          </div>
+        ) : filteredZones.length === 0 ? (
+          <div className="p-8 text-center text-muted-foreground">
+            {searchTerm ? "No zones match your search" : "No zones configured. Click 'Add New Zone' to get started."}
+          </div>
+        ) : viewMode === "grid" ? (
+          <CardContent className="p-4 bg-muted/30">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filteredZones.map((zone) => (
+                <Card key={zone.id} className="relative overflow-hidden">
+                  <div className={`absolute top-0 left-0 h-full ${statusColor(zone.status)}`} style={{ width: "4px" }} />
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded bg-primary/10 text-primary">
-                          <Globe className="w-4 h-4" />
+                        <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-primary">
+                          <Globe className="h-5 w-5" />
                         </div>
-                        <span className="font-mono text-sm">{zone.domain}</span>
+                        <div>
+                          <h5 className="font-mono font-medium text-sm truncate max-w-[160px]" title={zone.domain}>
+                            {zone.domain}
+                          </h5>
+                          <Badge variant="outline" className="mt-1 uppercase text-xs">{zone.type}</Badge>
+                        </div>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="font-normal border-primary/20 bg-primary/5 text-primary-foreground/80 capitalize">
-                        {zone.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{zone.records}</TableCell>
-                    <TableCell className="font-mono text-muted-foreground text-xs">{zone.serial || "—"}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${zone.status === 'active' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' :
-                          zone.status === 'syncing' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'
-                          }`} />
-                        <span className="text-sm capitalize">{zone.status}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
+                      {canManageDNS && (
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setLocation(`/zones/${zone.id}`)} title="Edit Records">
+                            <FileEdit className="h-3.5 w-3.5 text-primary" />
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
-                            <FileEdit className="w-4 h-4" /> Edit Records
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => handleDelete(zone)}>
-                            <Trash2 className="w-4 h-4" /> Delete Zone
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </div>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteTarget(zone)} title="Delete Zone">
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div className="rounded-md border bg-muted/50 p-2">
+                        <small className="text-muted-foreground block mb-0.5 text-[11px]">Records</small>
+                        <span className="font-mono font-semibold text-sm">{zone.records}</span>
+                      </div>
+                      <div className="rounded-md border bg-muted/50 p-2">
+                        <small className="text-muted-foreground block mb-0.5 text-[11px]">Serial</small>
+                        <span className="font-mono font-semibold text-sm">{zone.serial || "—"}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t pt-3 mt-auto">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full animate-pulse ${statusColor(zone.status)}`} />
+                        <small className="text-muted-foreground capitalize">{zone.status}</small>
+                      </div>
+                      {canManageDNS && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-primary gap-1 h-7"
+                          onClick={() => setLocation(`/zones/${zone.id}`)}
+                        >
+                          Manage <FileEdit className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="h-10 px-4 text-left font-medium text-muted-foreground">Zone Name</th>
+                  <th className="h-10 px-4 text-left font-medium text-muted-foreground">Type</th>
+                  <th className="h-10 px-4 text-left font-medium text-muted-foreground">Records</th>
+                  <th className="h-10 px-4 text-left font-medium text-muted-foreground">Serial</th>
+                  <th className="h-10 px-4 text-left font-medium text-muted-foreground">Status</th>
+                  {canManageDNS && <th className="h-10 px-4 text-right font-medium text-muted-foreground">Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredZones.map((zone) => (
+                  <tr key={zone.id} className="border-b hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-primary">
+                          <Globe className="h-3.5 w-3.5" />
+                        </div>
+                        <span className="font-mono font-medium">{zone.domain}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant="outline" className="capitalize">{zone.type}</Badge>
+                    </td>
+                    <td className="px-4 py-3">{zone.records}</td>
+                    <td className="px-4 py-3 font-mono text-muted-foreground text-xs">{zone.serial || "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2 w-2 rounded-full animate-pulse ${statusColor(zone.status)}`} />
+                        <span className="capitalize text-xs">{zone.status}</span>
+                      </div>
+                    </td>
+                    {canManageDNS && (
+                      <td className="px-4 py-3 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
+                              <FileEdit className="h-4 w-4" /> Edit Records
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteTarget(zone)}>
+                              <Trash2 className="h-4 w-4" /> Delete Zone
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Create Zone Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Zone</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="domain">Domain Name</Label>
+              <Input id="domain" placeholder="example.com" value={newDomain} onChange={(e) => setNewDomain(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="type">Zone Type</Label>
+              <Select value={newType} onValueChange={setNewType}>
+                <SelectTrigger id="type">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="master">Master</SelectItem>
+                  <SelectItem value="slave">Slave</SelectItem>
+                  <SelectItem value="forward">Forward</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="admin">Admin Email</Label>
+              <Input id="admin" placeholder="admin.example.com" value={newAdmin} onChange={(e) => setNewAdmin(e.target.value)} />
+            </div>
+            {newType === "master" && (
+              <div className="flex items-center gap-2">
+                <Checkbox id="autoReverse" checked={autoReverse} onCheckedChange={(v) => setAutoReverse(!!v)} />
+                <Label htmlFor="autoReverse">Auto-create reverse zone</Label>
+              </div>
+            )}
+            {newType === "master" && autoReverse && (
+              <div className="grid gap-2">
+                <Label htmlFor="network">Network (CIDR)</Label>
+                <Input id="network" placeholder="192.168.1.0/24" value={network} onChange={(e) => setNetwork(e.target.value)} />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={creating}>
+              {creating && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Create Zone
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Zone</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{deleteTarget?.domain}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && handleDelete(deleteTarget)}>
+              Delete Zone
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
