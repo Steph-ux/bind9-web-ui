@@ -117,8 +117,8 @@ Bind-Config/
 ### 1. Cloner le projet
 
 ```bash
-git clone https://github.com/Steph-ux/bind9.git
-cd bind9
+git clone https://github.com/Steph-ux/bind9-web-ui.git
+cd bind9-web-ui
 ```
 
 ### 2. Prérequis Linux (compilation du module SQLite natif)
