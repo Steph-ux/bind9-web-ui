@@ -16,6 +16,23 @@ A modern web interface for managing BIND9 DNS servers (zones, records, ACLs, TSI
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Dashboard</b></td>
+    <td align="center"><b>Zone Management</b></td>
+    <td align="center"><b>Real-time Logs</b></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/dashboard.png" alt="Dashboard" width="400" /></td>
+    <td><img src="screenshots/zones.png" alt="Zone Management" width="400" /></td>
+    <td><img src="screenshots/logs.png" alt="Real-time Logs" width="400" /></td>
+  </tr>
+</table>
+
+---
+
 ## Fonctionnalités
 
 ### DNS Management
