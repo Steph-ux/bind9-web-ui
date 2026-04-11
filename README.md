@@ -1,4 +1,10 @@
-# BIND9 Admin Panel
+# BIND9 Web UI / Admin Panel
+
+A modern web interface for managing BIND9 DNS servers (zones, records, ACLs, TSIG, firewall, SSH remote control).
+
+> Replace manual config editing with a full-featured dashboard.
+
+<!-- keywords: bind9 web ui, dns manager, dns control panel, self hosted dns -->
 
 > Panneau d'administration web complet pour serveurs **BIND9**, avec support de gestion **locale** et **distante via SSH**.
 
