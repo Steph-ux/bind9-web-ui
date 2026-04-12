@@ -451,3 +451,44 @@ export const setReplicationZoneBindings = (serverId: string, bindings: { zoneId:
         method: "PUT",
         body: JSON.stringify({ bindings }),
     });
+
+// ── Health Checks ───────────────────────────────────────────────
+export interface HealthCheckEntry {
+    id: string;
+    serverId: string;
+    status: "healthy" | "degraded" | "down";
+    latencyMs: number | null;
+    details: string;
+    checkedAt: string;
+}
+
+export const getHealthChecks = (serverId?: string, limit?: number) =>
+    request<HealthCheckEntry[]>(`/health-checks${serverId ? `?serverId=${serverId}` : ""}${limit ? `${serverId ? "&" : "?"}limit=${limit}` : ""}`);
+export const runHealthChecks = () =>
+    request<HealthCheckEntry[]>("/health-checks/run", { method: "POST" });
+
+// ── Notification Channels ────────────────────────────────────────
+export interface NotificationChannelEntry {
+    id: string;
+    name: string;
+    type: "email" | "webhook" | "slack";
+    config: string;
+    enabled: boolean;
+    events: string;
+    createdAt: string;
+}
+
+export const getNotificationChannels = () =>
+    request<NotificationChannelEntry[]>("/notification-channels");
+export const createNotificationChannel = (data: { name: string; type: "email" | "webhook" | "slack"; config: Record<string, string>; enabled?: boolean; events?: string }) =>
+    request<NotificationChannelEntry>("/notification-channels", {
+        method: "POST",
+        body: JSON.stringify(data),
+    });
+export const updateNotificationChannel = (id: string, data: Partial<NotificationChannelEntry>) =>
+    request<NotificationChannelEntry>(`/notification-channels/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+    });
+export const deleteNotificationChannel = (id: string) =>
+    request<{ message: string }>(`/notification-channels/${id}`, { method: "DELETE" });

@@ -11,6 +11,7 @@ import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
 import { firewallService } from "./firewall-service";
 import { replicationService } from "./replication-service";
+import { healthService } from "./health-service";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -43,6 +44,14 @@ function safeError(status: number, message: string): string {
     return "Internal Server Error";
   }
   return message;
+}
+
+/** Mask sensitive fields in notification channel config */
+function maskNotificationConfig(config: Record<string, any>, type: string): Record<string, any> {
+  const masked = { ...config };
+  if (masked.webhookUrl) masked.webhookUrl = masked.webhookUrl.replace(/\/[^/]+$/, "/***");
+  if (masked.email) masked.email = masked.email.replace(/^(.).*(@.*)$/, "$1***$2");
+  return masked;
 }
 
 export async function registerRoutes(
@@ -1027,6 +1036,85 @@ export async function registerRoutes(
         message: `Zone bindings updated for server ${serverId} (${bindings.length} zones)`,
       });
       res.json({ message: "Zone bindings updated" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  // ── Health Checks ──────────────────────────────────────────────
+  app.get("/api/health-checks", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const serverId = req.query.serverId as string | undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const checks = await storage.getHealthChecks(serverId, limit);
+      res.json(checks);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/health-checks/run", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const results = await healthService.runCheck();
+      res.json(results);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  // ── Notification Channels ──────────────────────────────────────
+  app.get("/api/notification-channels", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const channels = await storage.getNotificationChannels();
+      // Mask sensitive config
+      res.json(channels.map(c => {
+        try {
+          const config = JSON.parse(c.config);
+          return { ...c, config: JSON.stringify(maskNotificationConfig(config, c.type)) };
+        } catch { return c; }
+      }));
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/notification-channels", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { name, type, config, enabled, events } = req.body;
+      if (!name || !type || !config) return res.status(400).json({ message: "name, type, config required" });
+      const channel = await storage.createNotificationChannel({
+        name, type, config: typeof config === "string" ? config : JSON.stringify(config),
+        enabled: enabled !== false,
+        events: events || "server_down,conflict_detected,health_degraded",
+      });
+      res.json(channel);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.put("/api/notification-channels/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const updates: Record<string, any> = {};
+      if (req.body.name !== undefined) updates.name = String(req.body.name);
+      if (req.body.type !== undefined) updates.type = String(req.body.type);
+      if (req.body.config !== undefined) updates.config = typeof req.body.config === "string" ? req.body.config : JSON.stringify(req.body.config);
+      if (req.body.enabled !== undefined) updates.enabled = Boolean(req.body.enabled);
+      if (req.body.events !== undefined) updates.events = String(req.body.events);
+      const channel = await storage.updateNotificationChannel(id, updates);
+      res.json(channel);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.delete("/api/notification-channels/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const deleted = await storage.deleteNotificationChannel(id);
+      if (!deleted) return res.status(404).json({ message: "Channel not found" });
+      res.json({ message: "Channel deleted" });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -2578,6 +2666,9 @@ export async function registerRoutes(
       message: line.substring(0, 500),
     });
   });
+
+  // Start periodic health checks (every 60s)
+  healthService.start(60_000);
 
   return httpServer;
 }

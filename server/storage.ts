@@ -18,6 +18,8 @@ import {
   replicationServers, type ReplicationServer,
   replicationConflicts, type ReplicationConflict,
   replicationZoneBindings, type ReplicationZoneBinding,
+  healthChecks, type HealthCheck,
+  notificationChannels, type NotificationChannel,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -96,6 +98,16 @@ export interface IStorage {
   getReplicationZoneBindings(serverId?: string, zoneId?: string): Promise<ReplicationZoneBinding[]>;
   setReplicationZoneBindings(serverId: string, bindings: { zoneId: string; mode: "push" | "pull" | "both"; enabled: boolean }[]): Promise<void>;
   getReplicationZoneBinding(serverId: string, zoneId: string): Promise<ReplicationZoneBinding | undefined>;
+  // Health Checks
+  getHealthChecks(serverId?: string, limit?: number): Promise<HealthCheck[]>;
+  getLatestHealthCheck(serverId: string): Promise<HealthCheck | undefined>;
+  createHealthCheck(data: Omit<HealthCheck, "id" | "checkedAt">): Promise<HealthCheck>;
+  // Notification Channels
+  getNotificationChannels(): Promise<NotificationChannel[]>;
+  getNotificationChannel(id: string): Promise<NotificationChannel | undefined>;
+  createNotificationChannel(data: Omit<NotificationChannel, "id" | "createdAt">): Promise<NotificationChannel>;
+  updateNotificationChannel(id: string, data: Partial<NotificationChannel>): Promise<NotificationChannel>;
+  deleteNotificationChannel(id: string): Promise<boolean>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -859,6 +871,75 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(replicationZoneBindings.serverId, serverId), eq(replicationZoneBindings.zoneId, zoneId)))
       .limit(1);
     return binding;
+  }
+
+  // ── Health Checks ───────────────────────────────────────────
+  async getHealthChecks(serverId?: string, limit = 100): Promise<HealthCheck[]> {
+    await this.ensureDb();
+    if (serverId) {
+      return db.select().from(healthChecks)
+        .where(eq(healthChecks.serverId, serverId))
+        .orderBy(desc(healthChecks.checkedAt))
+        .limit(limit);
+    }
+    return db.select().from(healthChecks)
+      .orderBy(desc(healthChecks.checkedAt))
+      .limit(limit);
+  }
+
+  async getLatestHealthCheck(serverId: string): Promise<HealthCheck | undefined> {
+    await this.ensureDb();
+    const [check] = await db.select().from(healthChecks)
+      .where(eq(healthChecks.serverId, serverId))
+      .orderBy(desc(healthChecks.checkedAt))
+      .limit(1);
+    return check;
+  }
+
+  async createHealthCheck(data: Omit<HealthCheck, "id" | "checkedAt">): Promise<HealthCheck> {
+    await this.ensureDb();
+    const [check] = await db.insert(healthChecks).values({
+      ...data,
+      checkedAt: new Date().toISOString(),
+    }).returning();
+    return check;
+  }
+
+  // ── Notification Channels ───────────────────────────────────
+  async getNotificationChannels(): Promise<NotificationChannel[]> {
+    await this.ensureDb();
+    return db.select().from(notificationChannels);
+  }
+
+  async getNotificationChannel(id: string): Promise<NotificationChannel | undefined> {
+    await this.ensureDb();
+    const [channel] = await db.select().from(notificationChannels)
+      .where(eq(notificationChannels.id, id))
+      .limit(1);
+    return channel;
+  }
+
+  async createNotificationChannel(data: Omit<NotificationChannel, "id" | "createdAt">): Promise<NotificationChannel> {
+    await this.ensureDb();
+    const [channel] = await db.insert(notificationChannels).values({
+      ...data,
+      createdAt: new Date().toISOString(),
+    }).returning();
+    return channel;
+  }
+
+  async updateNotificationChannel(id: string, data: Partial<NotificationChannel>): Promise<NotificationChannel> {
+    await this.ensureDb();
+    const [channel] = await db.update(notificationChannels).set(data)
+      .where(eq(notificationChannels.id, id))
+      .returning();
+    return channel;
+  }
+
+  async deleteNotificationChannel(id: string): Promise<boolean> {
+    await this.ensureDb();
+    const result = await db.delete(notificationChannels).where(eq(notificationChannels.id, id));
+    return (result as any).changes > 0;
   }
 }
 

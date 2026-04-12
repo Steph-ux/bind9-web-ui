@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
-import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe } from "lucide-react";
+import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe, Heart, Activity, Mail, Webhook, MessageSquare } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, getHealthChecks, runHealthChecks, getNotificationChannels, createNotificationChannel, deleteNotificationChannel, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry, type HealthCheckEntry, type NotificationChannelEntry } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -98,6 +98,20 @@ export default function ReplicationPage() {
     queryKey: ["replication-stats"],
     queryFn: getReplicationStats,
   });
+
+  const { data: healthChecks } = useQuery<HealthCheckEntry[]>({
+    queryKey: ["health-checks"],
+    queryFn: () => getHealthChecks(),
+    refetchInterval: 30000,
+  });
+
+  const { data: channels } = useQuery<NotificationChannelEntry[]>({
+    queryKey: ["notification-channels"],
+    queryFn: getNotificationChannels,
+  });
+
+  const [addChannelOpen, setAddChannelOpen] = useState(false);
+  const [channelForm, setChannelForm] = useState({ name: "", type: "webhook" as "email" | "webhook" | "slack", url: "", email: "" });
 
   const syncMutation = useMutation({
     mutationFn: syncAllReplication,
@@ -269,6 +283,12 @@ export default function ReplicationPage() {
             {syncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Sync All
           </Button>
+          <Button variant="outline" className="gap-2" onClick={async () => {
+            try { await runHealthChecks(); queryClient.invalidateQueries({ queryKey: ["health-checks"] }); toast({ title: "Health check completed" }); }
+            catch (err: any) { toast({ variant: "destructive", title: "Health check failed", description: err.message }); }
+          }}>
+            <Activity className="h-4 w-4" /> Health Check
+          </Button>
           <Button className="gap-2" onClick={() => { resetForm(); setAddOpen(true); }}>
             <Plus className="h-4 w-4" /> Add Server
           </Button>
@@ -350,6 +370,15 @@ export default function ReplicationPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Server className="h-4 w-4" /> {s.name}
+                    {(() => {
+                      const hc = healthChecks?.find(h => h.serverId === s.id);
+                      if (!hc || !s.enabled) return null;
+                      return hc.status === "healthy"
+                        ? <Heart className="h-3.5 w-3.5 text-green-500" />
+                        : hc.status === "degraded"
+                          ? <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                          : <AlertTriangle className="h-3.5 w-3.5 text-red-500" />;
+                    })()}
                   </CardTitle>
                   {statusBadge(s.lastSyncStatus)}
                 </div>
@@ -624,6 +653,128 @@ export default function ReplicationPage() {
           </Card>
         )}
       </div>
+
+      {/* Notification Channels */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Notification Channels
+          </h3>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setAddChannelOpen(true)}>
+            <Plus className="h-4 w-4" /> Add Channel
+          </Button>
+        </div>
+        {channels && channels.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {channels.map(ch => {
+              let config: Record<string, string> = {};
+              try { config = JSON.parse(ch.config); } catch {}
+              return (
+                <Card key={ch.id}>
+                  <CardContent className="pt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {ch.type === "webhook" ? <Webhook className="h-4 w-4" /> : ch.type === "slack" ? <MessageSquare className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+                        <span className="font-medium">{ch.name}</span>
+                      </div>
+                      <Badge variant={ch.enabled ? "default" : "secondary"}>{ch.enabled ? "Active" : "Disabled"}</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      <span className="capitalize">{ch.type}</span>
+                      {config.url && <span className="ml-2 font-mono">{config.url.replace(/^https?:\/\/[^/]+/, "***")}</span>}
+                      {config.webhookUrl && <span className="ml-2 font-mono">{config.webhookUrl.replace(/^https?:\/\/[^/]+/, "***")}</span>}
+                      {config.email && <span className="ml-2">{config.email}</span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Events: {ch.events}
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <Button variant="ghost" size="sm" className="h-7" onClick={async () => {
+                        try { await deleteNotificationChannel(ch.id); queryClient.invalidateQueries({ queryKey: ["notification-channels"] }); toast({ title: "Channel deleted" }); }
+                        catch (err: any) { toast({ variant: "destructive", title: "Failed", description: err.message }); }
+                      }}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col items-center py-8">
+              <Bell className="h-10 w-10 text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">No notification channels configured.</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Add Channel Dialog */}
+      <Dialog open={addChannelOpen} onOpenChange={setAddChannelOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Notification Channel</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Name</Label>
+              <Input value={channelForm.name} onChange={e => setChannelForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Ops Slack" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Type</Label>
+              <Select value={channelForm.type} onValueChange={v => setChannelForm(f => ({ ...f, type: v as "email" | "webhook" | "slack" }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="webhook">Webhook</SelectItem>
+                  <SelectItem value="slack">Slack</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {channelForm.type === "webhook" && (
+              <div className="grid gap-2">
+                <Label>Webhook URL</Label>
+                <Input value={channelForm.url} onChange={e => setChannelForm(f => ({ ...f, url: e.target.value }))} placeholder="https://hooks.example.com/..." />
+              </div>
+            )}
+            {channelForm.type === "slack" && (
+              <div className="grid gap-2">
+                <Label>Slack Webhook URL</Label>
+                <Input value={channelForm.url} onChange={e => setChannelForm(f => ({ ...f, url: e.target.value }))} placeholder="https://hooks.slack.com/services/..." />
+              </div>
+            )}
+            {channelForm.type === "email" && (
+              <div className="grid gap-2">
+                <Label>Email Address</Label>
+                <Input value={channelForm.email} onChange={e => setChannelForm(f => ({ ...f, email: e.target.value }))} placeholder="admin@example.com" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddChannelOpen(false)}>Cancel</Button>
+            <Button onClick={async () => {
+              try {
+                const config: Record<string, string> = {};
+                if (channelForm.type === "webhook") config.url = channelForm.url;
+                else if (channelForm.type === "slack") config.webhookUrl = channelForm.url;
+                else if (channelForm.type === "email") config.email = channelForm.email;
+                await createNotificationChannel({ name: channelForm.name, type: channelForm.type, config });
+                toast({ title: "Channel created" });
+                setAddChannelOpen(false);
+                setChannelForm({ name: "", type: "webhook", url: "", email: "" });
+                queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
+              } catch (err: any) {
+                toast({ variant: "destructive", title: "Failed", description: err.message });
+              }
+            }}>
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

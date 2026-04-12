@@ -172,6 +172,23 @@ if (DB_TYPE === "sqlite") {
       last_sync_at TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS health_checks (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      latency_ms INTEGER,
+      details TEXT DEFAULT '',
+      checked_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS notification_channels (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      config TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      events TEXT NOT NULL DEFAULT 'server_down,conflict_detected,health_degraded',
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

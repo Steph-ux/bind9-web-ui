@@ -266,3 +266,28 @@ export const replicationZoneBindings = sqliteTable("replication_zone_bindings", 
 });
 
 export type ReplicationZoneBinding = typeof replicationZoneBindings.$inferSelect;
+
+// ── Health Checks ──────────────────────────────────────────────
+export const healthChecks = sqliteTable("health_checks", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  status: text("status", { enum: ["healthy", "degraded", "down"] }).notNull(),
+  latencyMs: integer("latency_ms"),
+  details: text("details").default(""),
+  checkedAt: text("checked_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type HealthCheck = typeof healthChecks.$inferSelect;
+
+// ── Notification Channels ──────────────────────────────────────
+export const notificationChannels = sqliteTable("notification_channels", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["email", "webhook", "slack"] }).notNull(),
+  config: text("config").notNull(), // JSON string: {email, webhookUrl, etc.}
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  events: text("events").notNull().default("server_down,conflict_detected,health_degraded"), // comma-separated
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type NotificationChannel = typeof notificationChannels.$inferSelect;

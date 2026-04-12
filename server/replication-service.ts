@@ -277,7 +277,7 @@ class ReplicationService {
   }
 
   /** Connect to a replication server via SSH */
-  private connectToServer(server: ReplicationServer): Promise<Client> {
+  connectToServer(server: ReplicationServer): Promise<Client> {
     return new Promise((resolve, reject) => {
       const client = new Client();
       const timeout = setTimeout(() => {
@@ -314,7 +314,7 @@ class ReplicationService {
   }
 
   /** Execute a command on a remote client */
-  private execOnClient(client: Client, command: string): Promise<{ stdout: string; stderr: string }> {
+  execOnClient(client: Client, command: string): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       client.exec(command, (err, stream) => {
         if (err) return reject(err);
