@@ -1200,7 +1200,7 @@ zone "${safeDomain}" {
     }
 
     private parsePid(output: string): number | null {
-        const match = output.match(/pid:\s*(\d+)/i);
+        const match = output.match(/daemon pid:\s*(\d+)/i) || output.match(/pid:\s*(\d+)/i);
         return match ? parseInt(match[1]) : null;
     }
 
