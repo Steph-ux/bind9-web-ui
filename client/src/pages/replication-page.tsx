@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
-import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle } from "lucide-react";
+import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, type ReplicationServerEntry, type ReplicationConflictEntry } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -89,6 +89,11 @@ export default function ReplicationPage() {
   const { data: conflicts } = useQuery<ReplicationConflictEntry[]>({
     queryKey: ["replication-conflicts"],
     queryFn: () => getReplicationConflicts(false),
+  });
+
+  const { data: stats } = useQuery<ReplicationStats>({
+    queryKey: ["replication-stats"],
+    queryFn: getReplicationStats,
   });
 
   const syncMutation = useMutation({
@@ -266,6 +271,60 @@ export default function ReplicationPage() {
           </Button>
         </div>
       </div>
+
+      {/* Insights Summary */}
+      {stats && (
+        <div className="grid gap-4 md:grid-cols-4 mb-6">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Servers</p>
+                  <p className="text-2xl font-bold">{stats.totalServers}</p>
+                </div>
+                <Server className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{stats.enabledServers} enabled, {stats.connectedServers} connected</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Master Zones</p>
+                  <p className="text-2xl font-bold">{stats.totalZones}</p>
+                </div>
+                <Globe className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Zones available for replication</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Conflicts</p>
+                  <p className="text-2xl font-bold">{stats.unresolvedConflicts}</p>
+                </div>
+                <AlertTriangle className={`h-8 w-8 ${stats.unresolvedConflicts > 0 ? "text-yellow-500" : "text-muted-foreground"}`} />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{stats.serialMismatches} serial, {stats.zoneMissing} missing</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Last Sync</p>
+                  <p className="text-lg font-bold">{stats.lastSyncAt ? new Date(stats.lastSyncAt).toLocaleString() : "Never"}</p>
+                </div>
+                <RefreshCw className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{stats.failedServers} failed, {stats.neverSyncedServers} never synced</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>

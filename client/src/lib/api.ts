@@ -361,6 +361,21 @@ export interface ReplicationServerEntry {
 
 export const getReplicationServers = () =>
     request<ReplicationServerEntry[]>("/replication");
+export const getReplicationStats = () =>
+    request<ReplicationStats>("/replication/stats");
+
+export interface ReplicationStats {
+    totalServers: number;
+    enabledServers: number;
+    connectedServers: number;
+    failedServers: number;
+    neverSyncedServers: number;
+    totalZones: number;
+    unresolvedConflicts: number;
+    serialMismatches: number;
+    zoneMissing: number;
+    lastSyncAt: string | null;
+}
 export const createReplicationServer = (data: Partial<ReplicationServerEntry> & { name: string; host: string }) =>
     request<ReplicationServerEntry>("/replication", {
         method: "POST",

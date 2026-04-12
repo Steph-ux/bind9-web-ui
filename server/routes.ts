@@ -753,6 +753,39 @@ export async function registerRoutes(
   });
 
   // ── Replication Servers ────────────────────────────────────────
+  app.get("/api/replication/stats", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const servers = await storage.getReplicationServers();
+      const conflicts = await storage.getReplicationConflicts(false);
+      const zones = await storage.getZones();
+      const masterZones = zones.filter(z => z.type === "master" && z.status === "active");
+
+      const enabled = servers.filter(s => s.enabled);
+      const connected = servers.filter(s => s.lastSyncStatus === "success");
+      const failed = servers.filter(s => s.lastSyncStatus === "failed");
+      const neverSynced = servers.filter(s => s.lastSyncStatus === "never");
+
+      res.json({
+        totalServers: servers.length,
+        enabledServers: enabled.length,
+        connectedServers: connected.length,
+        failedServers: failed.length,
+        neverSyncedServers: neverSynced.length,
+        totalZones: masterZones.length,
+        unresolvedConflicts: conflicts.length,
+        serialMismatches: conflicts.filter(c => c.conflictType === "serial_mismatch").length,
+        zoneMissing: conflicts.filter(c => c.conflictType === "zone_missing").length,
+        lastSyncAt: servers.reduce((latest: string | null, s) => {
+          if (!s.lastSyncAt) return latest;
+          if (!latest || s.lastSyncAt > latest) return s.lastSyncAt;
+          return latest;
+        }, null),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
   app.get("/api/replication", requireOperator, async (_req: Request, res: Response) => {
     try {
       const servers = await storage.getReplicationServers();
