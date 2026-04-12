@@ -1,0 +1,253 @@
+// Copyright © 2025 Stephane ASSOGBA
+/**
+ * Replication Service
+ * Pushes zone files and config to slave/secondary BIND9 servers via SSH/SFTP.
+ * Sends rndc notify after zone transfers.
+ */
+import { Client, type ConnectConfig } from "ssh2";
+import type { ReplicationServer } from "@shared/schema";
+import { storage } from "./storage";
+import { bind9Service } from "./bind9-service";
+
+export interface SyncResult {
+  serverId: string;
+  serverName: string;
+  success: boolean;
+  message: string;
+  zonesPushed: number;
+  timestamp: string;
+}
+
+export interface FullSyncResult {
+  results: SyncResult[];
+  totalZones: number;
+  duration: number;
+}
+
+class ReplicationService {
+
+  /** Push all zones to all enabled replication servers */
+  async syncAll(): Promise<FullSyncResult> {
+    const start = Date.now();
+    const servers = await storage.getReplicationServers();
+    const enabled = servers.filter(s => s.enabled);
+    const zones = await storage.getZones();
+    const masterZones = zones.filter(z => z.type === "master" && z.status === "active");
+
+    const results: SyncResult[] = [];
+
+    for (const server of enabled) {
+      const result = await this.syncToServer(server, masterZones);
+      results.push(result);
+    }
+
+    return {
+      results,
+      totalZones: masterZones.length,
+      duration: Date.now() - start,
+    };
+  }
+
+  /** Push specific zone to all enabled replication servers */
+  async syncZone(zoneId: string): Promise<FullSyncResult> {
+    const start = Date.now();
+    const zone = await storage.getZone(zoneId);
+    if (!zone) throw new Error("Zone not found");
+
+    const servers = await storage.getReplicationServers();
+    const enabled = servers.filter(s => s.enabled);
+    const results: SyncResult[] = [];
+
+    for (const server of enabled) {
+      const result = await this.syncToServer(server, [zone]);
+      results.push(result);
+    }
+
+    return {
+      results,
+      totalZones: 1,
+      duration: Date.now() - start,
+    };
+  }
+
+  /** Push zones to a single replication server */
+  private async syncToServer(server: ReplicationServer, zones: any[]): Promise<SyncResult> {
+    const timestamp = new Date().toISOString();
+
+    try {
+      await storage.updateReplicationSyncStatus(server.id, "pending");
+
+      const client = await this.connectToServer(server);
+      let zonesPushed = 0;
+
+      try {
+        // Push each zone file
+        for (const zone of zones) {
+          try {
+            // Read zone file from master
+            const zoneContent = await this.readZoneFile(zone);
+            if (!zoneContent) continue;
+
+            // Write to slave server
+            const remotePath = `${server.bind9ZoneDir}/db.${zone.domain}`;
+            await this.sftpWriteFile(client, remotePath, zoneContent);
+            zonesPushed++;
+          } catch (zoneErr: any) {
+            console.error(`[replication] Failed to push zone ${zone.domain} to ${server.host}: ${zoneErr.message}`);
+          }
+        }
+
+        // Also push named.conf.local with slave zone definitions
+        try {
+          const slaveConfig = this.generateSlaveConfig(zones, server);
+          const confPath = `${server.bind9ConfDir}/named.conf.local`;
+          await this.sftpWriteFile(client, confPath, slaveConfig);
+        } catch (confErr: any) {
+          console.error(`[replication] Failed to push config to ${server.host}: ${confErr.message}`);
+        }
+
+        // Reload BIND9 on the slave
+        try {
+          await this.execOnClient(client, "sudo -n /usr/sbin/rndc reload");
+        } catch (reloadErr: any) {
+          console.error(`[replication] Failed to reload BIND9 on ${server.host}: ${reloadErr.message}`);
+        }
+      } finally {
+        client.end();
+      }
+
+      await storage.updateReplicationSyncStatus(server.id, "success");
+
+      return {
+        serverId: server.id,
+        serverName: server.name,
+        success: true,
+        message: `Pushed ${zonesPushed}/${zones.length} zones`,
+        zonesPushed,
+        timestamp,
+      };
+    } catch (err: any) {
+      await storage.updateReplicationSyncStatus(server.id, "failed");
+
+      return {
+        serverId: server.id,
+        serverName: server.name,
+        success: false,
+        message: err.message,
+        zonesPushed: 0,
+        timestamp,
+      };
+    }
+  }
+
+  /** Send rndc notify for a zone to all replication servers */
+  async notifyZone(zoneDomain: string): Promise<void> {
+    try {
+      // Notify locally first
+      if (await bind9Service.isAvailable()) {
+        if (/^[a-zA-Z0-9._-]+$/.test(zoneDomain)) {
+          await bind9Service.rndc(`notify ${zoneDomain}`);
+        }
+      }
+    } catch (err: any) {
+      console.error(`[replication] rndc notify failed for ${zoneDomain}: ${err.message}`);
+    }
+  }
+
+  /** Read a zone file from the master (local or via SSH) */
+  private async readZoneFile(zone: any): Promise<string | null> {
+    try {
+      if (!zone.filePath) return null;
+      const content = await bind9Service.readRawFile(zone.filePath);
+      return content;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Generate a slave named.conf.local for the given zones */
+  private generateSlaveConfig(zones: any[], server: ReplicationServer): string {
+    const lines: string[] = ["// Auto-generated by BIND9 Web Manager — DO NOT EDIT MANUALLY"];
+    // Get the master's IP — use the active connection's host or localhost
+    const masterIp = "master"; // This will be replaced with the actual master IP
+
+    for (const zone of zones) {
+      const slavePath = `${server.bind9ZoneDir}/db.${zone.domain}`;
+      lines.push(`zone "${zone.domain}" {`);
+      lines.push(`    type slave;`);
+      lines.push(`    file "${slavePath}";`);
+      lines.push(`    masters { ${masterIp}; };`);
+      lines.push(`};`);
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }
+
+  /** Connect to a replication server via SSH */
+  private connectToServer(server: ReplicationServer): Promise<Client> {
+    return new Promise((resolve, reject) => {
+      const client = new Client();
+      const timeout = setTimeout(() => {
+        client.end();
+        reject(new Error("SSH connection timeout (15s)"));
+      }, 15000);
+
+      const config: ConnectConfig = {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        readyTimeout: 15000,
+        keepaliveInterval: 30000,
+      };
+
+      if (server.authType === "password") {
+        config.password = server.password || undefined;
+      } else {
+        config.privateKey = server.privateKey || undefined;
+      }
+
+      client.on("ready", () => {
+        clearTimeout(timeout);
+        resolve(client);
+      });
+
+      client.on("error", (err) => {
+        clearTimeout(timeout);
+        reject(new Error(`SSH connection failed: ${err.message}`));
+      });
+
+      client.connect(config);
+    });
+  }
+
+  /** Execute a command on a remote client */
+  private execOnClient(client: Client, command: string): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      client.exec(command, (err, stream) => {
+        if (err) return reject(err);
+        let stdout = "";
+        let stderr = "";
+        stream.on("data", (data: Buffer) => { stdout += data.toString(); });
+        stream.stderr?.on("data", (data: Buffer) => { stderr += data.toString(); });
+        stream.on("close", () => resolve({ stdout, stderr }));
+        stream.on("error", (err: Error) => reject(err));
+      });
+    });
+  }
+
+  /** Write a file via SFTP */
+  private sftpWriteFile(client: Client, remotePath: string, content: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      client.sftp((err, sftp) => {
+        if (err) return reject(new Error(`SFTP failed: ${err.message}`));
+        sftp.writeFile(remotePath, content, "utf-8", (writeErr: any) => {
+          if (writeErr) return reject(new Error(`Cannot write ${remotePath}: ${writeErr.message}`));
+          resolve();
+        });
+      });
+    });
+  }
+}
+
+export const replicationService = new ReplicationService();

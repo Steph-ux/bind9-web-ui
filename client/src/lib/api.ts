@@ -377,3 +377,15 @@ export const testReplicationServer = (id: string) =>
     request<{ success: boolean; message: string; serverInfo?: any }>(`/replication/${id}/test`, {
         method: "POST",
     });
+export const syncAllReplication = () =>
+    request<{ results: any[]; totalZones: number; duration: number }>("/replication/sync", {
+        method: "POST",
+    });
+export const syncZoneReplication = (zoneId: string) =>
+    request<{ results: any[]; totalZones: number; duration: number }>(`/replication/sync/${zoneId}`, {
+        method: "POST",
+    });
+export const notifyZoneReplication = (domain: string) =>
+    request<{ message: string }>(`/replication/notify/${domain}`, {
+        method: "POST",
+    });

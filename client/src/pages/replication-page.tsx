@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
-import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff } from "lucide-react";
+import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, type ReplicationServerEntry } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, type ReplicationServerEntry } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -83,6 +83,18 @@ export default function ReplicationPage() {
     },
     onError: (err: Error) => {
       toast({ variant: "destructive", title: "Failed to delete server", description: err.message });
+    },
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: syncAllReplication,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["replication"] });
+      const ok = result.results.filter(r => r.success).length;
+      toast({ title: "Sync completed", description: `${ok}/${result.results.length} servers OK (${result.totalZones} zones, ${result.duration}ms)` });
+    },
+    onError: (err: Error) => {
+      toast({ variant: "destructive", title: "Sync failed", description: err.message });
     },
   });
 
@@ -206,9 +218,15 @@ export default function ReplicationPage() {
           <h2 className="text-2xl font-bold tracking-tight">Replication Servers</h2>
           <p className="text-muted-foreground">Manage BIND9 slave/secondary servers for zone replication.</p>
         </div>
-        <Button className="gap-2" onClick={() => { resetForm(); setAddOpen(true); }}>
-          <Plus className="h-4 w-4" /> Add Server
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+            {syncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Sync All
+          </Button>
+          <Button className="gap-2" onClick={() => { resetForm(); setAddOpen(true); }}>
+            <Plus className="h-4 w-4" /> Add Server
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

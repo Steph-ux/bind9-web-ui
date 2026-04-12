@@ -94,6 +94,11 @@ class Bind9Service {
         return execAsync(command);
     }
 
+    /** Read a raw file (locally or via SSH/SFTP) — public for replication */
+    async readRawFile(filePath: string): Promise<string> {
+        return this.readRemoteFile(filePath);
+    }
+
     /** Read a file (locally or via SSH/SFTP) */
     private async readRemoteFile(filePath: string): Promise<string> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {

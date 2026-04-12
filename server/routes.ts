@@ -10,6 +10,7 @@ import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
 import { firewallService } from "./firewall-service";
+import { replicationService } from "./replication-service";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -885,6 +886,48 @@ export async function registerRoutes(
 
 
 
+  // ── Replication Sync & Notify ──────────────────────────────────
+  app.post("/api/replication/sync", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const result = await replicationService.syncAll();
+      await storage.insertLog({
+        level: "INFO",
+        source: "replication",
+        message: `Full sync completed: ${result.results.filter(r => r.success).length}/${result.results.length} servers OK (${result.totalZones} zones, ${result.duration}ms)`,
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/replication/sync/:zoneId", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const zoneId = req.params.zoneId as string;
+      const result = await replicationService.syncZone(zoneId);
+      await storage.insertLog({
+        level: "INFO",
+        source: "replication",
+        message: `Zone sync completed: ${result.results.filter(r => r.success).length}/${result.results.length} servers OK`,
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/replication/notify/:domain", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const domain = req.params.domain as string;
+      if (!/^[a-zA-Z0-9._-]+$/.test(domain)) return res.status(400).json({ message: "Invalid domain" });
+      await replicationService.notifyZone(domain);
+      res.json({ message: `Notify sent for ${domain}` });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+
   // ── Restore active SSH connection on startup ──────────────────
   try {
     const activeConn = await storage.getActiveConnection();
@@ -1434,6 +1477,16 @@ export async function registerRoutes(
       }
       await bind9Service.rndc(`reload ${zone.domain}`);
       console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
+
+      // Auto-notify replication servers
+      try {
+        const replServers = await storage.getReplicationServers();
+        if (replServers.some(s => s.enabled)) {
+          await replicationService.notifyZone(zone.domain);
+        }
+      } catch (replErr: any) {
+        console.error(`[replication] Auto-notify failed for ${zone.domain}: ${replErr.message}`);
+      }
     } catch (error: any) {
       console.error(`[bind9] Failed to sync zone file: ${error.message}`);
       // Don't throw, just log. The DB is updated.
