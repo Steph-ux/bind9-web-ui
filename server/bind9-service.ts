@@ -1348,17 +1348,21 @@ zone "${safeDomain}" {
     }
 
     /** Parse an RPZ blocklist file content (zone format or plain domain list) and return entries */
-    parseRpzBlocklist(content: string, sourceName: string = "import"): Array<{ name: string; type: string; target: string; comment: string }> {
+    async parseRpzBlocklist(content: string, sourceName: string = "import"): Promise<Array<{ name: string; type: string; target: string; comment: string }>> {
         const entries: Array<{ name: string; type: string; target: string; comment: string }> = [];
         const lines = content.split("\n");
 
         // Detect format: if it contains SOA/NS records, it's a zone file; otherwise plain list
         const isZoneFormat = lines.some(l => /\bSOA\b/i.test(l) || /\bIN\s+NS\b/i.test(l));
 
+        // Yield to event loop every YIELD_INTERVAL lines to avoid blocking
+        const YIELD_INTERVAL = 50000;
+
         if (isZoneFormat) {
             // Parse as RPZ zone file
-            for (const rawLine of lines) {
-                const line = rawLine.trim();
+            for (let i = 0; i < lines.length; i++) {
+                if (i > 0 && i % YIELD_INTERVAL === 0) await new Promise(r => setImmediate(r));
+                const line = lines[i].trim();
                 if (!line || line.startsWith(";") || line.startsWith("$") || line.startsWith("@")) continue;
 
                 const parts = line.split(/\s+/);
@@ -1399,8 +1403,9 @@ zone "${safeDomain}" {
             }
         } else {
             // Parse as plain domain list (one domain per line)
-            for (const rawLine of lines) {
-                let line = rawLine.trim();
+            for (let i = 0; i < lines.length; i++) {
+                if (i > 0 && i % YIELD_INTERVAL === 0) await new Promise(r => setImmediate(r));
+                let line = lines[i].trim();
                 if (!line || line.startsWith("#") || line.startsWith("//") || line.startsWith(";")) continue;
 
                 // Remove inline comments

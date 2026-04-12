@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -43,8 +43,15 @@ export default function FirewallDNS() {
     const queryClient = useQueryClient();
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
     const [clearAllOpen, setClearAllOpen] = useState(false);
+    const [searchInput, setSearchInput] = useState("");
     const [searchFilter, setSearchFilter] = useState("");
     const [page, setPage] = useState(1);
+
+    // Debounce search: 300ms delay before triggering API query
+    useEffect(() => {
+        const timer = setTimeout(() => setSearchFilter(searchInput), 300);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
     const [typeFilter, setTypeFilter] = useState("all");
     const PAGE_SIZE = 50;
     const [importOpen, setImportOpen] = useState(false);
@@ -174,21 +181,7 @@ export default function FirewallDNS() {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 180000); // 3min client timeout
             try {
-                const res = await fetch("/api/rpz/import-url", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url, sourceName }),
-                    credentials: "include",
-                    signal: controller.signal,
-                });
-                if (!res.ok) {
-                    let errorMsg = res.statusText;
-                    try {
-                        const errData = await res.json();
-                        errorMsg = errData.message || res.statusText;
-                    } catch {}
-                    throw new Error(errorMsg);
-                }
+                const res = await apiRequest("POST", "/api/rpz/import-url", { url, sourceName });
                 return res.json();
             } finally {
                 clearTimeout(timeoutId);
@@ -217,14 +210,28 @@ export default function FirewallDNS() {
             toast({ title: "File too large", description: "Maximum file size is 200MB", variant: "destructive" });
             return;
         }
+        // For large files, use streaming read to avoid loading entire file in RAM
+        const CHUNK = 4 * 1024 * 1024; // 4MB chunks
+        let result = "";
+        let offset = 0;
         const reader = new FileReader();
         reader.onload = (ev) => {
-            const text = ev.target?.result as string;
-            setImportText(text);
-            setImportSourceName(file.name);
-            setImportTab("text");
+            result += ev.target?.result as string;
+            offset += CHUNK;
+            if (offset < file.size) {
+                const slice = file.slice(offset, offset + CHUNK);
+                reader.readAsText(slice);
+            } else {
+                setImportText(result);
+                setImportSourceName(file.name);
+                setImportTab("text");
+            }
         };
-        reader.readAsText(file);
+        reader.onerror = () => {
+            toast({ title: "File read error", description: "Failed to read the uploaded file", variant: "destructive" });
+        };
+        const firstSlice = file.slice(0, CHUNK);
+        reader.readAsText(firstSlice);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -256,7 +263,7 @@ export default function FirewallDNS() {
     };
 
     const handleSearch = useCallback((value: string) => {
-        setSearchFilter(value);
+        setSearchInput(value);
         setPage(1);
     }, []);
 
@@ -610,7 +617,7 @@ export default function FirewallDNS() {
                                         <Input
                                             placeholder="Filter rules..."
                                             className="pl-8 w-[200px]"
-                                            value={searchFilter}
+                                            value={searchInput}
                                             onChange={(e) => handleSearch(e.target.value)}
                                         />
                                     </div>

@@ -54,10 +54,9 @@ export interface IStorage {
   createKey(key: InsertTsigKey): Promise<TsigKey>;
   deleteKey(id: string): Promise<void>;
   // RPZ
-  getRpzEntries(): Promise<RpzEntry[]>;
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
-  deleteRpzEntry(id: string): Promise<void>;
+  deleteRpzEntry(id: string): Promise<boolean>;
   getRpzExistingNames(names: string[]): Promise<Set<string>>;
   createRpzEntriesBatch(entries: InsertRpzEntry[]): Promise<number>;
   clearRpzEntries(): Promise<void>;
@@ -394,6 +393,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── RPZ ──────────────────────────────────────────────
+  /** @deprecated Use getRpzZoneData() for BIND9 sync or getRpzEntriesPaged() for UI */
   async getRpzEntries(): Promise<RpzEntry[]> {
     await this.ensureDb();
     return db.select().from(rpzEntries).orderBy(rpzEntries.name);
@@ -415,16 +415,17 @@ export class DatabaseStorage implements IStorage {
     return entry;
   }
 
-  async deleteRpzEntry(id: string): Promise<void> {
+  async deleteRpzEntry(id: string): Promise<boolean> {
     await this.ensureDb();
-    await db.delete(rpzEntries).where(eq(rpzEntries.id, id));
+    const result = await db.delete(rpzEntries).where(eq(rpzEntries.id, id)).returning();
+    return result.length > 0;
   }
 
   async getRpzExistingNames(names: string[]): Promise<Set<string>> {
     await this.ensureDb();
     if (names.length === 0) return new Set();
-    // Query in batches to avoid SQL param limit
-    const BATCH = 500;
+    // Query in batches to avoid SQL param limit (SQLite max 999 default, but better-sqlite3 handles more)
+    const BATCH = 5000;
     const existing = new Set<string>();
     for (let i = 0; i < names.length; i += BATCH) {
       const batch = names.slice(i, i + BATCH);
