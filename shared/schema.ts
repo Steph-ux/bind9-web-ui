@@ -236,3 +236,19 @@ export const replicationServers = sqliteTable("replication_servers", {
 });
 
 export type ReplicationServer = typeof replicationServers.$inferSelect;
+
+// ── Replication Conflicts ───────────────────────────────────────
+export const replicationConflicts = sqliteTable("replication_conflicts", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  zoneDomain: text("zone_domain").notNull(),
+  masterSerial: text("master_serial"),
+  slaveSerial: text("slave_serial"),
+  conflictType: text("conflict_type", { enum: ["serial_mismatch", "zone_missing", "soa_mismatch", "config_mismatch"] }).notNull(),
+  details: text("details").default(""),
+  resolved: integer("resolved", { mode: "boolean" }).notNull().default(false),
+  detectedAt: text("detected_at").notNull().$defaultFn(() => new Date().toISOString()),
+  resolvedAt: text("resolved_at"),
+});
+
+export type ReplicationConflict = typeof replicationConflicts.$inferSelect;

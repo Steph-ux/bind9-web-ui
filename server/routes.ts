@@ -927,6 +927,47 @@ export async function registerRoutes(
     }
   });
 
+  // ── Replication Conflicts ─────────────────────────────────────
+  app.get("/api/replication/conflicts", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const resolved = req.query.resolved === "true" ? true : req.query.resolved === "false" ? false : undefined;
+      const conflicts = await storage.getReplicationConflicts(resolved);
+      // Enrich with server name
+      const servers = await storage.getReplicationServers();
+      const serverMap = new Map(servers.map(s => [s.id, s.name]));
+      res.json(conflicts.map(c => ({ ...c, serverName: serverMap.get(c.serverId) || "Unknown" })));
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/replication/conflicts/detect", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const newConflicts = await replicationService.detectConflicts();
+      res.json({ detected: newConflicts.length, conflicts: newConflicts });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.put("/api/replication/conflicts/:id/resolve", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      await storage.resolveReplicationConflict(req.params.id as string);
+      res.json({ message: "Conflict resolved" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.put("/api/replication/conflicts/resolve-all", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      await storage.resolveAllReplicationConflicts();
+      res.json({ message: "All conflicts resolved" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
 
   // ── Restore active SSH connection on startup ──────────────────
   try {

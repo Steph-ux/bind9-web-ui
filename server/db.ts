@@ -151,6 +151,18 @@ if (DB_TYPE === "sqlite") {
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS replication_conflicts (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      zone_domain TEXT NOT NULL,
+      master_serial TEXT,
+      slave_serial TEXT,
+      conflict_type TEXT NOT NULL,
+      details TEXT DEFAULT '',
+      resolved INTEGER NOT NULL DEFAULT 0,
+      detected_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

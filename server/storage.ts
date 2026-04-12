@@ -16,6 +16,7 @@ import {
   apiTokens, type ApiToken,
   userDomains, type UserDomain,
   replicationServers, type ReplicationServer,
+  replicationConflicts, type ReplicationConflict,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -85,6 +86,11 @@ export interface IStorage {
   updateReplicationServer(id: string, data: Partial<ReplicationServer>): Promise<ReplicationServer>;
   deleteReplicationServer(id: string): Promise<boolean>;
   updateReplicationSyncStatus(id: string, status: ReplicationServer["lastSyncStatus"]): Promise<void>;
+  // Replication Conflicts
+  getReplicationConflicts(resolved?: boolean): Promise<ReplicationConflict[]>;
+  createReplicationConflict(data: Omit<ReplicationConflict, "id" | "detectedAt" | "resolvedAt">): Promise<ReplicationConflict>;
+  resolveReplicationConflict(id: string): Promise<void>;
+  resolveAllReplicationConflicts(): Promise<void>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -774,6 +780,42 @@ export class DatabaseStorage implements IStorage {
       lastSyncStatus: status,
       lastSyncAt: status === "success" || status === "failed" ? new Date().toISOString() : undefined,
     }).where(eq(replicationServers.id, id));
+  }
+
+  // ── Replication Conflicts ─────────────────────────────────
+  async getReplicationConflicts(resolved?: boolean): Promise<ReplicationConflict[]> {
+    await this.ensureDb();
+    if (resolved !== undefined) {
+      return db.select().from(replicationConflicts)
+        .where(eq(replicationConflicts.resolved, resolved))
+        .orderBy(desc(replicationConflicts.detectedAt));
+    }
+    return db.select().from(replicationConflicts).orderBy(desc(replicationConflicts.detectedAt));
+  }
+
+  async createReplicationConflict(data: Omit<ReplicationConflict, "id" | "detectedAt" | "resolvedAt">): Promise<ReplicationConflict> {
+    await this.ensureDb();
+    const [conflict] = await db.insert(replicationConflicts).values({
+      ...data,
+      detectedAt: new Date().toISOString(),
+    }).returning();
+    return conflict;
+  }
+
+  async resolveReplicationConflict(id: string): Promise<void> {
+    await this.ensureDb();
+    await db.update(replicationConflicts).set({
+      resolved: true,
+      resolvedAt: new Date().toISOString(),
+    }).where(eq(replicationConflicts.id, id));
+  }
+
+  async resolveAllReplicationConflicts(): Promise<void> {
+    await this.ensureDb();
+    await db.update(replicationConflicts).set({
+      resolved: true,
+      resolvedAt: new Date().toISOString(),
+    }).where(eq(replicationConflicts.resolved, false));
   }
 }
 

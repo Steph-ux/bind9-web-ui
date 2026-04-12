@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
-import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell } from "lucide-react";
+import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, type ReplicationServerEntry } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, type ReplicationServerEntry, type ReplicationConflictEntry } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -86,6 +86,11 @@ export default function ReplicationPage() {
     },
   });
 
+  const { data: conflicts } = useQuery<ReplicationConflictEntry[]>({
+    queryKey: ["replication-conflicts"],
+    queryFn: () => getReplicationConflicts(false),
+  });
+
   const syncMutation = useMutation({
     mutationFn: syncAllReplication,
     onSuccess: (result) => {
@@ -113,6 +118,39 @@ export default function ReplicationPage() {
     onError: (err: Error) => {
       setTestResult({ success: false, message: err.message });
       setTestTarget(null);
+    },
+  });
+
+  const detectMutation = useMutation({
+    mutationFn: detectReplicationConflicts,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["replication-conflicts"] });
+      toast({ title: "Conflict detection complete", description: `${result.detected} new conflicts found` });
+    },
+    onError: (err: Error) => {
+      toast({ variant: "destructive", title: "Detection failed", description: err.message });
+    },
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: resolveReplicationConflict,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["replication-conflicts"] });
+      toast({ title: "Conflict resolved" });
+    },
+    onError: (err: Error) => {
+      toast({ variant: "destructive", title: "Failed to resolve", description: err.message });
+    },
+  });
+
+  const resolveAllMutation = useMutation({
+    mutationFn: resolveAllReplicationConflicts,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["replication-conflicts"] });
+      toast({ title: "All conflicts resolved" });
+    },
+    onError: (err: Error) => {
+      toast({ variant: "destructive", title: "Failed to resolve all", description: err.message });
     },
   });
 
@@ -371,6 +409,81 @@ export default function ReplicationPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Conflicts Section */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              Conflicts
+              {conflicts && conflicts.length > 0 && (
+                <Badge variant="destructive">{conflicts.length}</Badge>
+              )}
+            </h3>
+            <p className="text-sm text-muted-foreground">Serial mismatches and missing zones on slave servers.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => detectMutation.mutate()} disabled={detectMutation.isPending}>
+              {detectMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              Detect
+            </Button>
+            {conflicts && conflicts.length > 0 && (
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => resolveAllMutation.mutate()} disabled={resolveAllMutation.isPending}>
+                <CheckCircle className="h-3 w-3" /> Resolve All
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {!conflicts || conflicts.length === 0 ? (
+          <Card>
+            <CardContent className="flex items-center justify-center py-8">
+              <CheckCircle className="h-8 w-8 text-green-500 mr-3" />
+              <span className="text-muted-foreground">No unresolved conflicts detected</span>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="px-4 py-3 text-left font-medium">Zone</th>
+                    <th className="px-4 py-3 text-left font-medium">Server</th>
+                    <th className="px-4 py-3 text-left font-medium">Type</th>
+                    <th className="px-4 py-3 text-left font-medium">Master Serial</th>
+                    <th className="px-4 py-3 text-left font-medium">Slave Serial</th>
+                    <th className="px-4 py-3 text-left font-medium">Detected</th>
+                    <th className="px-4 py-3 text-right font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {conflicts.map(c => (
+                    <tr key={c.id} className="border-b last:border-0 hover:bg-muted/50">
+                      <td className="px-4 py-2 font-mono">{c.zoneDomain}</td>
+                      <td className="px-4 py-2">{c.serverName}</td>
+                      <td className="px-4 py-2">
+                        <Badge variant={c.conflictType === "zone_missing" ? "destructive" : "outline"}>
+                          {c.conflictType.replace("_", " ")}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2 font-mono">{c.masterSerial || "-"}</td>
+                      <td className="px-4 py-2 font-mono">{c.slaveSerial || "-"}</td>
+                      <td className="px-4 py-2 text-muted-foreground">{new Date(c.detectedAt).toLocaleString()}</td>
+                      <td className="px-4 py-2 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => resolveMutation.mutate(c.id)}>
+                          <CheckCircle className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </DashboardLayout>
   );
 }

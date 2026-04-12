@@ -389,3 +389,29 @@ export const notifyZoneReplication = (domain: string) =>
     request<{ message: string }>(`/replication/notify/${domain}`, {
         method: "POST",
     });
+
+// ── Replication Conflicts ───────────────────────────────────────
+export interface ReplicationConflictEntry {
+    id: string;
+    serverId: string;
+    serverName: string;
+    zoneDomain: string;
+    masterSerial: string | null;
+    slaveSerial: string | null;
+    conflictType: "serial_mismatch" | "zone_missing" | "soa_mismatch" | "config_mismatch";
+    details: string | null;
+    resolved: boolean;
+    detectedAt: string;
+    resolvedAt: string | null;
+}
+
+export const getReplicationConflicts = (resolved?: boolean) =>
+    request<ReplicationConflictEntry[]>(`/replication/conflicts${resolved !== undefined ? `?resolved=${resolved}` : ""}`);
+export const detectReplicationConflicts = () =>
+    request<{ detected: number; conflicts: ReplicationConflictEntry[] }>("/replication/conflicts/detect", {
+        method: "POST",
+    });
+export const resolveReplicationConflict = (id: string) =>
+    request<{ message: string }>(`/replication/conflicts/${id}/resolve`, { method: "PUT" });
+export const resolveAllReplicationConflicts = () =>
+    request<{ message: string }>("/replication/conflicts/resolve-all", { method: "PUT" });

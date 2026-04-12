@@ -5,7 +5,7 @@
  * Sends rndc notify after zone transfers.
  */
 import { Client, type ConnectConfig } from "ssh2";
-import type { ReplicationServer } from "@shared/schema";
+import type { ReplicationServer, ReplicationConflict } from "@shared/schema";
 import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 
@@ -152,6 +152,81 @@ class ReplicationService {
     } catch (err: any) {
       console.error(`[replication] rndc notify failed for ${zoneDomain}: ${err.message}`);
     }
+  }
+
+  /** Detect conflicts by comparing master zone serials with slave serials */
+  async detectConflicts(): Promise<ReplicationConflict[]> {
+    const servers = await storage.getReplicationServers();
+    const enabled = servers.filter(s => s.enabled);
+    const zones = await storage.getZones();
+    const masterZones = zones.filter(z => z.type === "master" && z.status === "active");
+    const newConflicts: ReplicationConflict[] = [];
+
+    // Get existing unresolved conflicts to avoid duplicates
+    const existingConflicts = await storage.getReplicationConflicts(false);
+    const existingKeys = new Set(existingConflicts.map(c => `${c.serverId}:${c.zoneDomain}:${c.conflictType}`));
+
+    for (const server of enabled) {
+      try {
+        const client = await this.connectToServer(server);
+        try {
+          for (const zone of masterZones) {
+            const key = `${server.id}:${zone.domain}:serial_mismatch`;
+            try {
+              // Get serial from slave via rndc
+              const { stdout } = await this.execOnClient(client,
+                `sudo -n /usr/sbin/rndc zonestatus ${zone.domain} 2>/dev/null | grep serial || echo "serial:0"`);
+              const slaveSerialMatch = stdout.match(/serial:\s*(\d+)/i);
+              const slaveSerial = slaveSerialMatch ? slaveSerialMatch[1] : "0";
+              const masterSerial = zone.serial || "0";
+
+              if (slaveSerial !== masterSerial && !existingKeys.has(key)) {
+                const conflict = await storage.createReplicationConflict({
+                  serverId: server.id,
+                  zoneDomain: zone.domain,
+                  masterSerial,
+                  slaveSerial,
+                  conflictType: "serial_mismatch",
+                  details: `Master serial ${masterSerial} != Slave serial ${slaveSerial}`,
+                  resolved: false,
+                });
+                newConflicts.push(conflict);
+              }
+            } catch {
+              // Zone missing on slave
+              const missingKey = `${server.id}:${zone.domain}:zone_missing`;
+              if (!existingKeys.has(missingKey)) {
+                const conflict = await storage.createReplicationConflict({
+                  serverId: server.id,
+                  zoneDomain: zone.domain,
+                  masterSerial: zone.serial || "0",
+                  slaveSerial: null,
+                  conflictType: "zone_missing",
+                  details: `Zone ${zone.domain} not found on slave ${server.name}`,
+                  resolved: false,
+                });
+                newConflicts.push(conflict);
+              }
+            }
+          }
+        } finally {
+          client.end();
+        }
+      } catch (err: any) {
+        // Cannot connect to server — skip conflict detection for this server
+        console.error(`[replication] Cannot check conflicts on ${server.name}: ${err.message}`);
+      }
+    }
+
+    if (newConflicts.length > 0) {
+      await storage.insertLog({
+        level: "WARN",
+        source: "replication",
+        message: `Conflict detection found ${newConflicts.length} new conflicts`,
+      });
+    }
+
+    return newConflicts;
   }
 
   /** Read a zone file from the master (local or via SSH) */
