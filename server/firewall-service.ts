@@ -194,6 +194,14 @@ class FirewallService {
             activeBackend = preference.find(b => available.includes(b)) || "none";
         }
 
+        // Windows without SSH: no real firewall backends, use mock UFW
+        if (available.length === 0 && os.platform() === "win32" && !sshManager.isConfigured()) {
+            this.detectedBackend = "ufw";
+            this.detectedAvailable = ["ufw"];
+            console.log(`[firewall] Windows mock mode: active=ufw, available=[ufw]`);
+            return { active: "ufw", available: ["ufw"] };
+        }
+
         this.detectedBackend = activeBackend;
         this.detectedAvailable = available;
         console.log(`[firewall] Detected: active=${activeBackend}, available=[${available.join(",")}]`);
