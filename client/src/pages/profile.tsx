@@ -26,8 +26,8 @@ export default function ProfilePage() {
             toast({ variant: "destructive", title: "Current password required" });
             return;
         }
-        if (password.length < 4) {
-            toast({ variant: "destructive", title: "Too short", description: "Minimum 4 characters" });
+        if (password.length < 8) {
+            toast({ variant: "destructive", title: "Too short", description: "Minimum 8 characters" });
             return;
         }
         if (password !== confirm) {

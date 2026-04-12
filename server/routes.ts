@@ -698,7 +698,7 @@ export async function registerRoutes(
         updateData.role = role;
       }
       if (newPassword) {
-        if (typeof newPassword !== "string" || newPassword.length < 8) {
+        if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
           return res.status(400).json({ message: "New password must be at least 8 characters" });
         }
         updateData.password = await hashPassword(newPassword);
@@ -1122,8 +1122,36 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const updates: Record<string, any> = {};
       if (req.body.name !== undefined) updates.name = String(req.body.name);
-      if (req.body.type !== undefined) updates.type = String(req.body.type);
-      if (req.body.config !== undefined) updates.config = typeof req.body.config === "string" ? req.body.config : JSON.stringify(req.body.config);
+      if (req.body.type !== undefined) {
+        const validTypes = ["email", "webhook", "slack"];
+        if (!validTypes.includes(req.body.type)) return res.status(400).json({ message: "type must be email, webhook, or slack" });
+        updates.type = String(req.body.type);
+      }
+      if (req.body.config !== undefined) {
+        const configVal = req.body.config;
+        try {
+          const parsed = typeof configVal === "string" ? JSON.parse(configVal) : configVal;
+          // Determine the effective type (updated or existing)
+          const effectiveType = updates.type || (await storage.getNotificationChannel(id))?.type;
+          if (effectiveType === "webhook" && !parsed.url) return res.status(400).json({ message: "webhook config requires a url" });
+          if (effectiveType === "slack" && !parsed.webhookUrl) return res.status(400).json({ message: "slack config requires a webhookUrl" });
+          if (effectiveType === "email" && !parsed.email) return res.status(400).json({ message: "email config requires an email address" });
+          // SSRF: block private/internal URLs
+          const urlToCheck = parsed.url || parsed.webhookUrl;
+          if (urlToCheck) {
+            try {
+              const u = new URL(urlToCheck);
+              if (!["http:", "https:"].includes(u.protocol)) return res.status(400).json({ message: "Only http/https URLs allowed" });
+              if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:|169\.254\.)/i.test(u.hostname)) {
+                return res.status(400).json({ message: "Private/internal URLs are not allowed" });
+              }
+            } catch { return res.status(400).json({ message: "Invalid URL format" }); }
+          }
+          updates.config = typeof configVal === "string" ? configVal : JSON.stringify(configVal);
+        } catch {
+          return res.status(400).json({ message: "config must be valid JSON" });
+        }
+      }
       if (req.body.enabled !== undefined) updates.enabled = Boolean(req.body.enabled);
       if (req.body.events !== undefined) updates.events = String(req.body.events);
       const channel = await storage.updateNotificationChannel(id, updates);

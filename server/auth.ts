@@ -151,8 +151,8 @@ export function setupAuth(app: Express) {
             return res.status(401).json({ message: "Not authenticated" });
         }
         const { currentPassword, newPassword } = req.body;
-        if (!newPassword || typeof newPassword !== "string" || newPassword.length < 4) {
-            return res.status(400).json({ message: "New password must be at least 4 characters" });
+        if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+            return res.status(400).json({ message: "New password must be at least 8 characters" });
         }
         const user = req.user as User;
         // Verify current password if user doesn't have mustChangePassword flag

@@ -67,6 +67,32 @@ This project solves that by providing a modern, secure and user-friendly control
 - **Firewall** — Gestion du pare-feu avec auto-détection du backend (UFW, firewalld, nftables, iptables), ouverture/fermeture de ports, règles par IP, switch de backend en un clic
 - **DNS Firewall (RPZ)** — Blocage DNS via Response Policy Zones : import de blocklists (HaGeZi, etc.), gestion CRUD, filtrage/pagination côté serveur, sync bidirectionnelle avec BIND9, support de 1M+ entrées
 - **RBAC** — Gestion des rôles utilisateurs (Admin, Operator, Viewer)
+- **Domain Jailing** — Restriction d'accès par zone pour les viewers
+- **API Tokens** — Jetons d'API avec permissions et scope pour accès programmatique
+
+### Réplication
+- **Serveurs secondaires** — Ajout de serveurs esclaves (SSH) avec sync automatique des fichiers de zone
+- **Zone Bindings** — Assignation sélective des zones à synchroniser vers chaque serveur
+- **Détection de conflits** — Détection automatique des mismatches de serial et zones manquantes
+- **Notify** — Envoi de notify BIND9 aux esclaves après modification
+- **Statistiques** — Métriques de synchronisation et historique
+
+### Health Checks & Notifications
+- **Checks automatiques** — Vérification périodique de la santé du serveur BIND9
+- **Canaux de notification** — Alertes par email, webhook HTTP, ou Slack
+- **SSRF protection** — Blocage des URLs privées/interne dans les canaux webhook/Slack
+
+### DNSSEC
+- **Gestion des clés** — Génération de clés KSK/ZSK (ECDSAP256, ECDSAP384, RSASHA256, RSASHA512)
+- **Signature de zone** — Signature automatique via rndc dnssec
+- **Rotation des clés** — Retrait et suppression de clés avec validation
+- **Validation des entrées** — Protection contre l'injection de commandes dans les arguments rndc
+
+### Sauvegardes
+- **Types** — auto, manual, snapshot
+- **Scopes** — full, zones, configs, single_zone
+- **Restauration** — Restauration avec mise à jour des enregistrements existants
+- **Planification** — Sauvegardes automatiques programmées
 
 ### Configuration
 - **Éditeur de configuration** — Édition de `named.conf.options` et `named.conf.local` avec sauvegarde automatique
@@ -120,7 +146,13 @@ Bind-Config/
 │       │   ├── status.tsx                # Métriques serveur
 │       │   ├── connections.tsx           # Connexions SSH distantes
 │       │   ├── firewall.tsx              # Gestion du pare-feu
-│       │   └── firewall-dns.tsx          # DNS Firewall (RPZ)
+│       │   ├── firewall-dns.tsx          # DNS Firewall (RPZ)
+│       │   ├── replication-page.tsx      # Réplication & sync
+│       │   ├── zone-editor.tsx           # Éditeur de zone (records + DNSSEC)
+│       │   ├── users-page.tsx            # Gestion des utilisateurs
+│       │   ├── api-tokens.tsx            # Jetons d'API
+│       │   ├── blacklist.tsx             # Liste noire d'IPs
+│       │   └── profile.tsx               # Profil utilisateur
 │       ├── lib/
 │       │   └── api.ts                    # Client API typé
 │       └── App.tsx                       # Router
@@ -128,7 +160,12 @@ Bind-Config/
 ├── server/                      # Backend Express
 │   ├── index.ts                 # Point d'entrée serveur
 │   ├── routes.ts                # Tous les endpoints REST + WebSocket
+│   ├── auth.ts                  # Authentification, sessions, RBAC middleware
 │   ├── bind9-service.ts         # Service BIND9 (local + SSH)
+│   ├── replication-service.ts   # Service de réplication (sync, conflits, slave config)
+│   ├── health-service.ts        # Service de health checks + notifications
+│   ├── dnssec-service.ts        # Service DNSSEC (génération clés, signature, rotation)
+│   ├── backup-service.ts        # Service de sauvegarde/restauration
 │   ├── firewall-service.ts      # Service Pare-feu (UFW/firewalld/nftables/iptables)
 │   ├── ssh-manager.ts           # Gestionnaire de connexions SSH
 │   ├── storage.ts               # Couche d'accès aux données (Drizzle)
@@ -136,7 +173,7 @@ Bind-Config/
 │   └── vite.ts                  # Middleware Vite pour le dev
 │
 ├── shared/
-│   ├── schema.ts                # Schéma Drizzle SQLite (9 tables)
+│   ├── schema.ts                # Schéma Drizzle SQLite (20 tables)
 │   ├── schema-pg.ts             # Schéma Drizzle PostgreSQL
 │   └── schema-mysql.ts          # Schéma Drizzle MySQL
 │
@@ -383,6 +420,62 @@ Commandes autorisées : `reload`, `flush`, `status`, `stats`, `reconfig`, `dumpd
 > **Performance :** Pagination côté serveur (50/page), insertion par batch (500), déduplication efficace, sync BIND9 en arrière-plan.
 > **Blocklists compatibles :** HaGeZi (TIF, Ultimate, Light), Steven Black, OISD, etc.
 
+### Replication
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/replication` | Lister les serveurs de réplication (credentials masqués) |
+| GET | `/api/replication/stats` | Statistiques de réplication |
+| POST | `/api/replication` | Ajouter un serveur de réplication |
+| PUT | `/api/replication/:id` | Modifier un serveur |
+| DELETE | `/api/replication/:id` | Supprimer un serveur |
+| POST | `/api/replication/:id/test` | Tester la connexion SSH |
+| POST | `/api/replication/:id/sync` | Synchroniser toutes les zones vers un serveur |
+| POST | `/api/replication/sync-all` | Synchroniser vers tous les serveurs actifs |
+| POST | `/api/replication/notify/:domain` | Notifier un domaine aux esclaves |
+| GET | `/api/replication/conflicts` | Lister les conflits |
+| POST | `/api/replication/conflicts/detect` | Détecter les conflits |
+| PUT | `/api/replication/conflicts/:id/resolve` | Résoudre un conflit |
+| PUT | `/api/replication/conflicts/resolve-all` | Résoudre tous les conflits |
+| GET | `/api/replication/:serverId/bindings` | Bindings zone↔serveur |
+| PUT | `/api/replication/:serverId/bindings` | Mettre à jour les bindings |
+| GET | `/api/sync-history` | Historique des synchronisations |
+| GET | `/api/sync-metrics` | Métriques de synchronisation |
+
+### Health Checks & Notifications
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/health-checks` | Lister les résultats de health checks |
+| POST | `/api/health-checks/run` | Lancer un health check |
+| GET | `/api/notification-channels` | Lister les canaux de notification (config masqué) |
+| POST | `/api/notification-channels` | Créer un canal (email/webhook/Slack) |
+| PUT | `/api/notification-channels/:id` | Modifier un canal |
+| DELETE | `/api/notification-channels/:id` | Supprimer un canal |
+
+### DNSSEC
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/dnssec/keys` | Lister les clés DNSSEC |
+| POST | `/api/dnssec/generate-key` | Générer une clé (KSK/ZSK) |
+| POST | `/api/dnssec/sign-zone/:zoneId` | Signer une zone |
+| GET | `/api/dnssec/status/:zoneId` | Statut de signature d'une zone |
+| POST | `/api/dnssec/retire-key/:keyId` | Retirer une clé |
+| DELETE | `/api/dnssec/keys/:keyId` | Supprimer une clé (admin) |
+
+### Backups
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/backups` | Lister les sauvegardes |
+| POST | `/api/backups` | Créer une sauvegarde (auto/manual/snapshot) |
+| POST | `/api/backups/:id/restore` | Restaurer une sauvegarde (admin) |
+| DELETE | `/api/backups/:id` | Supprimer une sauvegarde (admin) |
+
+### API Tokens
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/tokens` | Lister les jetons API |
+| POST | `/api/tokens` | Créer un jeton |
+| DELETE | `/api/tokens/:id` | Révoquer un jeton |
+
 ---
 
 ## Importation de configuration existante
@@ -461,18 +554,29 @@ npx drizzle-kit studio   # Visualiser la DB
    npm run dev
    ```
 
-### Schéma (9 tables, identique pour les 3 moteurs)
+### Schéma (20 tables, identique pour les 3 moteurs)
 
 ```
-users           → Comptes utilisateurs
-zones           → Zones DNS (domain, type, serial, filePath)
-dns_records     → Enregistrements DNS (A, AAAA, CNAME, MX, TXT, NS, etc.)
-acls            → Listes de contrôle d'accès
-tsig_keys       → Clés TSIG pour l'authentification DNS
-config_snapshots → Historique des configurations
-log_entries     → Logs applicatifs
-connections     → Connexions SSH distantes
-rpz_entries     → Entrées DNS Firewall (RPZ) — name, type (nxdomain/nodata/redirect), target, comment
+users                    → Comptes utilisateurs
+zones                    → Zones DNS (domain, type, serial, filePath)
+dns_records              → Enregistrements DNS (A, AAAA, CNAME, MX, TXT, NS, etc.)
+acls                     → Listes de contrôle d'accès
+tsig_keys                → Clés TSIG pour l'authentification DNS
+config_snapshots         → Historique des configurations
+log_entries              → Logs applicatifs
+connections              → Connexions SSH distantes
+rpz_entries              → Entrées DNS Firewall (RPZ)
+ip_blacklist             → Liste noire d'IPs
+api_tokens               → Jetons d'API pour accès programmatique
+user_domains             → Assignations domaine→utilisateur (domain jailing)
+replication_servers      → Serveurs de réplication secondaires
+replication_conflicts    → Conflits de réplication détectés
+replication_zone_bindings → Bindings zone→serveur de réplication
+health_checks            → Résultats de health checks
+notification_channels    → Canaux de notification (email, webhook, Slack)
+sync_history             → Historique des synchronisations
+dnssec_keys              → Clés DNSSEC (KSK/ZSK)
+backups                  → Sauvegardes (auto, manual, snapshot)
 ```
 
 ### Commandes Drizzle
@@ -527,6 +631,7 @@ L'application intègre de multiples couches de sécurité :
 - **Sessions sécurisées** — `express-session` avec cookies `httpOnly`, `secure` (prod), `sameSite`
 - **Secret de session** — Variable `SESSION_SECRET` obligatoire en production (random en dev)
 - **Forced password change** — L'utilisateur `admin` par défaut doit changer son mot de passe à la première connexion
+- **Minimum 8 caractères** — Tous les mots de passe (création, changement, reset admin) doivent faire au moins 8 caractères
 - **Rate limiting** — 5 tentatives de login par IP / 60 secondes
 - **Route dédiée** — `PUT /api/auth/password` pour que tout utilisateur authentifié change son propre mot de passe
 
@@ -542,6 +647,9 @@ L'application intègre de multiples couches de sécurité :
 - **Sanitisation BIND9** — Les identifiants injectés dans les fichiers de config sont nettoyés (`sanitizeIdentifier`)
 - **Validation des commandes** — Les commandes rndc sont validées par regex avant exécution
 - **Validation firewall** — Ports (digits only), IPs (regex CIDR), protocoles/actions/backends (whitelist)
+- **Validation notification channels** — Type (email/webhook/slack), config requise selon le type, SSRF sur les URLs
+- **Validation backups** — Type (auto/manual/snapshot), scope (full/zones/configs/single_zone), zoneId requis pour single_zone
+- **Validation DNSSEC** — keyType (KSK/ZSK), algorithme parmi une whitelist, keySize numérique
 
 ### Protection contre les injections
 - **Command injection** — Validation stricte des entrées avant interpolation dans les commandes shell
@@ -549,7 +657,10 @@ L'application intègre de multiples couches de sécurité :
 - **Path traversal** — Validation des noms de section, chemins SSH, et paramètres de config
 - **Config injection** — Nettoyage des caractères dangereux dans les fichiers BIND9 (`"';{}\n\r`)
 - **Regex injection** — Sanitisation des domaines avant construction de regex dynamiques
-- **SSRF** — Validation du format host/port dans le test de connexion SSH
+- **SSRF** — Blocage des URLs privées/interne (RFC1918, loopback, link-local, CGN) pour les canaux de notification webhook/Slack et l'import RPZ par URL
+- **DNSSEC injection** — Validation stricte des entrées (domaine, algorithme, keyType, keySize) avant interpolation dans les commandes rndc dnssec
+- **Backup validation** — Validation du format timestamp, vérification de l'existence du fichier avant suppression/restauration, mise à jour des enregistrements existants lors de la restauration
+- **Index DB** — Index sur les colonnes fréquemment interrogées (sync_history, dnssec_keys, backups, health_checks) pour des performances optimales
 
 ### Headers de sécurité
 - `X-Content-Type-Options: nosniff`

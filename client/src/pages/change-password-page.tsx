@@ -21,8 +21,8 @@ export default function ChangePasswordPage() {
       toast({ variant: "destructive", title: "Current password required", description: "Enter your current password" });
       return;
     }
-    if (password.length < 4) {
-      toast({ variant: "destructive", title: "Password too short", description: "Minimum 4 characters" });
+    if (password.length < 8) {
+      toast({ variant: "destructive", title: "Password too short", description: "Minimum 8 characters" });
       return;
     }
     if (password !== confirm) {

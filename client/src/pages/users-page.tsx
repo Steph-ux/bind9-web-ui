@@ -333,7 +333,13 @@ export default function UsersPage() {
                 if (!editTarget) return;
                 const data: { role?: string; password?: string } = {};
                 if (editRole !== editTarget.role) data.role = editRole;
-                if (editPassword) data.password = editPassword;
+                if (editPassword) {
+                  if (editPassword.length < 8) {
+                    toast({ variant: "destructive", title: "Password too short", description: "Minimum 8 characters" });
+                    return;
+                  }
+                  data.password = editPassword;
+                }
                 if (Object.keys(data).length === 0) {
                   toast({ title: "No changes" });
                   return;
