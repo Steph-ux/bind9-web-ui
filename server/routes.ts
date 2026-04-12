@@ -657,7 +657,15 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
-      const updated = await storage.updateZone(id, req.body);
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { domain, type, status, adminEmail, filePath } = req.body;
+      if (domain !== undefined) allowed.domain = String(domain);
+      if (type !== undefined) allowed.type = String(type);
+      if (status !== undefined) allowed.status = String(status);
+      if (adminEmail !== undefined) allowed.adminEmail = String(adminEmail);
+      if (filePath !== undefined) allowed.filePath = String(filePath);
+      const updated = await storage.updateZone(id, allowed);
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -888,8 +896,15 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
-
-      const updated = await storage.updateRecord(id, req.body);
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { name, type, value, ttl, priority } = req.body;
+      if (name !== undefined) allowed.name = String(name);
+      if (type !== undefined) allowed.type = String(type);
+      if (value !== undefined) allowed.value = String(value);
+      if (ttl !== undefined) allowed.ttl = parseInt(ttl, 10) || 3600;
+      if (priority !== undefined) allowed.priority = parseInt(priority, 10) || null;
+      const updated = await storage.updateRecord(id, allowed);
 
       // Sync changes to disk
       await syncZoneFile(record.zoneId);
@@ -1035,7 +1050,13 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
       if (!acl) return res.status(404).json({ message: "ACL not found" });
-      const updated = await storage.updateAcl(id, req.body);
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { name, networks, comment } = req.body;
+      if (name !== undefined) allowed.name = String(name);
+      if (networks !== undefined) allowed.networks = String(networks);
+      if (comment !== undefined) allowed.comment = String(comment);
+      const updated = await storage.updateAcl(id, allowed);
 
       // Sync to BIND9
       try {

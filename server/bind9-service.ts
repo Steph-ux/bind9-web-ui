@@ -204,8 +204,27 @@ class Bind9Service {
         }
     }
 
+    /** Validate a config section name (prevent path traversal) */
+    private validateSectionName(section: string): string {
+        if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
+            throw new Error(`Invalid config section name: ${section}`);
+        }
+        return section;
+    }
+
+    /** Sanitize a BIND9 identifier (acl/key/zone name) to prevent config injection */
+    private sanitizeIdentifier(name: string): string {
+        // Remove any characters that could break out of quotes or inject directives
+        const sanitized = name.replace(/["';{}\n\r]/g, "");
+        if (sanitized !== name || !name.length) {
+            throw new Error(`Invalid identifier: contains disallowed characters`);
+        }
+        return name;
+    }
+
     /** Write named.conf with backup + validation */
     async writeNamedConf(section: string, content: string): Promise<void> {
+        this.validateSectionName(section);
         const confPath = path.posix.join(BIND9_CONF_DIR, `named.conf.${section}`);
         const backupPath = `${confPath}.bak.${Date.now()}`;
 
@@ -237,7 +256,8 @@ class Bind9Service {
     async writeAclsConf(acls: Array<{ name: string; networks: string }>): Promise<void> {
         let content = "";
         for (const acl of acls) {
-            content += `acl "${acl.name}" {\n`;
+            const safeName = this.sanitizeIdentifier(acl.name);
+            content += `acl "${safeName}" {\n`;
             // Ensure networks are semi-colon terminated
             const nets = acl.networks.split(/[,\n\s]+/).filter(s => s);
             for (const net of nets) {
@@ -254,9 +274,12 @@ class Bind9Service {
     async writeKeysConf(keys: Array<{ name: string; algorithm: string; secret: string }>): Promise<void> {
         let content = "";
         for (const key of keys) {
-            content += `key "${key.name}" {\n`;
-            content += `    algorithm ${key.algorithm};\n`;
-            content += `    secret "${key.secret}";\n`;
+            const safeName = this.sanitizeIdentifier(key.name);
+            const safeAlgo = this.sanitizeIdentifier(key.algorithm);
+            const safeSecret = key.secret.replace(/["';\\]/g, "");
+            content += `key "${safeName}" {\n`;
+            content += `    algorithm ${safeAlgo};\n`;
+            content += `    secret "${safeSecret}";\n`;
             content += `};\n\n`;
         }
         const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.keys");
@@ -266,6 +289,8 @@ class Bind9Service {
     /** Add a zone to named.conf.local */
     async addZoneToConfig(domain: string, type: "master" | "slave" | "forward", file: string): Promise<void> {
         try {
+            const safeDomain = this.sanitizeIdentifier(domain);
+            const safeFile = file.replace(/["';\n\r]/g, "");
             const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
             let content = "";
             try {
@@ -275,19 +300,19 @@ class Bind9Service {
             }
 
             // Check if zone already exists to avoid duplicates
-            if (content.includes(`zone "${domain}"`)) {
-                console.log(`[bind9] Zone ${domain} already in config, skipping add.`);
+            if (content.includes(`zone "${safeDomain}"`)) {
+                console.log(`[bind9] Zone ${safeDomain} already in config, skipping add.`);
                 return;
             }
 
             const newBlock = `
-zone "${domain}" {
+zone "${safeDomain}" {
     type ${type};
-    file "${file}";
+    file "${safeFile}";
 };
 `;
             await this.writeRemoteFile(confPath, content + newBlock);
-            console.log(`[bind9] Added zone ${domain} to named.conf.local`);
+            console.log(`[bind9] Added zone ${safeDomain} to named.conf.local`);
         } catch (error: any) {
             throw new Error(`Failed to add zone to config: ${error.message}`);
         }
@@ -296,6 +321,7 @@ zone "${domain}" {
     /** Remove a zone from named.conf.local */
     async removeZoneFromConfig(domain: string): Promise<void> {
         try {
+            const safeDomain = this.sanitizeIdentifier(domain);
             const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
             let content = "";
             try {
@@ -307,16 +333,16 @@ zone "${domain}" {
             // Regex to match the zone block: zone "domain" { ... };
             // We use [\s\S]*? to match across newlines non-greedily until the first closing brace followed by semi-colon
             // This is a basic parser; for complex nested braces it might be fragile but standard BIND format is usually clean.
-            const regex = new RegExp(`zone\\s+"${domain}"\\s*{[\\s\\S]*?};\\s*`, "g");
+            const regex = new RegExp(`zone\\s+"${safeDomain}"\\s*{[\\s\\S]*?};\\s*`, "g");
 
             if (!regex.test(content)) {
-                console.log(`[bind9] Zone ${domain} not found in config, skipping remove.`);
+                console.log(`[bind9] Zone ${safeDomain} not found in config, skipping remove.`);
                 return;
             }
 
             const newContent = content.replace(regex, "");
             await this.writeRemoteFile(confPath, newContent.trim() + "\n");
-            console.log(`[bind9] Removed zone ${domain} from named.conf.local`);
+            console.log(`[bind9] Removed zone ${safeDomain} from named.conf.local`);
         } catch (error: any) {
             throw new Error(`Failed to remove zone from config: ${error.message}`);
         }

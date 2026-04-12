@@ -239,7 +239,9 @@ export class DatabaseStorage implements IStorage {
       conditions.push(eq(logEntries.source, filter.source));
     }
     if (filter?.search) {
-      conditions.push(like(logEntries.message, `%${filter.search}%`));
+      // Escape LIKE special characters to prevent injection
+      const escaped = filter.search.replace(/[%_\\]/g, "\\$&");
+      conditions.push(like(logEntries.message, `%${escaped}%`));
     }
 
     if (conditions.length > 0) {
