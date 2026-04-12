@@ -1084,6 +1084,28 @@ export async function registerRoutes(
     try {
       const { name, type, config, enabled, events } = req.body;
       if (!name || !type || !config) return res.status(400).json({ message: "name, type, config required" });
+      const validTypes = ["email", "webhook", "slack"];
+      if (!validTypes.includes(type)) return res.status(400).json({ message: "type must be email, webhook, or slack" });
+      // Validate config is valid JSON
+      try {
+        const parsed = typeof config === "string" ? JSON.parse(config) : config;
+        if (type === "webhook" && !parsed.url) return res.status(400).json({ message: "webhook config requires a url" });
+        if (type === "slack" && !parsed.webhookUrl) return res.status(400).json({ message: "slack config requires a webhookUrl" });
+        if (type === "email" && !parsed.email) return res.status(400).json({ message: "email config requires an email address" });
+        // SSRF: block private/internal URLs
+        const urlToCheck = parsed.url || parsed.webhookUrl;
+        if (urlToCheck) {
+          try {
+            const u = new URL(urlToCheck);
+            if (!["http:", "https:"].includes(u.protocol)) return res.status(400).json({ message: "Only http/https URLs allowed" });
+            if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:|169\.254\.)/i.test(u.hostname)) {
+              return res.status(400).json({ message: "Private/internal URLs are not allowed" });
+            }
+          } catch { return res.status(400).json({ message: "Invalid URL format" }); }
+        }
+      } catch {
+        return res.status(400).json({ message: "config must be valid JSON" });
+      }
       const channel = await storage.createNotificationChannel({
         name, type, config: typeof config === "string" ? config : JSON.stringify(config),
         enabled: enabled !== false,
@@ -1159,6 +1181,7 @@ export async function registerRoutes(
     try {
       const { zoneId, keyType, algorithm, keySize } = req.body;
       if (!zoneId || !keyType) return res.status(400).json({ message: "zoneId and keyType required" });
+      if (keyType !== "KSK" && keyType !== "ZSK") return res.status(400).json({ message: "keyType must be KSK or ZSK" });
       const result = await dnssecService.generateKey(zoneId, keyType, algorithm, keySize);
       if (!result.success) return res.status(400).json({ message: result.message });
       res.json(result);
@@ -1225,6 +1248,9 @@ export async function registerRoutes(
     try {
       const { type, scope, zoneId } = req.body;
       if (!type || !scope) return res.status(400).json({ message: "type and scope required" });
+      if (!["auto", "manual", "snapshot"].includes(type)) return res.status(400).json({ message: "invalid type" });
+      if (!["full", "zones", "configs", "single_zone"].includes(scope)) return res.status(400).json({ message: "invalid scope" });
+      if (scope === "single_zone" && !zoneId) return res.status(400).json({ message: "zoneId required for single_zone scope" });
       const backup = await backupService.createBackup(type, scope, zoneId);
       res.json(backup);
     } catch (error: any) {

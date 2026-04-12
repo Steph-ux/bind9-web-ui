@@ -236,7 +236,15 @@ if (DB_TYPE === "sqlite") {
   // Index on type for faster filtering
   try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks
-  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_name ON rpz_entries(name)`); } catch {}
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_name ON rpz_entries(name)`); } catch {};
+  // Index on server_id for sync history queries
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_sync_history_server ON sync_history(server_id)`); } catch {};
+  // Index on zone_id for DNSSEC key lookups
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_dnssec_keys_zone ON dnssec_keys(zone_id)`); } catch {};
+  // Index on type for backup filtering
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_backups_type ON backups(type)`); } catch {};
+  // Index on server_id for health check queries
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_health_checks_server ON health_checks(server_id)`); } catch {};
 
   console.log(`[db] SQLite database ready at ${dbPath}`);
 

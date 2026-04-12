@@ -51,9 +51,7 @@ class HealthService {
       });
 
       // Send notifications if status changed
-      const previous = await storage.getLatestHealthCheck(server.id);
-      // getLatestHealthCheck returns the latest, but we just inserted a new one,
-      // so we need to compare against the one before that
+      // Get the 2 most recent checks (the one we just inserted + the previous one)
       const allChecks = await storage.getHealthChecks(server.id, 2);
       if (allChecks.length >= 2 && allChecks[1].status !== result.status) {
         await this.dispatchNotification({
@@ -114,6 +112,16 @@ class HealthService {
     }
   }
 
+  /** Check if a URL points to a private/internal address (SSRF protection) */
+  private isPrivateUrl(urlStr: string): boolean {
+    try {
+      const parsed = new URL(urlStr);
+      if (!["http:", "https:"].includes(parsed.protocol)) return true;
+      const h = parsed.hostname;
+      return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:|169\.254\.)/i.test(h);
+    } catch { return true; }
+  }
+
   /** Dispatch notification to all enabled channels matching the event */
   private async dispatchNotification(alert: {
     event: string;
@@ -135,6 +143,10 @@ class HealthService {
         const message = `[Bind9 Manager] ${alert.event.toUpperCase()}: ${alert.serverName} changed from ${alert.previousStatus} to ${alert.newStatus}. ${alert.details}`;
 
         if (channel.type === "webhook" && config.url) {
+          if (this.isPrivateUrl(config.url)) {
+            console.error(`[health] Blocked webhook to private URL: ${config.url}`);
+            continue;
+          }
           await fetch(config.url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -149,6 +161,10 @@ class HealthService {
             signal: AbortSignal.timeout(5000),
           });
         } else if (channel.type === "slack" && config.webhookUrl) {
+          if (this.isPrivateUrl(config.webhookUrl)) {
+            console.error(`[health] Blocked Slack webhook to private URL`);
+            continue;
+          }
           await fetch(config.webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

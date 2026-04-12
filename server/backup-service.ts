@@ -41,7 +41,7 @@ class BackupService {
   async createBackup(type: "auto" | "manual" | "snapshot", scope: "full" | "zones" | "configs" | "single_zone", zoneId?: string): Promise<Backup> {
     await this.ensureDir();
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `backup-${scope}-${timestamp}.tar.gz`;
+    const filename = `backup-${scope}-${timestamp}`;
     const filePath = path.join(BACKUP_DIR, filename);
 
     const zones = await storage.getZones();
@@ -111,7 +111,7 @@ class BackupService {
       type,
       scope,
       zoneId: zoneId || null,
-      filePath,
+      filePath: timestamp, // Store timestamp as identifier, not full path
       sizeBytes,
       description,
     });
@@ -128,6 +128,8 @@ class BackupService {
   /** Read BIND9 configuration files for backup */
   private async readBind9Configs(): Promise<Record<string, string>> {
     const configs: Record<string, string> = {};
+    if (!(await bind9Service.isAvailable())) return configs;
+
     const confFiles = [
       { name: "named.conf.options", path: "/etc/bind/named.conf.options" },
       { name: "named.conf.local", path: "/etc/bind/named.conf.local" },
@@ -137,14 +139,17 @@ class BackupService {
 
     for (const file of confFiles) {
       try {
-        if (await bind9Service.isAvailable()) {
-          const content = await bind9Service.readRawFile(file.path);
-          if (content) configs[file.name] = content;
-        }
+        const content = await bind9Service.readRawFile(file.path);
+        if (content) configs[file.name] = content;
       } catch {}
     }
 
     return configs;
+  }
+
+  /** Validate timestamp format to prevent path traversal */
+  private isValidTimestamp(ts: string): boolean {
+    return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/.test(ts);
   }
 
   /** Restore from a backup */
@@ -153,7 +158,8 @@ class BackupService {
       const backup = await storage.getBackup(backupId);
       if (!backup) return { success: false, message: "Backup not found" };
 
-      const timestamp = backup.filePath.split("-").slice(-1)?.[0]?.replace(".tar.gz", "") || "";
+      const timestamp = backup.filePath; // filePath stores the timestamp identifier
+      if (!this.isValidTimestamp(timestamp)) return { success: false, message: "Invalid backup identifier" };
       const metaPath = path.join(BACKUP_DIR, `meta-${timestamp}.json`);
 
       let meta: any = {};
@@ -181,7 +187,9 @@ class BackupService {
               for (const record of records) {
                 try {
                   const existingRec = await storage.getRecord(record.id);
-                  if (!existingRec) {
+                  if (existingRec) {
+                    await storage.updateRecord(record.id, record);
+                  } else {
                     await storage.createRecord(record);
                   }
                 } catch {}
@@ -214,7 +222,8 @@ class BackupService {
       if (!backup) return { success: false, message: "Backup not found" };
 
       // Try to delete backup files
-      const timestamp = backup.filePath.split("-").slice(-1)?.[0]?.replace(".tar.gz", "") || "";
+      const timestamp = backup.filePath; // filePath stores the timestamp identifier
+      if (!this.isValidTimestamp(timestamp)) return { success: false, message: "Invalid backup identifier" };
       try {
         const files = await fs.readdir(BACKUP_DIR);
         for (const f of files) {
