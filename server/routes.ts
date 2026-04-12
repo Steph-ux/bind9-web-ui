@@ -14,6 +14,26 @@ import { z } from "zod";
 import { hashPassword } from "./auth";
 import { insertUserSchema } from "@shared/schema";
 
+// Async mutex to prevent concurrent BIND9 zone writes (race condition)
+let rpzSyncLock = Promise.resolve();
+function syncRpzZone(): void {
+  const prev = rpzSyncLock;
+  let release: () => void;
+  rpzSyncLock = new Promise<void>(r => { release = r; });
+  prev.then(async () => {
+    try {
+      const zoneData = await storage.getRpzZoneData();
+      await bind9Service.ensureRpzConfigured();
+      await bind9Service.writeRpzZone("rpz.intra", zoneData);
+      await bind9Service.reload();
+    } catch (syncErr: any) {
+      console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+    } finally {
+      release!();
+    }
+  });
+}
+
 /** Sanitize error messages — in production, hide internal details for 500 errors */
 function safeError(status: number, message: string): string {
   if (process.env.NODE_ENV === "production" && status >= 500) {
@@ -197,16 +217,9 @@ export async function registerRoutes(
       // Create in DB
       const entry = await storage.createRpzEntry(data);
 
-      // Sync to BIND9 (background — respond first)
+      // Sync to BIND9 (background — respond first, mutex-serialized)
       res.json(entry);
-      try {
-        const zoneData = await storage.getRpzZoneData();
-        await bind9Service.ensureRpzConfigured();
-        await bind9Service.writeRpzZone("rpz.intra", zoneData);
-        await bind9Service.reload();
-      } catch (syncErr: any) {
-        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-      }
+      syncRpzZone();
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
@@ -218,18 +231,14 @@ export async function registerRoutes(
   app.delete("/api/rpz/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
-      await storage.deleteRpzEntry(id);
-
-      // Sync to BIND9 (background — respond first)
-      res.json({ message: "Entry deleted" });
-      try {
-        const zoneData = await storage.getRpzZoneData();
-        await bind9Service.ensureRpzConfigured();
-        await bind9Service.writeRpzZone("rpz.intra", zoneData);
-        await bind9Service.reload();
-      } catch (syncErr: any) {
-        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      const deleted = await storage.deleteRpzEntry(id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Entry not found" });
       }
+
+      // Sync to BIND9 (background — respond first, mutex-serialized)
+      res.json({ message: "Entry deleted" });
+      syncRpzZone();
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -277,15 +286,8 @@ export async function registerRoutes(
       // Respond first, then sync BIND9 in background
       res.json({ message: `Synced ${imported} entries, ${skipped} skipped`, imported, skipped });
 
-      // Background: re-sync zone file from DB (to ensure consistency)
-      try {
-        const zoneData = await storage.getRpzZoneData();
-        await bind9Service.ensureRpzConfigured();
-        await bind9Service.writeRpzZone("rpz.intra", zoneData);
-        await bind9Service.reload();
-      } catch (syncErr: any) {
-        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-      }
+      // Background: re-sync zone file from DB (mutex-serialized)
+      syncRpzZone();
 
       await storage.insertLog({
         level: "INFO",
@@ -309,7 +311,7 @@ export async function registerRoutes(
       }
       const safeSource = String(sourceName || "import").replace(/[\n\r$]/g, "").slice(0, 100);
 
-      const parsed = bind9Service.parseRpzBlocklist(content, safeSource);
+      const parsed = await bind9Service.parseRpzBlocklist(content, safeSource);
       if (parsed.length === 0) {
         return res.status(400).json({ message: "No valid RPZ entries found in the provided content" });
       }
@@ -341,15 +343,8 @@ export async function registerRoutes(
         duplicates,
       });
 
-      // Background sync to BIND9 zone file
-      try {
-        const zoneData = await storage.getRpzZoneData();
-        await bind9Service.ensureRpzConfigured();
-        await bind9Service.writeRpzZone("rpz.intra", zoneData);
-        await bind9Service.reload();
-      } catch (syncErr: any) {
-        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-      }
+      // Background sync to BIND9 zone file (mutex-serialized)
+      syncRpzZone();
 
       await storage.insertLog({
         level: "INFO",
@@ -380,7 +375,7 @@ export async function registerRoutes(
       }
       // Prevent SSRF — block internal/private IPs
       const hostname = parsedUrl.hostname;
-      if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd)/i.test(hostname)) {
+      if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:|169\.254\.|100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\.)/i.test(hostname)) {
         return res.status(400).json({ message: "Private/internal URLs are not allowed" });
       }
 
@@ -399,7 +394,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "File too large (max 200MB)" });
       }
 
-      const parsed = bind9Service.parseRpzBlocklist(content, safeSource);
+      const parsed = await bind9Service.parseRpzBlocklist(content, safeSource);
       if (parsed.length === 0) {
         return res.status(400).json({ message: "No valid RPZ entries found in the fetched content" });
       }
@@ -431,15 +426,8 @@ export async function registerRoutes(
         duplicates,
       });
 
-      // Background sync to BIND9 zone file
-      try {
-        const zoneData = await storage.getRpzZoneData();
-        await bind9Service.ensureRpzConfigured();
-        await bind9Service.writeRpzZone("rpz.intra", zoneData);
-        await bind9Service.reload();
-      } catch (syncErr: any) {
-        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-      }
+      // Background sync to BIND9 zone file (mutex-serialized)
+      syncRpzZone();
 
       await storage.insertLog({
         level: "INFO",
@@ -458,16 +446,23 @@ export async function registerRoutes(
       const count = stats.total;
       await storage.clearRpzEntries();
 
-      // Respond first, then sync BIND9 in background
+      // Respond first, then sync BIND9 empty zone in background (mutex-serialized)
       res.json({ message: `All ${count} RPZ entries cleared` });
 
-      try {
-        await bind9Service.ensureRpzConfigured();
-        await bind9Service.writeRpzZone("rpz.intra", []);
-        await bind9Service.reload();
-      } catch (syncErr: any) {
-        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-      }
+      const prev = rpzSyncLock;
+      let release: () => void;
+      rpzSyncLock = new Promise<void>(r => { release = r; });
+      prev.then(async () => {
+        try {
+          await bind9Service.ensureRpzConfigured();
+          await bind9Service.writeRpzZone("rpz.intra", []);
+          await bind9Service.reload();
+        } catch (syncErr: any) {
+          console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+        } finally {
+          release!();
+        }
+      });
 
       await storage.insertLog({
         level: "WARN",

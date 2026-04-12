@@ -119,6 +119,8 @@ if (DB_TYPE === "sqlite") {
   try { sqlite.exec(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Index on type for faster filtering
   try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
+  // Index on name for LIKE prefix search and dedup checks
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_name ON rpz_entries(name)`); } catch {}
 
   console.log(`[db] SQLite database ready at ${dbPath}`);
 
@@ -141,6 +143,8 @@ if (DB_TYPE === "sqlite") {
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Index on type for faster filtering
   try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
+  // Index on name for LIKE prefix search and dedup checks
+  try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_name ON rpz_entries(name)`); } catch {}
 
   console.log(`[db] PostgreSQL database ready (${DATABASE_URL.replace(/:[^:@]+@/, ":****@")})`);
 
@@ -163,6 +167,8 @@ if (DB_TYPE === "sqlite") {
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Index on type for faster filtering
   try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
+  // Index on name for LIKE prefix search and dedup checks
+  try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_name ON rpz_entries(name)`); } catch {}
 
   console.log(`[db] MySQL database ready (${DATABASE_URL.replace(/:[^:@]+@/, ":****@")})`);
 
