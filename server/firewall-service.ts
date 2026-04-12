@@ -544,6 +544,11 @@ class FirewallService {
 
     async toggle(enable: boolean): Promise<void> {
         const { active: backend } = await this.detectBackend();
+        if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
+            this.mockActive = enable;
+            console.log(`[Mock Firewall] Toggle: ${enable}`);
+            return;
+        }
         switch (backend) {
             case "ufw": return await this.toggleUfw(enable);
             case "firewalld": return await this.toggleFirewalld(enable);
@@ -555,6 +560,13 @@ class FirewallService {
 
     async addRule(toPort: string, proto: "tcp" | "udp" | "any", action: "allow" | "deny", fromIp: string = "any"): Promise<void> {
         const { active: backend } = await this.detectBackend();
+        if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
+            const newId = this.mockRules.length + 1;
+            const ruleAction = action === "allow" ? "ALLOW" as const : "DENY" as const;
+            this.mockRules.push({ id: newId, to: `${toPort}/${proto}`, action: ruleAction, from: fromIp === "any" ? "Anywhere" : fromIp, ipv6: false });
+            console.log(`[Mock Firewall] Add rule: ${action} ${proto} ${toPort} from ${fromIp}`);
+            return;
+        }
         switch (backend) {
             case "ufw": return await this.addRuleUfw(toPort, proto, action, fromIp);
             case "firewalld": return await this.addRuleFirewalld(toPort, proto, action, fromIp);
@@ -566,6 +578,11 @@ class FirewallService {
 
     async deleteRule(id: number): Promise<void> {
         const { active: backend } = await this.detectBackend();
+        if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
+            this.mockRules = this.mockRules.filter(r => r.id !== id);
+            console.log(`[Mock Firewall] Delete rule: ${id}`);
+            return;
+        }
         switch (backend) {
             case "ufw": return await this.deleteRuleUfw(id);
             case "firewalld": return await this.deleteRuleFirewalld(id);
