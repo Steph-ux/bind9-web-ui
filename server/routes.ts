@@ -1,5 +1,7 @@
+// Copyright © 2025 Stephane ASSOGBA
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import os from "os";
 import { storage } from "./storage";
@@ -11,6 +13,14 @@ import { z } from "zod";
 
 import { hashPassword } from "./auth";
 import { insertUserSchema } from "@shared/schema";
+
+/** Sanitize error messages — in production, hide internal details for 500 errors */
+function safeError(status: number, message: string): string {
+  if (process.env.NODE_ENV === "production" && status >= 500) {
+    return "Internal Server Error";
+  }
+  return message;
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -52,24 +62,27 @@ export async function registerRoutes(
       const status = await firewallService.getStatus();
       res.json(status);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   app.post("/api/firewall/toggle", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { enable } = req.body;
+      if (typeof enable !== "boolean") return res.status(400).json({ message: "enable must be a boolean" });
       await firewallService.toggle(enable);
       res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   app.post("/api/firewall/backend", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { backend } = req.body;
+      const ALLOWED_BACKENDS = ["ufw", "firewalld", "iptables", "nftables", "none"];
       if (!backend) return res.status(400).json({ message: "Backend is required" });
+      if (!ALLOWED_BACKENDS.includes(backend)) return res.status(400).json({ message: `Invalid backend. Allowed: ${ALLOWED_BACKENDS.join(", ")}` });
       firewallService.setBackend(backend);
       const status = await firewallService.getStatus();
       res.json({ message: `Switched to ${backend}`, status });
@@ -83,7 +96,7 @@ export async function registerRoutes(
       const { rules } = await firewallService.getStatus();
       res.json(rules);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -91,11 +104,15 @@ export async function registerRoutes(
     try {
       const { toPort, proto, action, fromIp } = req.body;
       if (!toPort) return res.status(400).json({ message: "Port is required" });
+      const ALLOWED_PROTOS = ["tcp", "udp", "any"];
+      const ALLOWED_ACTIONS = ["allow", "deny", "reject"];
+      if (proto && !ALLOWED_PROTOS.includes(proto)) return res.status(400).json({ message: `Invalid protocol. Allowed: ${ALLOWED_PROTOS.join(", ")}` });
+      if (action && !ALLOWED_ACTIONS.includes(action)) return res.status(400).json({ message: `Invalid action. Allowed: ${ALLOWED_ACTIONS.join(", ")}` });
 
       await firewallService.addRule(toPort, proto || "tcp", action || "allow", fromIp || "any");
       res.json({ message: "Rule added" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(400).json({ message: error.message });
     }
   });
 
@@ -105,7 +122,7 @@ export async function registerRoutes(
       await firewallService.deleteRule(id);
       res.json({ message: "Rule deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -115,7 +132,7 @@ export async function registerRoutes(
       const entries = await storage.getRpzEntries();
       res.json(entries);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -144,7 +161,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -167,7 +184,7 @@ export async function registerRoutes(
 
       res.json({ message: "Entry deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -183,7 +200,7 @@ export async function registerRoutes(
       });
       res.json(safeUsers);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -207,27 +224,39 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   app.put("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
-      const { password, role, ...rest } = req.body;
+      const { password, role, username, mustChangePassword } = req.body;
 
+      const ALLOWED_ROLES = ["admin", "operator", "viewer"];
       const updateData: any = {};
-      if (role) updateData.role = role;
-      if (password) {
-        updateData.password = await hashPassword(password);
+      if (role) {
+        if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ message: `Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}` });
+        updateData.role = role;
       }
+      if (password) {
+        if (password.length < 4) return res.status(400).json({ message: "Password must be at least 4 characters" });
+        updateData.password = await hashPassword(password);
+        updateData.mustChangePassword = false;
+      }
+      if (username !== undefined) {
+        if (typeof username !== 'string' || username.trim().length < 2) return res.status(400).json({ message: "Username must be at least 2 characters" });
+        if (!/^[a-zA-Z0-9._-]+$/.test(username)) return res.status(400).json({ message: "Username contains invalid characters" });
+        updateData.username = username.trim();
+      }
+      if (mustChangePassword !== undefined) updateData.mustChangePassword = !!mustChangePassword;
 
       const updated = await storage.updateUser(id, updateData);
       // exclude password
       const { password: _, ...safe } = updated;
       res.json(safe);
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      res.status(500).json({ message: safeError(500, e.message) });
     }
   });
 
@@ -240,7 +269,7 @@ export async function registerRoutes(
       await storage.deleteUser(id);
       res.json({ message: "User deleted" });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      res.status(500).json({ message: safeError(500, e.message) });
     }
   });
 
@@ -420,7 +449,7 @@ export async function registerRoutes(
         sshState: sshManager.getState(),
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -436,7 +465,7 @@ export async function registerRoutes(
       })));
       res.json(enriched);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -537,7 +566,7 @@ export async function registerRoutes(
 
     } catch (error: any) {
       console.error(`[api] Sync fatal error: ${error.message}`);
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -549,7 +578,7 @@ export async function registerRoutes(
       const records = await storage.getRecords(zone.id);
       res.json({ ...zone, records });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -635,7 +664,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -644,10 +673,32 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
-      const updated = await storage.updateZone(id, req.body);
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { domain, type, status, adminEmail, filePath } = req.body;
+      const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
+      const ALLOWED_ZONE_STATUSES = ["active", "inactive"];
+      if (domain !== undefined) {
+        if (!/^[a-zA-Z0-9._-]+$/.test(String(domain))) return res.status(400).json({ message: "Invalid domain name" });
+        allowed.domain = String(domain);
+      }
+      if (type !== undefined) {
+        if (!ALLOWED_ZONE_TYPES.includes(String(type))) return res.status(400).json({ message: `Invalid zone type. Allowed: ${ALLOWED_ZONE_TYPES.join(", ")}` });
+        allowed.type = String(type);
+      }
+      if (status !== undefined) {
+        if (!ALLOWED_ZONE_STATUSES.includes(String(status))) return res.status(400).json({ message: `Invalid status. Allowed: ${ALLOWED_ZONE_STATUSES.join(", ")}` });
+        allowed.status = String(status);
+      }
+      if (adminEmail !== undefined) allowed.adminEmail = String(adminEmail);
+      if (filePath !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(filePath))) return res.status(400).json({ message: "Invalid file path" });
+        allowed.filePath = String(filePath);
+      }
+      const updated = await storage.updateZone(id, allowed);
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -676,7 +727,7 @@ export async function registerRoutes(
 
       res.json({ message: "Zone deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -715,6 +766,11 @@ export async function registerRoutes(
       );
 
       // Reload zone
+      // Validate domain before passing to rndc to prevent command injection
+      if (!/^[a-zA-Z0-9._-]+$/.test(zone.domain)) {
+        console.error(`[bind9] Invalid zone domain for rndc reload: ${zone.domain}`);
+        return;
+      }
       await bind9Service.rndc(`reload ${zone.domain}`);
       console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
     } catch (error: any) {
@@ -836,7 +892,7 @@ export async function registerRoutes(
       const records = await storage.getRecords(id);
       res.json(records);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -866,7 +922,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -875,8 +931,19 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
-
-      const updated = await storage.updateRecord(id, req.body);
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { name, type, value, ttl, priority } = req.body;
+      const ALLOWED_DNS_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SRV", "CAA", "SOA", "TLSA", "DS", "DNSKEY"];
+      if (name !== undefined) allowed.name = String(name);
+      if (type !== undefined) {
+        if (!ALLOWED_DNS_TYPES.includes(String(type).toUpperCase())) return res.status(400).json({ message: `Invalid record type. Allowed: ${ALLOWED_DNS_TYPES.join(", ")}` });
+        allowed.type = String(type).toUpperCase();
+      }
+      if (value !== undefined) allowed.value = String(value);
+      if (ttl !== undefined) allowed.ttl = parseInt(ttl, 10) || 3600;
+      if (priority !== undefined) allowed.priority = parseInt(priority, 10) || null;
+      const updated = await storage.updateRecord(id, allowed);
 
       // Sync changes to disk
       await syncZoneFile(record.zoneId);
@@ -886,7 +953,7 @@ export async function registerRoutes(
 
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -906,7 +973,7 @@ export async function registerRoutes(
 
       res.json({ message: "Record deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -915,7 +982,11 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   app.get("/api/config/:section", async (req: Request, res: Response) => {
     try {
-      const { section } = req.params;
+      const section = String(req.params.section);
+      // Validate section name to prevent path traversal
+      if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
+        return res.status(400).json({ message: "Invalid section name" });
+      }
 
       let content = "";
       try {
@@ -935,13 +1006,17 @@ export async function registerRoutes(
 
       res.json({ section, content });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   app.put("/api/config/:section", requireAdmin, async (req: Request, res: Response) => {
     try {
       const section = req.params.section as string;
+      // Validate section name to prevent path traversal
+      if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
+        return res.status(400).json({ message: "Invalid section name" });
+      }
       const { content } = req.body;
 
       if (!content || typeof content !== "string") {
@@ -971,7 +1046,7 @@ export async function registerRoutes(
 
       res.json(snapshot);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -982,7 +1057,7 @@ export async function registerRoutes(
     try {
       res.json(await storage.getAcls());
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1013,7 +1088,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1022,7 +1097,13 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
       if (!acl) return res.status(404).json({ message: "ACL not found" });
-      const updated = await storage.updateAcl(id, req.body);
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { name, networks, comment } = req.body;
+      if (name !== undefined) allowed.name = String(name);
+      if (networks !== undefined) allowed.networks = String(networks);
+      if (comment !== undefined) allowed.comment = String(comment);
+      const updated = await storage.updateAcl(id, allowed);
 
       // Sync to BIND9
       try {
@@ -1037,7 +1118,7 @@ export async function registerRoutes(
 
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1067,7 +1148,7 @@ export async function registerRoutes(
 
       res.json({ message: "ACL deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1085,7 +1166,7 @@ export async function registerRoutes(
       }));
       res.json(safeKeys);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1119,7 +1200,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1149,84 +1230,9 @@ export async function registerRoutes(
 
       res.json({ message: "Key deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
-
-  // ══════════════════════════════════════════════════════════════
-  //  ACLs
-  // ══════════════════════════════════════════════════════════════
-  app.get("/api/acls", async (_req: Request, res: Response) => {
-    try {
-      const acls = await storage.getAcls();
-      res.json(acls);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
-    try {
-      const data = insertAclSchema.parse(req.body);
-      const acl = await storage.createAcl(data);
-
-      await storage.insertLog({
-        level: "INFO",
-        source: "security",
-        message: `ACL '${acl.name}' created`,
-      });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
-      }
-
-      res.status(201).json(acl);
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid data", errors: error.errors });
-      }
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.delete("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
-    try {
-      const id = req.params.id as string;
-      const acl = await storage.getAcl(id);
-      if (!acl) return res.status(404).json({ message: "ACL not found" });
-
-      await storage.deleteAcl(id);
-
-      await storage.insertLog({
-        level: "WARN",
-        source: "security",
-        message: `ACL '${acl.name}' deleted`,
-      });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
-      }
-
-      res.json({ message: "ACL deleted" });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
 
   // ══════════════════════════════════════════════════════════════
   //  LOGS
@@ -1237,7 +1243,7 @@ export async function registerRoutes(
         level: req.query.level as string | undefined,
         source: req.query.source as string | undefined,
         search: req.query.search as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string) : 200,
+        limit: req.query.limit ? Math.min(parseInt(req.query.limit as string) || 200, 1000) : 200,
       };
       // Combine app logs with real BIND9 logs
       const appLogs = await storage.getLogs(filter);
@@ -1278,27 +1284,27 @@ export async function registerRoutes(
 
       res.json(all);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   /** Get only real BIND9 daemon logs */
   app.get("/api/logs/bind9", async (req: Request, res: Response) => {
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 200;
+      const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string) || 200, 1000) : 200;
       const logs = await bind9Service.readBind9Logs(limit);
       res.json(logs);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
-  app.delete("/api/logs", async (_req: Request, res: Response) => {
+  app.delete("/api/logs", requireAdmin, async (_req: Request, res: Response) => {
     try {
       await storage.clearLogs();
       res.json({ message: "Logs cleared" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1321,14 +1327,14 @@ export async function registerRoutes(
         sshState: sshManager.getState(),
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   // ══════════════════════════════════════════════════════════════
   //  RNDC COMMANDS
   // ══════════════════════════════════════════════════════════════
-  app.post("/api/rndc/:command", async (req: Request, res: Response) => {
+  app.post("/api/rndc/:command", requireOperator, async (req: Request, res: Response) => {
     try {
       const command = req.params.command as string;
       const allowed = ["reload", "flush", "status", "stats", "reconfig", "dumpdb", "querylog"];
@@ -1350,14 +1356,14 @@ export async function registerRoutes(
 
       res.json({ command, output });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   // ══════════════════════════════════════════════════════════════
   //  SSH CONNECTIONS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/connections", async (_req: Request, res: Response) => {
+  app.get("/api/connections", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const conns = await storage.getConnections();
       // Mask passwords in response
@@ -1367,7 +1373,7 @@ export async function registerRoutes(
         privateKey: c.privateKey ? "***" : "",
       })));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1391,7 +1397,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1401,19 +1407,50 @@ export async function registerRoutes(
       const conn = await storage.getConnection(id);
       if (!conn) return res.status(404).json({ message: "Connection not found" });
 
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, rndcBin } = req.body;
+      if (name !== undefined) allowed.name = String(name);
+      if (host !== undefined) {
+        const safeHost = String(host).trim();
+        if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
+        allowed.host = safeHost;
+      }
+      if (port !== undefined) {
+        const safePort = parseInt(port, 10) || 22;
+        if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port number" });
+        allowed.port = safePort;
+      }
+      if (username !== undefined) allowed.username = String(username);
+      if (authType !== undefined) {
+        const safeAuthType = String(authType);
+        if (safeAuthType !== "password" && safeAuthType !== "key") return res.status(400).json({ message: "Invalid authType. Allowed: password, key" });
+        allowed.authType = safeAuthType;
+      }
+      if (bind9ConfDir !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(bind9ConfDir))) return res.status(400).json({ message: "Invalid confDir path" });
+        allowed.bind9ConfDir = String(bind9ConfDir);
+      }
+      if (bind9ZoneDir !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(bind9ZoneDir))) return res.status(400).json({ message: "Invalid zoneDir path" });
+        allowed.bind9ZoneDir = String(bind9ZoneDir);
+      }
+      if (rndcBin !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(rndcBin))) return res.status(400).json({ message: "Invalid rndcBin path" });
+        allowed.rndcBin = String(rndcBin);
+      }
       // Don't overwrite password/key if they come as "***"
-      const updates = { ...req.body };
-      if (updates.password === "***") delete updates.password;
-      if (updates.privateKey === "***") delete updates.privateKey;
+      if (password !== undefined && password !== "***") allowed.password = String(password);
+      if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
 
-      const updated = await storage.updateConnection(id, updates);
+      const updated = await storage.updateConnection(id, allowed);
       res.json({
         ...updated,
         password: updated.password ? "***" : "",
         privateKey: updated.privateKey ? "***" : "",
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1439,7 +1476,7 @@ export async function registerRoutes(
 
       res.json({ message: "Connection deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1477,7 +1514,7 @@ export async function registerRoutes(
 
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1488,19 +1525,29 @@ export async function registerRoutes(
       if (!host || !username) {
         return res.status(400).json({ message: "host and username are required" });
       }
+      // Validate host: prevent SSRF — only allow hostnames/IPs, no schemes or internal addrs
+      const safeHost = String(host).trim();
+      if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) {
+        return res.status(400).json({ message: "Invalid host format" });
+      }
+      const safePort = parseInt(port, 10) || 22;
+      if (safePort < 1 || safePort > 65535) {
+        return res.status(400).json({ message: "Invalid port number" });
+      }
+      const safeAuthType = authType === "key" ? "key" : "password";
 
       const result = await sshManager.testConnection({
-        host,
-        port: port || 22,
-        username,
-        authType: authType || "password",
-        password,
-        privateKey,
+        host: safeHost,
+        port: safePort,
+        username: String(username),
+        authType: safeAuthType,
+        password: password ? String(password) : undefined,
+        privateKey: privateKey ? String(privateKey) : undefined,
       });
 
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1525,7 +1572,7 @@ export async function registerRoutes(
         await sshManager.connect();
       } catch (e: any) {
         await storage.updateConnection(id, { lastStatus: "failed" });
-        return res.status(502).json({ message: `SSH connection failed: ${e.message}` });
+        return res.status(502).json({ message: safeError(502, `SSH connection failed: ${e.message}`) });
       }
 
       // Switch bind9-service to SSH mode
@@ -1553,7 +1600,7 @@ export async function registerRoutes(
         message: `Connected to ${conn.host}`,
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1573,18 +1620,51 @@ export async function registerRoutes(
 
       res.json({ message: "Switched to local mode" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
 
   // ══════════════════════════════════════════════════════════════
-  //  WEBSOCKET — Live Logs
+  //  WEBSOCKET — Live Logs (requires auth via cookie)
   // ══════════════════════════════════════════════════════════════
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws/logs" });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws/logs",
+    verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
+      // WS upgrade requests bypass Express middleware, so we verify
+      // the session cookie by making an internal HTTP request
+      const cookie = info.req.headers?.cookie || "";
+      if (!cookie.includes("connect.sid")) {
+        return callback(false, 4001, "Authentication required");
+      }
+      // Verify session by making an internal request to /api/auth/me
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: httpServer.address() ? (httpServer.address() as any).port : 3001,
+        path: "/api/auth/me",
+        method: "GET",
+        headers: { Cookie: cookie },
+      }, (res: any) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => { body += chunk; });
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            callback(!!data.id);
+          } catch {
+            callback(false, 4001, "Authentication required");
+          }
+        });
+      });
+      req.on("error", () => callback(false, 4001, "Authentication required"));
+      req.setTimeout(3000, () => { req.destroy(); callback(false, 4001, "Auth check timeout"); });
+      req.end();
+    },
+  });
 
   wss.on("connection", (ws: WebSocket) => {
-    console.log("[ws] Log client connected");
+    console.log("[ws] Authenticated log client connected");
 
     storage.getLogs({ limit: 50 }).then((logs) => {
       ws.send(JSON.stringify({ type: "history", data: logs }));

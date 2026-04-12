@@ -12,6 +12,8 @@ type AuthContextType = {
     isAdmin: boolean;
     canManageDNS: boolean;
     isReadOnly: boolean;
+    mustChangePassword: boolean;
+    changeOwnPassword: (newPassword: string, currentPassword?: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -26,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         const fetchUser = async () => {
             try {
-                const res = await fetch("/api/auth/me");
+                const res = await fetch("/api/auth/me", { credentials: "same-origin" });
                 if (res.ok) {
                     try {
                         const data = await res.json();
@@ -51,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const res = await fetch("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
                 body: JSON.stringify(data),
             });
 
@@ -70,8 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 throw new Error("Server returned an invalid response. Please ensure the backend is running.");
             }
             setUser(user);
-            toast({ title: "Welcome back!", description: `Logged in as ${user.username}` });
-            setLocation("/");
+            if (user.mustChangePassword) {
+                toast({ title: "Password change required", description: "You must change your default password before continuing.", variant: "destructive" });
+                setLocation("/change-password");
+            } else {
+                toast({ title: "Welcome back!", description: `Logged in as ${user.username}` });
+                setLocation("/");
+            }
         } catch (e: any) {
             toast({
                 variant: "destructive",
@@ -84,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = async () => {
         try {
-            await fetch("/api/auth/logout", { method: "POST" });
+            await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
             setUser(null);
             setLocation("/auth");
             toast({ title: "Logged out", description: "See you soon!" });
@@ -97,6 +105,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const changeOwnPassword = async (newPassword: string, currentPassword?: string) => {
+        const res = await fetch("/api/auth/password", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ newPassword, currentPassword }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ message: "Failed to change password" }));
+            throw new Error(err.message);
+        }
+        setUser({ ...user!, mustChangePassword: false });
+        setLocation("/");
+        toast({ title: "Password changed", description: "Your password has been updated successfully." });
+    };
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -106,7 +130,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             logout,
             isAdmin: user?.role === "admin",
             canManageDNS: user?.role === "admin" || user?.role === "operator",
-            isReadOnly: user?.role === "viewer"
+            isReadOnly: user?.role === "viewer",
+            mustChangePassword: !!user?.mustChangePassword,
+            changeOwnPassword,
         }}>
             {children}
         </AuthContext.Provider>
@@ -148,6 +174,10 @@ export function ProtectedRoute({
 
     if (adminOnly && user.role !== "admin") {
         return <Redirect to="/" />;
+    }
+
+    if (user.mustChangePassword) {
+        return <Redirect to="/change-password" />;
     }
 
     return <Route path={path} component={Component} />;

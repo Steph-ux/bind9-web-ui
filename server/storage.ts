@@ -1,5 +1,6 @@
+// Copyright © 2025 Stephane ASSOGBA
 import { eq, desc, like, and, sql } from "drizzle-orm";
-import { db } from "./db";
+import { db, dbReady } from "./db";
 import {
   users, zones, dnsRecords, acls, tsigKeys, configSnapshots, logEntries, connections,
   type User, type InsertUser,
@@ -75,47 +76,66 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  private dbInitialized = false;
+
+  /** Ensure DB is initialized before any operation */
+  private async ensureDb(): Promise<void> {
+    if (!this.dbInitialized) {
+      await dbReady;
+      this.dbInitialized = true;
+    }
+  }
+
   // ── Users ────────────────────────────────────────────
   async getUser(id: string): Promise<User | undefined> {
+    await this.ensureDb();
     const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
     return user;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
+    await this.ensureDb();
     const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     return user;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
+    await this.ensureDb();
     const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
 
   async getUsers(): Promise<User[]> {
+    await this.ensureDb();
     return db.select().from(users);
   }
 
   async updateUser(id: string, data: Partial<User>): Promise<User> {
+    await this.ensureDb();
     const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
     if (!user) throw new Error("User not found");
     return user;
   }
 
   async deleteUser(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(users).where(eq(users.id, id));
   }
 
   // ── Zones ────────────────────────────────────────────
   async getZones(): Promise<Zone[]> {
+    await this.ensureDb();
     return db.select().from(zones).orderBy(zones.domain);
   }
 
   async getZone(id: string): Promise<Zone | undefined> {
+    await this.ensureDb();
     const [zone] = await db.select().from(zones).where(eq(zones.id, id)).limit(1);
     return zone;
   }
 
   async createZone(insertZone: InsertZone): Promise<Zone> {
+    await this.ensureDb();
     const now = new Date().toISOString();
     const serial = now.slice(0, 10).replace(/-/g, "") + "01";
     const [zone] = await db.insert(zones).values({
@@ -130,6 +150,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateZone(id: string, data: Partial<Zone>): Promise<Zone> {
+    await this.ensureDb();
     const [zone] = await db.update(zones)
       .set({ ...data, updatedAt: new Date().toISOString() })
       .where(eq(zones.id, id))
@@ -138,10 +159,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteZone(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(zones).where(eq(zones.id, id));
   }
 
   async getZoneRecordCount(zoneId: string): Promise<number> {
+    await this.ensureDb();
     const result = await db.select({ count: sql<number>`count(*)` })
       .from(dnsRecords)
       .where(eq(dnsRecords.zoneId, zoneId));
@@ -150,20 +173,24 @@ export class DatabaseStorage implements IStorage {
 
   // ── DNS Records ──────────────────────────────────────
   async getRecords(zoneId: string): Promise<DnsRecord[]> {
+    await this.ensureDb();
     return db.select().from(dnsRecords).where(eq(dnsRecords.zoneId, zoneId)).orderBy(dnsRecords.name);
   }
 
   async getRecord(id: string): Promise<DnsRecord | undefined> {
+    await this.ensureDb();
     const [record] = await db.select().from(dnsRecords).where(eq(dnsRecords.id, id)).limit(1);
     return record;
   }
 
   async createRecord(record: InsertDnsRecord): Promise<DnsRecord> {
+    await this.ensureDb();
     const [created] = await db.insert(dnsRecords).values(record).returning();
     return created;
   }
 
   async updateRecord(id: string, data: Partial<DnsRecord>): Promise<DnsRecord> {
+    await this.ensureDb();
     const [record] = await db.update(dnsRecords)
       .set(data)
       .where(eq(dnsRecords.id, id))
@@ -172,20 +199,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteRecord(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(dnsRecords).where(eq(dnsRecords.id, id));
   }
 
   // ── ACLs ─────────────────────────────────────────────
   async getAcls(): Promise<Acl[]> {
+    await this.ensureDb();
     return db.select().from(acls).orderBy(acls.name);
   }
 
   async getAcl(id: string): Promise<Acl | undefined> {
+    await this.ensureDb();
     const [acl] = await db.select().from(acls).where(eq(acls.id, id)).limit(1);
     return acl;
   }
 
   async createAcl(insertAcl: InsertAcl): Promise<Acl> {
+    await this.ensureDb();
     const [acl] = await db.insert(acls).values({
       ...insertAcl,
       createdAt: new Date().toISOString(),
@@ -194,6 +225,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateAcl(id: string, data: Partial<Acl>): Promise<Acl> {
+    await this.ensureDb();
     const [acl] = await db.update(acls)
       .set(data)
       .where(eq(acls.id, id))
@@ -202,20 +234,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteAcl(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(acls).where(eq(acls.id, id));
   }
 
   // ── TSIG Keys ────────────────────────────────────────
   async getKeys(): Promise<TsigKey[]> {
+    await this.ensureDb();
     return db.select().from(tsigKeys).orderBy(tsigKeys.name);
   }
 
   async getKey(id: string): Promise<TsigKey | undefined> {
+    await this.ensureDb();
     const [key] = await db.select().from(tsigKeys).where(eq(tsigKeys.id, id)).limit(1);
     return key;
   }
 
   async createKey(insertKey: InsertTsigKey): Promise<TsigKey> {
+    await this.ensureDb();
     const [key] = await db.insert(tsigKeys).values({
       ...insertKey,
       createdAt: new Date().toISOString(),
@@ -224,11 +260,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteKey(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(tsigKeys).where(eq(tsigKeys.id, id));
   }
 
   // ── Log Entries ──────────────────────────────────────
   async getLogs(filter?: LogFilter): Promise<LogEntry[]> {
+    await this.ensureDb();
     let query = db.select().from(logEntries);
     const conditions = [];
 
@@ -239,7 +277,9 @@ export class DatabaseStorage implements IStorage {
       conditions.push(eq(logEntries.source, filter.source));
     }
     if (filter?.search) {
-      conditions.push(like(logEntries.message, `%${filter.search}%`));
+      // Escape LIKE special characters to prevent injection
+      const escaped = filter.search.replace(/[%_\\]/g, "\\$&");
+      conditions.push(like(logEntries.message, `%${escaped}%`));
     }
 
     if (conditions.length > 0) {
@@ -250,6 +290,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async insertLog(entry: InsertLogEntry): Promise<LogEntry> {
+    await this.ensureDb();
     const [log] = await db.insert(logEntries).values({
       ...entry,
       timestamp: new Date().toISOString(),
@@ -258,11 +299,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async clearLogs(): Promise<void> {
+    await this.ensureDb();
     await db.delete(logEntries);
   }
 
   // ── Config Snapshots ─────────────────────────────────
   async getConfig(section: string): Promise<ConfigSnapshot | undefined> {
+    await this.ensureDb();
     const [config] = await db.select().from(configSnapshots)
       .where(eq(configSnapshots.section, section))
       .orderBy(desc(configSnapshots.appliedAt))
@@ -271,6 +314,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async saveConfig(section: string, content: string): Promise<ConfigSnapshot> {
+    await this.ensureDb();
     const [config] = await db.insert(configSnapshots).values({
       section,
       content,
@@ -281,15 +325,18 @@ export class DatabaseStorage implements IStorage {
 
   // ── Connections ──────────────────────────────────────
   async getConnections(): Promise<Connection[]> {
+    await this.ensureDb();
     return db.select().from(connections).orderBy(connections.name);
   }
 
   async getConnection(id: string): Promise<Connection | undefined> {
+    await this.ensureDb();
     const [conn] = await db.select().from(connections).where(eq(connections.id, id)).limit(1);
     return conn;
   }
 
   async getActiveConnection(): Promise<Connection | undefined> {
+    await this.ensureDb();
     const [conn] = await db.select().from(connections)
       .where(eq(connections.isActive, true))
       .limit(1);
@@ -297,6 +344,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createConnection(insertConn: InsertConnection): Promise<Connection> {
+    await this.ensureDb();
     const [conn] = await db.insert(connections).values({
       ...insertConn,
       createdAt: new Date().toISOString(),
@@ -305,6 +353,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateConnection(id: string, data: Partial<Connection>): Promise<Connection> {
+    await this.ensureDb();
     const [conn] = await db.update(connections)
       .set(data)
       .where(eq(connections.id, id))
@@ -313,10 +362,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteConnection(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(connections).where(eq(connections.id, id));
   }
 
   async activateConnection(id: string): Promise<Connection> {
+    await this.ensureDb();
     await this.deactivateAllConnections();
     const [conn] = await db.update(connections)
       .set({ isActive: true })
@@ -326,15 +377,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateAllConnections(): Promise<void> {
+    await this.ensureDb();
     await db.update(connections).set({ isActive: false });
   }
 
   // ── RPZ ──────────────────────────────────────────────
   async getRpzEntries(): Promise<RpzEntry[]> {
+    await this.ensureDb();
     return db.select().from(rpzEntries).orderBy(rpzEntries.name);
   }
 
   async createRpzEntry(insertEntry: InsertRpzEntry): Promise<RpzEntry> {
+    await this.ensureDb();
     const [entry] = await db.insert(rpzEntries).values({
       ...insertEntry,
       createdAt: new Date().toISOString(),
@@ -343,6 +397,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteRpzEntry(id: string): Promise<void> {
+    await this.ensureDb();
     await db.delete(rpzEntries).where(eq(rpzEntries.id, id));
   }
 }

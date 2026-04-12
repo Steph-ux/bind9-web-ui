@@ -1,16 +1,17 @@
 // Copyright © 2025 Stephane ASSOGBA
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+// PostgreSQL schema for BIND9 Web UI — mirror of schema.ts using pgTable
+import { pgTable, text, integer, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // ── Users ────────────────────────────────────────────────────────
-export const users = sqliteTable("users", {
+export const users = pgTable("users", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   role: text("role", { enum: ["admin", "operator", "viewer"] }).notNull().default("viewer"),
-  mustChangePassword: integer("must_change_password", { mode: "boolean" }).notNull().default(false),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
@@ -23,7 +24,7 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
 // ── DNS Zones ────────────────────────────────────────────────────
-export const zones = sqliteTable("zones", {
+export const zones = pgTable("zones", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   domain: text("domain").notNull().unique(),
   type: text("type", { enum: ["master", "slave", "forward"] }).notNull().default("master"),
@@ -44,7 +45,7 @@ export type InsertZone = z.infer<typeof insertZoneSchema>;
 export type Zone = typeof zones.$inferSelect;
 
 // ── DNS Records ──────────────────────────────────────────────────
-export const dnsRecords = sqliteTable("dns_records", {
+export const dnsRecords = pgTable("dns_records", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   zoneId: text("zone_id").notNull().references(() => zones.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
@@ -66,7 +67,7 @@ export type InsertDnsRecord = z.infer<typeof insertDnsRecordSchema>;
 export type DnsRecord = typeof dnsRecords.$inferSelect;
 
 // ── ACLs ─────────────────────────────────────────────────────────
-export const acls = sqliteTable("acls", {
+export const acls = pgTable("acls", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull().unique(),
   networks: text("networks").notNull(),
@@ -83,7 +84,7 @@ export type InsertAcl = z.infer<typeof insertAclSchema>;
 export type Acl = typeof acls.$inferSelect;
 
 // ── TSIG Keys ────────────────────────────────────────────────────
-export const tsigKeys = sqliteTable("tsig_keys", {
+export const tsigKeys = pgTable("tsig_keys", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull().unique(),
   algorithm: text("algorithm", { enum: ["hmac-sha256", "hmac-sha512", "hmac-md5"] }).notNull().default("hmac-sha256"),
@@ -100,7 +101,7 @@ export type InsertTsigKey = z.infer<typeof insertTsigKeySchema>;
 export type TsigKey = typeof tsigKeys.$inferSelect;
 
 // ── Config Snapshots ─────────────────────────────────────────────
-export const configSnapshots = sqliteTable("config_snapshots", {
+export const configSnapshots = pgTable("config_snapshots", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   section: text("section").notNull(),
   content: text("content").notNull(),
@@ -110,7 +111,7 @@ export const configSnapshots = sqliteTable("config_snapshots", {
 export type ConfigSnapshot = typeof configSnapshots.$inferSelect;
 
 // ── SSH Connections ──────────────────────────────────────────────
-export const connections = sqliteTable("connections", {
+export const connections = pgTable("connections", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   host: text("host").notNull(),
@@ -122,7 +123,7 @@ export const connections = sqliteTable("connections", {
   bind9ConfDir: text("bind9_conf_dir").default(""),
   bind9ZoneDir: text("bind9_zone_dir").default(""),
   rndcBin: text("rndc_bin").default("rndc"),
-  isActive: integer("is_active", { mode: "boolean" }).notNull().default(false),
+  isActive: boolean("is_active").notNull().default(false),
   lastStatus: text("last_status", { enum: ["connected", "failed", "unknown"] }).default("unknown"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -143,7 +144,7 @@ export type InsertConnection = z.infer<typeof insertConnectionSchema>;
 export type Connection = typeof connections.$inferSelect;
 
 // ── Log Entries ──────────────────────────────────────────────────
-export const logEntries = sqliteTable("log_entries", {
+export const logEntries = pgTable("log_entries", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   timestamp: text("timestamp").notNull().$defaultFn(() => new Date().toISOString()),
   level: text("level", { enum: ["INFO", "WARN", "ERROR", "DEBUG"] }).notNull().default("INFO"),
@@ -160,11 +161,11 @@ export type InsertLogEntry = z.infer<typeof insertLogEntrySchema>;
 export type LogEntry = typeof logEntries.$inferSelect;
 
 // ── RPZ Entries (DNS Firewall) ───────────────────────────────────
-export const rpzEntries = sqliteTable("rpz_entries", {
+export const rpzEntries = pgTable("rpz_entries", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  name: text("name").notNull().unique(), // The domain to block, e.g. "badconfig.com"
+  name: text("name").notNull().unique(),
   type: text("type", { enum: ["nxdomain", "nodata", "redirect"] }).notNull().default("nxdomain"),
-  target: text("target").default(""), // IP or CNAME if redirect
+  target: text("target").default(""),
   comment: text("comment").default(""),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });

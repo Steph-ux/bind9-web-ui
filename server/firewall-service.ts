@@ -1,4 +1,4 @@
-
+// Copyright © 2025 Stephane ASSOGBA
 import { exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
@@ -7,6 +7,38 @@ import { sshManager } from "./ssh-manager";
 const execAsync = promisify(exec);
 
 export type FirewallBackend = "ufw" | "firewalld" | "iptables" | "nftables" | "none";
+const ALLOWED_BACKENDS: FirewallBackend[] = ["ufw", "firewalld", "iptables", "nftables", "none"];
+const ALLOWED_PROTOS = ["tcp", "udp", "any"];
+const ALLOWED_ACTIONS = ["allow", "deny", "reject"];
+const ALLOWED_RNDC_COMMANDS = ["reload", "flush", "status", "stats", "reconfig", "dumpdb", "querylog"];
+
+/** Validate a port number (1-65535, or service name alphanumeric) */
+function validatePort(port: string): string {
+    if (/^\d+$/.test(port)) {
+        const n = parseInt(port, 10);
+        if (n < 1 || n > 65535) throw new Error(`Invalid port number: ${port}`);
+        return port;
+    }
+    // Service name: alphanumeric + hyphen only
+    if (/^[a-zA-Z0-9-]+$/.test(port)) return port;
+    throw new Error(`Invalid port value: ${port}`);
+}
+
+/** Validate an IP address or CIDR */
+function validateIp(ip: string): string {
+    if (ip === "any" || ip === "Anywhere" || ip === "Anywhere (v6)") return ip;
+    // IPv4/CIDR
+    if (/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(ip)) return ip;
+    // IPv6/CIDR (simplified)
+    if (/^[0-9a-fA-F:]+(\/\d{1,3})?$/.test(ip) && ip.includes(":")) return ip;
+    throw new Error(`Invalid IP address: ${ip}`);
+}
+
+/** Sanitize a string for safe shell interpolation (alphanumeric, dots, dashes, slashes, colons, underscores) */
+function shellSafe(input: string): string {
+    if (/^[a-zA-Z0-9.\/_:-]+$/.test(input)) return input;
+    throw new Error(`Invalid characters in input: ${input}`);
+}
 
 export interface FirewallRule {
     id: number;
@@ -176,6 +208,7 @@ class FirewallService {
 
     /** Manually set the active backend (user choice) */
     setBackend(backend: FirewallBackend): void {
+        if (!ALLOWED_BACKENDS.includes(backend)) throw new Error(`Invalid backend: ${backend}`);
         if (this.detectedAvailable?.includes(backend) || backend === "none") {
             this.detectedBackend = backend;
             console.log(`[firewall] Backend switched to: ${backend}`);
@@ -242,16 +275,21 @@ class FirewallService {
     }
 
     private async addRuleUfw(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+        const safePort = validatePort(toPort);
+        if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const safeIp = validateIp(fromIp);
         let cmd = `sudo -n ufw ${action}`;
-        if (fromIp && fromIp !== "any") cmd += ` from ${fromIp}`;
-        if (toPort) {
-            cmd += ` to any port ${toPort}`;
+        if (safeIp && safeIp !== "any") cmd += ` from ${safeIp}`;
+        if (safePort) {
+            cmd += ` to any port ${safePort}`;
             if (proto !== "any") cmd += ` proto ${proto}`;
         }
         await this.execCommand(cmd);
     }
 
     private async deleteRuleUfw(id: number): Promise<void> {
+        if (!Number.isInteger(id) || id < 1) throw new Error("Invalid rule ID");
         await this.execCommand(`echo "y" | sudo -n ufw delete ${id}`);
     }
 
@@ -290,20 +328,24 @@ class FirewallService {
     }
 
     private async addRuleFirewalld(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+        const safePort = validatePort(toPort);
+        if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const safeIp = validateIp(fromIp);
         const perm = "--permanent";
         if (action === "allow") {
-            if (fromIp && fromIp !== "any") {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='rule family="ipv4" source address="${fromIp}" port port="${toPort}" protocol="${proto}" accept'`);
-            } else if (/^\d+$/.test(toPort)) {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-port=${toPort}/${proto}`);
+            if (safeIp && safeIp !== "any") {
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='rule family="ipv4" source address="${safeIp}" port port="${safePort}" protocol="${proto}" accept'`);
+            } else if (/^\d+$/.test(safePort)) {
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-port=${safePort}/${proto}`);
             } else {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-service=${toPort}`);
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-service=${safePort}`);
             }
         } else {
-            if (fromIp && fromIp !== "any") {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='rule family="ipv4" source address="${fromIp}" port port="${toPort}" protocol="${proto}" reject'`);
+            if (safeIp && safeIp !== "any") {
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='rule family="ipv4" source address="${safeIp}" port port="${safePort}" protocol="${proto}" reject'`);
             } else {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --remove-port=${toPort}/${proto}`);
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --remove-port=${safePort}/${proto}`);
             }
         }
         await this.execCommand("sudo -n firewall-cmd --reload");
@@ -360,14 +402,19 @@ class FirewallService {
     }
 
     private async addRuleIptables(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+        const safePort = validatePort(toPort);
+        if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const safeIp = validateIp(fromIp);
         const iptAction = action === "allow" ? "ACCEPT" : action === "deny" ? "DROP" : "REJECT";
         let cmd = `sudo -n iptables -A INPUT`;
-        if (fromIp && fromIp !== "any") cmd += ` -s ${fromIp}`;
-        cmd += ` -p ${proto} --dport ${toPort} -j ${iptAction}`;
+        if (safeIp && safeIp !== "any") cmd += ` -s ${safeIp}`;
+        cmd += ` -p ${proto} --dport ${safePort} -j ${iptAction}`;
         await this.execCommand(cmd);
     }
 
     private async deleteRuleIptables(id: number): Promise<void> {
+        if (!Number.isInteger(id) || id < 1) throw new Error("Invalid rule ID");
         await this.execCommand(`sudo -n iptables -D INPUT ${id}`);
     }
 
@@ -444,13 +491,17 @@ class FirewallService {
     }
 
     private async addRuleNftables(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+        const safePort = validatePort(toPort);
+        if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const safeIp = validateIp(fromIp);
         const nftAction = action === "allow" ? "accept" : action === "deny" ? "drop" : "reject";
         let cmd = `sudo -n nft add rule inet filter input`;
-        if (fromIp && fromIp !== "any") {
-            const family = fromIp.includes(":") ? "ip6" : "ip";
-            cmd += ` ${family} saddr ${fromIp}`;
+        if (safeIp && safeIp !== "any") {
+            const family = safeIp.includes(":") ? "ip6" : "ip";
+            cmd += ` ${family} saddr ${safeIp}`;
         }
-        cmd += ` ${proto} dport ${toPort} ${nftAction}`;
+        cmd += ` ${proto} dport ${safePort} ${nftAction}`;
         await this.execCommand(cmd);
     }
 

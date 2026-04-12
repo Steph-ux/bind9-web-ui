@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 /**
  * SSH Connection Manager
  * Manages SSH connections to remote BIND9 servers.
@@ -215,6 +216,10 @@ class SSHManager {
     /** Check if a file exists on the remote server */
     async fileExists(remotePath: string): Promise<boolean> {
         try {
+            // Sanitize path: only allow safe characters to prevent shell injection
+            if (!/^[a-zA-Z0-9.\/_:-]+$/.test(remotePath)) {
+                throw new Error(`Invalid remote path: ${remotePath}`);
+            }
             const result = await this.exec(`test -f "${remotePath}" && echo "exists" || echo "missing"`);
             return result.stdout.trim() === "exists";
         } catch {

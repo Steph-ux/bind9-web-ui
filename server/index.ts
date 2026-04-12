@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -12,6 +13,20 @@ const httpServer = createServer(app);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws:;");
+  }
+  next();
+});
 
 // Setup Authentication
 setupAuth(app);
@@ -45,7 +60,12 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        // Mask sensitive fields before logging
+        const safe = { ...capturedJsonResponse };
+        if (safe.password) safe.password = "***";
+        if (safe.privateKey) safe.privateKey = "***";
+        if (safe.secret) safe.secret = "***";
+        logLine += ` :: ${JSON.stringify(safe)}`;
       }
 
       log(logLine);
@@ -66,6 +86,11 @@ app.use((req, res, next) => {
 
     if (res.headersSent) {
       return next(err);
+    }
+
+    // In production, don't leak internal error details for any 5xx
+    if (process.env.NODE_ENV === "production" && status >= 500) {
+      return res.status(status).json({ message: "Internal Server Error" });
     }
 
     return res.status(status).json({ message });

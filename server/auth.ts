@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { type Express } from "express";
@@ -24,15 +25,54 @@ async function comparePasswords(supplied: string, stored: string) {
     return match;
 }
 
+// Simple in-memory rate limiter for login attempts
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_RATE_LIMIT = 5;       // max attempts per window
+const LOGIN_RATE_WINDOW = 60000;  // 60 seconds
+
+function checkLoginRate(ip: string): boolean {
+    const now = Date.now();
+    const entry = loginAttempts.get(ip);
+    if (!entry || now > entry.resetAt) {
+        loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_RATE_WINDOW });
+        return true;
+    }
+    entry.count++;
+    return entry.count <= LOGIN_RATE_LIMIT;
+}
+
+// Clean up old entries every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    const expired: string[] = [];
+    loginAttempts.forEach((entry, ip) => {
+        if (now > entry.resetAt) expired.push(ip);
+    });
+    expired.forEach(ip => loginAttempts.delete(ip));
+}, 5 * 60 * 1000);
+
 export function setupAuth(app: Express) {
+    // Enforce a strong session secret — in production, MUST be set via env
+    let sessionSecret = process.env.SESSION_SECRET;
+    if (!sessionSecret) {
+        if (app.get("env") === "production") {
+            console.error("[auth] FATAL: SESSION_SECRET environment variable must be set in production!");
+            process.exit(1);
+        }
+        // In dev, generate a random one so sessions still work
+        sessionSecret = randomBytes(32).toString("hex");
+        console.warn("[auth] WARNING: Using auto-generated SESSION_SECRET. Set SESSION_SECRET env var for production.");
+    }
+
     const sessionSettings: session.SessionOptions = {
-        secret: process.env.SESSION_SECRET || "bind9_secret_key_change_me",
+        secret: sessionSecret,
         resave: false,
         saveUninitialized: false,
         store: undefined,
         cookie: {
             secure: app.get("env") === "production",
             httpOnly: true,
+            sameSite: app.get("env") === "production" ? "lax" : "lax",
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         }
     };
@@ -85,6 +125,12 @@ export function setupAuth(app: Express) {
 
     // Auth Routes
     app.post("/api/auth/login", (req, res, next) => {
+        // Rate limit login attempts by IP
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        if (!checkLoginRate(ip)) {
+            return res.status(429).json({ message: "Too many login attempts. Try again in 60 seconds." });
+        }
+
         passport.authenticate("local", (err: any, user: any, info: any) => {
             if (err) return next(err);
             if (!user) {
@@ -92,8 +138,11 @@ export function setupAuth(app: Express) {
             }
             req.login(user, (err) => {
                 if (err) return next(err);
-                const { password, ...userWithoutPassword } = user;
-                return res.json(userWithoutPassword);
+                // Express 5 compat: manually save session so cookie is set
+                req.session.save(() => {
+                    const { password, ...userWithoutPassword } = user;
+                    return res.json(userWithoutPassword);
+                });
             });
         })(req, res, next);
     });
@@ -113,6 +162,36 @@ export function setupAuth(app: Express) {
         res.json(userWithoutPassword);
     });
 
+    // Allow any authenticated user to change their own password
+    app.put("/api/auth/password", async (req, res) => {
+        if (!req.isAuthenticated()) {
+            return res.status(401).json({ message: "Not authenticated" });
+        }
+        const { currentPassword, newPassword } = req.body;
+        if (!newPassword || typeof newPassword !== "string" || newPassword.length < 4) {
+            return res.status(400).json({ message: "New password must be at least 4 characters" });
+        }
+        const user = req.user as User;
+        // Verify current password if user doesn't have mustChangePassword flag
+        if (!user.mustChangePassword) {
+            if (!currentPassword) {
+                return res.status(400).json({ message: "Current password is required" });
+            }
+            const isValid = await comparePasswords(currentPassword, user.password);
+            if (!isValid) {
+                return res.status(401).json({ message: "Current password is incorrect" });
+            }
+        }
+        const hashedPassword = await hashPassword(newPassword);
+        await storage.updateUser(user.id, { password: hashedPassword, mustChangePassword: false });
+        // Update req.user so subsequent /me calls reflect the change
+        const updated = await storage.getUser(user.id);
+        if (updated) {
+            req.login(updated, () => {});
+        }
+        res.json({ message: "Password changed successfully" });
+    });
+
     // Seed Admin User
     (async () => {
         const existingAdmin = await storage.getUserByUsername("admin");
@@ -122,8 +201,9 @@ export function setupAuth(app: Express) {
                 username: "admin",
                 password: hashedPassword,
                 role: "admin",
-            });
-            console.log("[auth] Default admin user created (admin/admin)");
+                mustChangePassword: true,
+            } as any);
+            console.log("[auth] Default admin user created (admin/admin) — CHANGE PASSWORD IMMEDIATELY");
         }
     })();
 }

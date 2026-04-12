@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 /**
  * BIND9 Integration Service
  * Interacts with a real BIND9 installation via rndc, zone files and system commands.
@@ -50,9 +51,24 @@ class Bind9Service {
         rndcBin?: string;
     }) {
         this.mode = config.mode;
-        if (config.confDir) BIND9_CONF_DIR = config.confDir;
-        if (config.zoneDir) BIND9_ZONE_DIR = config.zoneDir;
-        if (config.rndcBin) RNDC_BIN = config.rndcBin;
+        if (config.confDir) {
+            if (!/^[a-zA-Z0-9.\/_-]+$/.test(config.confDir)) {
+                throw new Error("Invalid confDir path: contains disallowed characters");
+            }
+            BIND9_CONF_DIR = config.confDir;
+        }
+        if (config.zoneDir) {
+            if (!/^[a-zA-Z0-9.\/_-]+$/.test(config.zoneDir)) {
+                throw new Error("Invalid zoneDir path: contains disallowed characters");
+            }
+            BIND9_ZONE_DIR = config.zoneDir;
+        }
+        if (config.rndcBin) {
+            if (!/^[a-zA-Z0-9.\/_-]+$/.test(config.rndcBin)) {
+                throw new Error("Invalid rndcBin path: contains disallowed characters");
+            }
+            RNDC_BIN = config.rndcBin;
+        }
         // Reset availability cache when config changes
         this.available = null;
         console.log(`[bind9] Mode: ${this.mode}, confDir: ${BIND9_CONF_DIR}, zoneDir: ${BIND9_ZONE_DIR}`);
@@ -106,8 +122,14 @@ class Bind9Service {
         return this.available;
     }
 
-    /** Execute an rndc command */
+    /** Execute an rndc command — input is validated to prevent injection */
     async rndc(command: string): Promise<string> {
+        // Only allow safe characters in rndc commands (alphanumeric, dots, dashes, underscores, slashes, spaces)
+        // Spaces are allowed for sub-commands like "reload zone.example.com"
+        // Shell metacharacters (; | & $ ` ! () <> etc.) are blocked
+        if (!/^[a-zA-Z0-9.\/_ -]+$/.test(command)) {
+            throw new Error(`Invalid rndc command: contains disallowed characters`);
+        }
         try {
             const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`, true);
             return stdout || stderr;
@@ -200,8 +222,27 @@ class Bind9Service {
         }
     }
 
+    /** Validate a config section name (prevent path traversal) */
+    private validateSectionName(section: string): string {
+        if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
+            throw new Error(`Invalid config section name: ${section}`);
+        }
+        return section;
+    }
+
+    /** Sanitize a BIND9 identifier (acl/key/zone name) to prevent config injection */
+    private sanitizeIdentifier(name: string): string {
+        // Remove any characters that could break out of quotes or inject directives
+        const sanitized = name.replace(/["';{}\n\r]/g, "");
+        if (sanitized !== name || !name.length) {
+            throw new Error(`Invalid identifier: contains disallowed characters`);
+        }
+        return name;
+    }
+
     /** Write named.conf with backup + validation */
     async writeNamedConf(section: string, content: string): Promise<void> {
+        this.validateSectionName(section);
         const confPath = path.posix.join(BIND9_CONF_DIR, `named.conf.${section}`);
         const backupPath = `${confPath}.bak.${Date.now()}`;
 
@@ -233,7 +274,8 @@ class Bind9Service {
     async writeAclsConf(acls: Array<{ name: string; networks: string }>): Promise<void> {
         let content = "";
         for (const acl of acls) {
-            content += `acl "${acl.name}" {\n`;
+            const safeName = this.sanitizeIdentifier(acl.name);
+            content += `acl "${safeName}" {\n`;
             // Ensure networks are semi-colon terminated
             const nets = acl.networks.split(/[,\n\s]+/).filter(s => s);
             for (const net of nets) {
@@ -250,9 +292,12 @@ class Bind9Service {
     async writeKeysConf(keys: Array<{ name: string; algorithm: string; secret: string }>): Promise<void> {
         let content = "";
         for (const key of keys) {
-            content += `key "${key.name}" {\n`;
-            content += `    algorithm ${key.algorithm};\n`;
-            content += `    secret "${key.secret}";\n`;
+            const safeName = this.sanitizeIdentifier(key.name);
+            const safeAlgo = this.sanitizeIdentifier(key.algorithm);
+            const safeSecret = key.secret.replace(/["';\\]/g, "");
+            content += `key "${safeName}" {\n`;
+            content += `    algorithm ${safeAlgo};\n`;
+            content += `    secret "${safeSecret}";\n`;
             content += `};\n\n`;
         }
         const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.keys");
@@ -262,6 +307,10 @@ class Bind9Service {
     /** Add a zone to named.conf.local */
     async addZoneToConfig(domain: string, type: "master" | "slave" | "forward", file: string): Promise<void> {
         try {
+            const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
+            if (!ALLOWED_ZONE_TYPES.includes(type)) throw new Error(`Invalid zone type: ${type}`);
+            const safeDomain = this.sanitizeIdentifier(domain);
+            const safeFile = file.replace(/["';\n\r]/g, "");
             const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
             let content = "";
             try {
@@ -271,19 +320,19 @@ class Bind9Service {
             }
 
             // Check if zone already exists to avoid duplicates
-            if (content.includes(`zone "${domain}"`)) {
-                console.log(`[bind9] Zone ${domain} already in config, skipping add.`);
+            if (content.includes(`zone "${safeDomain}"`)) {
+                console.log(`[bind9] Zone ${safeDomain} already in config, skipping add.`);
                 return;
             }
 
             const newBlock = `
-zone "${domain}" {
+zone "${safeDomain}" {
     type ${type};
-    file "${file}";
+    file "${safeFile}";
 };
 `;
             await this.writeRemoteFile(confPath, content + newBlock);
-            console.log(`[bind9] Added zone ${domain} to named.conf.local`);
+            console.log(`[bind9] Added zone ${safeDomain} to named.conf.local`);
         } catch (error: any) {
             throw new Error(`Failed to add zone to config: ${error.message}`);
         }
@@ -292,6 +341,7 @@ zone "${domain}" {
     /** Remove a zone from named.conf.local */
     async removeZoneFromConfig(domain: string): Promise<void> {
         try {
+            const safeDomain = this.sanitizeIdentifier(domain);
             const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
             let content = "";
             try {
@@ -303,16 +353,16 @@ zone "${domain}" {
             // Regex to match the zone block: zone "domain" { ... };
             // We use [\s\S]*? to match across newlines non-greedily until the first closing brace followed by semi-colon
             // This is a basic parser; for complex nested braces it might be fragile but standard BIND format is usually clean.
-            const regex = new RegExp(`zone\\s+"${domain}"\\s*{[\\s\\S]*?};\\s*`, "g");
+            const regex = new RegExp(`zone\\s+"${safeDomain}"\\s*{[\\s\\S]*?};\\s*`, "g");
 
             if (!regex.test(content)) {
-                console.log(`[bind9] Zone ${domain} not found in config, skipping remove.`);
+                console.log(`[bind9] Zone ${safeDomain} not found in config, skipping remove.`);
                 return;
             }
 
             const newContent = content.replace(regex, "");
             await this.writeRemoteFile(confPath, newContent.trim() + "\n");
-            console.log(`[bind9] Removed zone ${domain} from named.conf.local`);
+            console.log(`[bind9] Removed zone ${safeDomain} from named.conf.local`);
         } catch (error: any) {
             throw new Error(`Failed to remove zone from config: ${error.message}`);
         }
@@ -1039,13 +1089,20 @@ zone "${domain}" {
         }
     }
 
+    /** Sanitize a zone file field to prevent directive injection ($INCLUDE, $ORIGIN, etc.) */
+    private sanitizeZoneField(value: string): string {
+        // Remove newlines and $-prefixed directives that could inject BIND9 directives
+        return value.replace(/[\n\r]/g, "").replace(/\$INCLUDE/gi, "").replace(/\$ORIGIN/gi, "").replace(/\$TTL/gi, "");
+    }
+
     /** Write RPZ zone file */
     async writeRpzZone(zoneName: string, entries: Array<{ name: string; type: string; target?: string }>): Promise<void> {
-        const filePath = path.posix.join(BIND9_ZONE_DIR, `db.${zoneName}`);
+        const safeZoneName = this.sanitizeZoneField(zoneName);
+        const filePath = path.posix.join(BIND9_ZONE_DIR, `db.${safeZoneName}`);
         const serial = this.generateSerial();
 
         const lines: string[] = [
-            `; RPZ Firewall Zone: ${zoneName}`,
+            `; RPZ Firewall Zone: ${safeZoneName}`,
             `; Generated by BIND9 Admin Panel`,
             `$TTL 604800`,
             `@ IN SOA localhost. root.localhost. (`,
@@ -1060,7 +1117,7 @@ zone "${domain}" {
         ];
 
         for (const entry of entries) {
-            const name = entry.name;
+            const name = this.sanitizeZoneField(entry.name);
 
             if (entry.type === "nxdomain") {
                 lines.push(`${name}    CNAME   .`);
@@ -1069,12 +1126,13 @@ zone "${domain}" {
                 lines.push(`${name}    CNAME   *.`);
                 if (!name.startsWith("*.")) lines.push(`*.${name}  CNAME   *.`);
             } else if (entry.type === "redirect" && entry.target) {
-                const isIp = /^\d+\.\d+\.\d+\.\d+$/.test(entry.target);
+                const safeTarget = this.sanitizeZoneField(entry.target);
+                const isIp = /^\d+\.\d+\.\d+\.\d+$/.test(safeTarget);
                 if (isIp) {
-                    lines.push(`${name}    A   ${entry.target}`);
-                    if (!name.startsWith("*.")) lines.push(`*.${name}  A   ${entry.target}`);
+                    lines.push(`${name}    A   ${safeTarget}`);
+                    if (!name.startsWith("*.")) lines.push(`*.${name}  A   ${safeTarget}`);
                 } else {
-                    const target = entry.target.endsWith(".") ? entry.target : `${entry.target}.`;
+                    const target = safeTarget.endsWith(".") ? safeTarget : `${safeTarget}.`;
                     lines.push(`${name}    CNAME   ${target}`);
                     if (!name.startsWith("*.")) lines.push(`*.${name}  CNAME   ${target}`);
                 }
@@ -1092,15 +1150,16 @@ zone "${domain}" {
         serial: string,
         options: { adminEmail?: string; nameserver?: string } = {}
     ): string {
-        const adminEmail = (options.adminEmail || `hostmaster.${domain}`).replace(/@/, ".");
-        const nameserver = options.nameserver || `ns1.${domain}.`;
+        const safeDomain = this.sanitizeZoneField(domain);
+        const adminEmail = this.sanitizeZoneField((options.adminEmail || `hostmaster.${safeDomain}`).replace(/@/, "."));
+        const nameserver = this.sanitizeZoneField(options.nameserver || `ns1.${safeDomain}.`);
 
         const lines: string[] = [
-            `; Zone file for ${domain}`,
+            `; Zone file for ${safeDomain}`,
             `; Generated by BIND9 Admin Panel`,
             `; Serial: ${serial}`,
             `$TTL 86400`,
-            `$ORIGIN ${domain}.`,
+            `$ORIGIN ${safeDomain}.`,
             ``,
             `@ IN SOA ${nameserver} ${adminEmail}. (`,
             `    ${serial}  ; Serial`,
@@ -1115,9 +1174,11 @@ zone "${domain}" {
         for (const record of records) {
             if (record.type === "SOA") continue;
             const priority = record.priority !== undefined ? `${record.priority} ` : "";
-            const value = record.value;
-            // Ensure FQDNs end with dot if needed? BIND handles relative paths.
-            lines.push(`${record.name}\t${record.ttl}\tIN\t${record.type}\t${priority}${value}`);
+            // Sanitize fields to prevent $INCLUDE/$ORIGIN directive injection
+            const name = this.sanitizeZoneField(record.name);
+            const type = this.sanitizeZoneField(record.type);
+            const value = this.sanitizeZoneField(record.value);
+            lines.push(`${name}\t${record.ttl}\tIN\t${type}\t${priority}${value}`);
         }
 
         return lines.join("\n") + "\n";

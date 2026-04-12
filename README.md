@@ -1,4 +1,12 @@
-# BIND9 Admin Panel
+# BIND9 Web UI / Admin Panel
+
+Copyright © 2025 Stephane ASSOGBA
+
+A modern web interface for managing BIND9 DNS servers (zones, records, ACLs, TSIG, firewall, SSH remote control).
+
+> Replace manual config editing with a full-featured dashboard.
+
+<!-- keywords: bind9 web ui, dns manager, dns control panel, self hosted dns -->
 
 > Panneau d'administration web complet pour serveurs **BIND9**, avec support de gestion **locale** et **distante via SSH**.
 
@@ -6,7 +14,26 @@
 ![Express](https://img.shields.io/badge/Express-5.0-000?logo=express)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supported-4169E1?logo=postgresql&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-Supported-4479A1?logo=mysql&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Dashboard</b></td>
+    <td align="center"><b>Real-time Logs</b></td>
+    <td align="center"><b>SSH Connections</b></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/Dashboard.png" alt="Dashboard" width="400" /></td>
+    <td><img src="screenshots/Logs.png" alt="Real-time Logs" width="400" /></td>
+    <td><img src="screenshots/SSH.png" alt="SSH Connections" width="400" /></td>
+  </tr>
+</table>
 
 ---
 
@@ -53,7 +80,7 @@
 |--------|-------------|
 | **Frontend** | React 19, Vite 7, TypeScript, Tailwind CSS 4, shadcn/ui, Recharts, Lucide React, Wouter |
 | **Backend** | Node.js, Express 5, TypeScript, WebSocket (ws) |
-| **Base de données** | SQLite (better-sqlite3), Drizzle ORM |
+| **Base de données** | SQLite (better-sqlite3) / PostgreSQL (pg) / MySQL (mysql2), Drizzle ORM |
 | **SSH** | ssh2 (connexion, exécution de commandes, SFTP) |
 | **Validation** | Zod, drizzle-zod |
 
@@ -93,7 +120,9 @@ Bind-Config/
 │   └── vite.ts                  # Middleware Vite pour le dev
 │
 ├── shared/
-│   └── schema.ts                # Schéma Drizzle (8 tables)
+│   ├── schema.ts                # Schéma Drizzle SQLite (8 tables)
+│   ├── schema-pg.ts             # Schéma Drizzle PostgreSQL
+│   └── schema-mysql.ts          # Schéma Drizzle MySQL
 │
 ├── data/
 │   └── bind9admin.db            # Base SQLite (auto-créée)
@@ -106,7 +135,30 @@ Bind-Config/
 
 ---
 
-## Installation
+## ⚡ Quick Start
+
+```bash
+# 1 — Cloner
+git clone https://github.com/Steph-ux/bind9-web-ui.git
+cd bind9-web-ui
+
+# 2 — Installer (Linux : sudo apt install -y build-essential python3)
+npm install
+
+# 3 — Base de données
+npm run db:push
+
+# 4 — Lancer
+npm run dev
+
+# 5 — Ouvrir http://localhost:3001  →  admin / admin
+```
+
+> **Première connexion** : identifiants `admin` / `admin` — vous serez invité à changer le mot de passe.
+
+---
+
+## Installation détaillée
 
 ### Prérequis
 
@@ -133,7 +185,7 @@ sudo apt update && sudo apt install -y build-essential python3
 npm install
 ```
 
-### 3. Initialiser la base de données
+### 4. Initialiser la base de données
 
 ```bash
 npm run db:push
@@ -141,7 +193,7 @@ npm run db:push
 
 Cela crée automatiquement le fichier `data/bind9admin.db` avec toutes les tables.
 
-### 4. Lancer en développement
+### 5. Lancer en développement
 
 ```bash
 npm run dev
@@ -149,20 +201,22 @@ npm run dev
 
 Le serveur démarre sur **http://localhost:3001** (backend + frontend servis ensemble).
 
-### 5. Build de production
+### 6. Build de production
 
 ```bash
 npm run build
 npm start
 ```
 
-### 6. Premier Connexion
+### 7. Première connexion
 
 Lors du premier lancement, un utilisateur administrateur est créé automatiquement :
 
 - **URL** : http://localhost:3001
 - **Utilisateur** : `admin`
 - **Mot de passe** : `admin`
+
+> ⚠️ Vous serez automatiquement redirigé vers la page de changement de mot de passe.
 
 > **Note :** Si la connexion échoue, vous pouvez réinitialiser le mot de passe administrateur en exécutant le script de secours :
 > ```bash
@@ -177,7 +231,9 @@ Lors du premier lancement, un utilisateur administrateur est créé automatiquem
 | Variable | Défaut | Description |
 |----------|--------|-------------|
 | `PORT` | `3001` | Port du serveur |
-| `DATABASE_URL` | `data/bind9admin.db` | Chemin vers la base SQLite |
+| `DB_TYPE` | `sqlite` | Type de base de données : `sqlite`, `postgresql`, `mysql` |
+| `DATABASE_URL` | `data/bind9admin.db` | Chemin SQLite ou URL de connexion PG/MySQL |
+| `SESSION_SECRET` | *(random en dev)* | Secret de session (obligatoire en production) |
 | `BIND9_CONF_DIR` | `/etc/bind` | Répertoire de configuration BIND9 (mode local) |
 | `BIND9_ZONE_DIR` | `/var/cache/bind` | Répertoire des fichiers de zone (mode local) |
 | `RNDC_BIN` | `rndc` | Chemin vers le binaire rndc |
@@ -315,7 +371,63 @@ L'application est conçue pour s'adapter à une installation BIND9 existante san
 
 ## Base de Données
 
-### Schéma (SQLite, 8 tables)
+L'application supporte **3 moteurs de base de données** via Drizzle ORM :
+
+### SQLite (défaut)
+Aucune configuration supplémentaire. La base est auto-créée dans `data/bind9admin.db`.
+
+```bash
+npm run db:push          # Créer/mettre à jour les tables
+npx drizzle-kit studio   # Visualiser la DB
+```
+
+### PostgreSQL
+
+1. Installer et configurer PostgreSQL
+2. Créer la base de données :
+   ```sql
+   CREATE USER bind9admin WITH PASSWORD 'bind9admin';
+   CREATE DATABASE bind9admin OWNER bind9admin;
+   ```
+3. Configurer les variables d'environnement :
+   ```bash
+   export DB_TYPE=postgresql
+   export DATABASE_URL=postgresql://bind9admin:bind9admin@localhost:5432/bind9admin
+   ```
+4. Pousser le schéma :
+   ```bash
+   npm run db:push:pg
+   ```
+5. Lancer l'application :
+   ```bash
+   npm run dev
+   ```
+
+### MySQL
+
+1. Installer et configurer MySQL
+2. Créer la base de données :
+   ```sql
+   CREATE USER 'bind9admin'@'localhost' IDENTIFIED BY 'bind9admin';
+   CREATE DATABASE bind9admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   GRANT ALL PRIVILEGES ON bind9admin.* TO 'bind9admin'@'localhost';
+   FLUSH PRIVILEGES;
+   ```
+3. Configurer les variables d'environnement :
+   ```bash
+   export DB_TYPE=mysql
+   export DATABASE_URL=mysql://bind9admin:bind9admin@localhost:3306/bind9admin
+   ```
+4. Pousser le schéma :
+   ```bash
+   npm run db:push:mysql
+   ```
+5. Lancer l'application :
+   ```bash
+   npm run dev
+   ```
+
+### Schéma (8 tables, identique pour les 3 moteurs)
 
 ```
 users           → Comptes utilisateurs
@@ -326,20 +438,20 @@ tsig_keys       → Clés TSIG pour l'authentification DNS
 config_snapshots → Historique des configurations
 log_entries     → Logs applicatifs
 connections     → Connexions SSH distantes
+rpz_entries     → Entrées DNS Firewall (RPZ)
 ```
 
 ### Commandes Drizzle
 
-```bash
-# Pousser le schéma vers la DB (créer/mettre à jour les tables)
-npm run db:push
-
-# Générer une migration
-npx drizzle-kit generate
-
-# Visualiser la DB
-npx drizzle-kit studio
-```
+| Commande | Description |
+|----------|-------------|
+| `npm run db:push` | Synchroniser le schéma SQLite |
+| `npm run db:push:pg` | Synchroniser le schéma PostgreSQL |
+| `npm run db:push:mysql` | Synchroniser le schéma MySQL |
+| `npm run db:generate:pg` | Générer les migrations PostgreSQL |
+| `npm run db:generate:mysql` | Générer les migrations MySQL |
+| `npm run db:studio:pg` | Drizzle Studio pour PostgreSQL |
+| `npm run db:studio:mysql` | Drizzle Studio pour MySQL |
 
 ---
 
@@ -374,12 +486,59 @@ npx drizzle-kit studio
 
 ## Sécurité
 
-> **Note :** Les mots de passe SSH sont stockés en base de données en clair. Pour un environnement de production, il est recommandé de :
-> - Chiffrer les mots de passe en base
+L'application intègre de multiples couches de sécurité :
+
+### Authentification & Sessions
+- **Hachage des mots de passe** — scrypt avec sel aléatoire (Node.js crypto)
+- **Sessions sécurisées** — `express-session` avec cookies `httpOnly`, `secure` (prod), `sameSite`
+- **Secret de session** — Variable `SESSION_SECRET` obligatoire en production (random en dev)
+- **Forced password change** — L'utilisateur `admin` par défaut doit changer son mot de passe à la première connexion
+- **Rate limiting** — 5 tentatives de login par IP / 60 secondes
+- **Route dédiée** — `PUT /api/auth/password` pour que tout utilisateur authentifié change son propre mot de passe
+
+### Contrôle d'accès (RBAC)
+- **3 rôles** : `admin` (toutes les opérations), `operator` (DNS + firewall), `viewer` (lecture seule)
+- **Middleware** : `requireAuth`, `requireAdmin`, `requireOperator` sur toutes les routes API
+- **WebSocket auth** — Vérification du cookie de session avant acceptation de la connexion WS
+
+### Validation des entrées
+- **Zod schemas** — Validation des données entrantes sur les routes de création
+- **Whitelisting des champs** — Les routes PUT n'acceptent que les champs autorisés (pas de mass assignment)
+- **Validation des identifiants** — Noms de zones, ACLs, TSIG keys, sections de config validés par regex
+- **Sanitisation BIND9** — Les identifiants injectés dans les fichiers de config sont nettoyés (`sanitizeIdentifier`)
+- **Validation des commandes** — Les commandes rndc sont validées par regex avant exécution
+- **Validation firewall** — Ports (digits only), IPs (regex CIDR), protocoles/actions/backends (whitelist)
+
+### Protection contre les injections
+- **Command injection** — Validation stricte des entrées avant interpolation dans les commandes shell
+- **SQL injection** — Requêtes Drizzle ORM paramétrées + échappement des wildcards LIKE
+- **Path traversal** — Validation des noms de section, chemins SSH, et paramètres de config
+- **Config injection** — Nettoyage des caractères dangereux dans les fichiers BIND9 (`"';{}\n\r`)
+- **Regex injection** — Sanitisation des domaines avant construction de regex dynamiques
+- **SSRF** — Validation du format host/port dans le test de connexion SSH
+
+### Headers de sécurité
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Strict-Transport-Security` (production)
+- `Content-Security-Policy` (production)
+
+### Gestion des erreurs
+- Les erreurs 500 en production ne leakent pas les détails internes
+- Les mots de passe et clés privées SSH sont masqués dans les réponses API
+
+### Recommandations pour la production
+> **Important :** Les mots de passe SSH sont stockés en base de données en clair. Pour un environnement de production, il est recommandé de :
+> - Chiffrer les mots de passe en base (AES-256)
 > - Utiliser un coffre-fort de secrets (HashiCorp Vault, etc.)
 > - Privilégier l'authentification par clé SSH
-> - L'authentification par session et JWT est activée et sécurisée.
-> - Les mots de passe utilisateurs sont hachés (scrypt).
+> - Utiliser un store de session externe (Redis/PostgreSQL) au lieu du store mémoire
+> - Ajouter une protection CSRF (`csurf` ou double-submit cookie)
+> - Activer la vérification des clés hôtes SSH pour prévenir les attaques MITM
+> - Implémenter un journal d'audit pour les actions administrateurs
 
 ### Configuration sudoers pour SSH distant
 
@@ -396,4 +555,4 @@ chmod 440 /etc/sudoers.d/bind9
 
 ## Licence
 
-MIT
+MIT License — Copyright © 2025 Stephane ASSOGBA
