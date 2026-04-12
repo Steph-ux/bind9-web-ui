@@ -190,3 +190,18 @@ export const ipBlacklist = sqliteTable("ip_blacklist", {
 });
 
 export type IpBlacklist = typeof ipBlacklist.$inferSelect;
+
+// ── API Tokens ──────────────────────────────────────────────────
+export const apiTokens = sqliteTable("api_tokens", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),                          // Human-readable label
+  tokenHash: text("token_hash").notNull().unique(),      // SHA-256 of the raw token
+  tokenPrefix: text("token_prefix").notNull(),           // First 8 chars for identification (e.g. "bwm_a1b2")
+  permissions: text("permissions").notNull().default("*"), // Comma-separated scopes: "*" | "zones:read,records:read" etc.
+  createdBy: text("created_by").notNull(),               // User ID who created the token
+  lastUsedAt: text("last_used_at"),
+  expiresAt: text("expires_at"),                         // null = never expires
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ApiToken = typeof apiTokens.$inferSelect;

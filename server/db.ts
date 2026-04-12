@@ -117,6 +117,17 @@ if (DB_TYPE === "sqlite") {
       expires_at TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_prefix TEXT NOT NULL,
+      permissions TEXT NOT NULL DEFAULT '*',
+      created_by TEXT NOT NULL,
+      last_used_at TEXT,
+      expires_at TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

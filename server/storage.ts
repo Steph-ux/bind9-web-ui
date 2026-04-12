@@ -13,6 +13,7 @@ import {
   type Connection, type InsertConnection,
   rpzEntries, type RpzEntry, type InsertRpzEntry,
   ipBlacklist, type IpBlacklist,
+  apiTokens, type ApiToken,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -62,6 +63,13 @@ export interface IStorage {
   unbanIp(ip: string): Promise<void>;
   banIp(ip: string, reason: "login_failed" | "api_abuse" | "brute_force" | "manual", durationMs?: number): Promise<void>;
   cleanupExpiredBans(): Promise<void>;
+
+  // API Tokens
+  getApiTokens(): Promise<ApiToken[]>;
+  getApiTokenByHash(tokenHash: string): Promise<ApiToken | undefined>;
+  createApiToken(data: { name: string; tokenHash: string; tokenPrefix: string; permissions: string; createdBy: string; expiresAt?: string }): Promise<ApiToken>;
+  deleteApiToken(id: string): Promise<boolean>;
+  updateTokenLastUsed(tokenHash: string): Promise<void>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -622,6 +630,61 @@ export class DatabaseStorage implements IStorage {
         sql`${ipBlacklist.expiresAt} < ${now}`
       )
     );
+  }
+
+  // ── API Tokens ─────────────────────────────────────────────
+  async getApiTokens(): Promise<ApiToken[]> {
+    await this.ensureDb();
+    return db.select({
+      id: apiTokens.id,
+      name: apiTokens.name,
+      tokenHash: apiTokens.tokenHash,
+      tokenPrefix: apiTokens.tokenPrefix,
+      permissions: apiTokens.permissions,
+      createdBy: apiTokens.createdBy,
+      lastUsedAt: apiTokens.lastUsedAt,
+      expiresAt: apiTokens.expiresAt,
+      createdAt: apiTokens.createdAt,
+    }).from(apiTokens).orderBy(desc(apiTokens.createdAt));
+  }
+
+  async getApiTokenByHash(tokenHash: string): Promise<ApiToken | undefined> {
+    await this.ensureDb();
+    const rows = await db.select().from(apiTokens).where(eq(apiTokens.tokenHash, tokenHash)).limit(1);
+    if (rows.length === 0) return undefined;
+    const token = rows[0];
+    // Check expiry
+    if (token.expiresAt && new Date(token.expiresAt) < new Date()) {
+      await db.delete(apiTokens).where(eq(apiTokens.id, token.id));
+      return undefined;
+    }
+    return token;
+  }
+
+  async createApiToken(data: { name: string; tokenHash: string; tokenPrefix: string; permissions: string; createdBy: string; expiresAt?: string }): Promise<ApiToken> {
+    await this.ensureDb();
+    const [token] = await db.insert(apiTokens).values({
+      name: data.name,
+      tokenHash: data.tokenHash,
+      tokenPrefix: data.tokenPrefix,
+      permissions: data.permissions,
+      createdBy: data.createdBy,
+      expiresAt: data.expiresAt || null,
+    }).returning();
+    return token;
+  }
+
+  async deleteApiToken(id: string): Promise<boolean> {
+    await this.ensureDb();
+    const result = await db.delete(apiTokens).where(eq(apiTokens.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async updateTokenLastUsed(tokenHash: string): Promise<void> {
+    await this.ensureDb();
+    await db.update(apiTokens).set({
+      lastUsedAt: new Date().toISOString(),
+    }).where(eq(apiTokens.tokenHash, tokenHash));
   }
 }
 

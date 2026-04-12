@@ -27,6 +27,7 @@ import {
   Plug,
   Users,
   UserRound,
+  Key,
   LogOut,
   ShieldCheck,
   ShieldAlert,
@@ -119,6 +120,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     navItems.push({ label: "Firewall", icon: ShieldCheck, href: "/firewall" });
     navItems.push({ label: "DNS Firewall", icon: ShieldAlert, href: "/firewall-rpz" });
     navItems.push({ label: "IP Blacklist", icon: ShieldBan, href: "/blacklist" });
+    navItems.push({ label: "API Tokens", icon: Key, href: "/api-tokens" });
     navItems.push({ label: "Users", icon: Users, href: "/users" });
   }
 

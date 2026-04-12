@@ -21,6 +21,7 @@ import FirewallPage from "@/pages/firewall";
 import FirewallDNS from "@/pages/firewall-dns";
 import BlacklistPage from "@/pages/blacklist";
 import ProfilePage from "@/pages/profile";
+import ApiTokensPage from "@/pages/api-tokens";
 
 function Router() {
   return (
@@ -40,6 +41,7 @@ function Router() {
       <ProtectedRoute path="/firewall-rpz" component={FirewallDNS} adminOnly />
       <ProtectedRoute path="/blacklist" component={BlacklistPage} adminOnly />
       <ProtectedRoute path="/profile" component={ProfilePage} />
+      <ProtectedRoute path="/api-tokens" component={ApiTokensPage} adminOnly />
       <Route component={NotFound} />
     </Switch>
   );

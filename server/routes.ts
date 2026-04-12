@@ -5,6 +5,7 @@ import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import os from "os";
 import path from "path";
+import { createHash, randomBytes } from "crypto";
 import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
@@ -48,30 +49,66 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  // Middleware to ensure user is authenticated
-  const requireAuth = (req: Request, res: Response, next: Function) => {
+  // Middleware to ensure user is authenticated (session or Bearer token)
+  const requireAuth = async (req: Request, res: Response, next: Function) => {
     // Exclude auth routes (handled by setupAuth)
     if (req.path.startsWith("/api/auth")) return next();
 
+    // Session auth takes priority
     if (req.isAuthenticated()) {
       return next();
     }
+
+    // Bearer token auth
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const rawToken = authHeader.slice(7);
+      const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+      const token = await storage.getApiTokenByHash(tokenHash);
+      if (token) {
+        // Check permissions scope
+        const scope = token.permissions;
+        if (scope !== "*" && scope !== "all") {
+          // Check if the requested path matches any allowed scope
+          const allowed = scope.split(",").map(s => s.trim());
+          const reqPath = req.path.replace(/^\/api\//, "");
+          const hasAccess = allowed.some(perm => {
+            if (perm.endsWith(":read") && req.method !== "GET") return false;
+            return reqPath.startsWith(perm.split(":")[0]);
+          });
+          if (!hasAccess) {
+            return res.status(403).json({ message: "Token does not have permission for this resource" });
+          }
+        }
+        // Mark token as used
+        await storage.updateTokenLastUsed(tokenHash);
+        // Attach token info to request for downstream use
+        (req as any).apiToken = token;
+        (req as any).tokenRole = scope === "*" || scope === "all" ? "admin" : "operator";
+        return next();
+      }
+    }
+
     res.status(401).json({ message: "Unauthorized" });
   };
 
-  // Middleware to ensure user is admin
+  // Middleware to ensure user is admin (session or Bearer token with full scope)
   const requireAdmin = (req: Request, res: Response, next: Function) => {
-    if (!req.isAuthenticated()) return res.status(401).json({ message: "Unauthorized" });
-    if ((req.user as any).role !== "admin") return res.status(403).json({ message: "Forbidden" });
-    next();
+    if (req.isAuthenticated() && (req.user as any).role === "admin") return next();
+    if ((req as any).tokenRole === "admin") return next();
+    if (!req.isAuthenticated() && !(req as any).apiToken) return res.status(401).json({ message: "Unauthorized" });
+    return res.status(403).json({ message: "Forbidden" });
   };
 
-  // Middleware to ensure user is admin or operator
+  // Middleware to ensure user is admin or operator (session or Bearer token)
   const requireOperator = (req: Request, res: Response, next: Function) => {
-    if (!req.isAuthenticated()) return res.status(401).json({ message: "Unauthorized" });
-    const role = (req.user as any).role;
-    if (role !== "admin" && role !== "operator") return res.status(403).json({ message: "Forbidden" });
-    next();
+    if (req.isAuthenticated()) {
+      const role = (req.user as any).role;
+      if (role === "admin" || role === "operator") return next();
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if ((req as any).apiToken) return next(); // Token already passed requireAuth scope check
+    return res.status(401).json({ message: "Unauthorized" });
   };
 
   // Protect all API routes defined below
@@ -217,6 +254,69 @@ export async function registerRoutes(
     try {
       await storage.cleanupExpiredBans();
       res.json({ message: "Expired bans cleaned up" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  // ── API Tokens ─────────────────────────────────────────────────
+  app.get("/api/tokens", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const tokens = await storage.getApiTokens();
+      // Never return tokenHash to client
+      const safe = tokens.map(({ tokenHash, ...rest }) => rest);
+      res.json(safe);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/tokens", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { name, permissions, expiresAt } = req.body;
+      if (!name || typeof name !== "string" || name.length > 64) {
+        return res.status(400).json({ message: "name is required (max 64 chars)" });
+      }
+      const perms = permissions || "*";
+      // Generate token: bwm_<32 random hex chars>
+      const raw = `bwm_${randomBytes(16).toString("hex")}`;
+      const tokenHash = createHash("sha256").update(raw).digest("hex");
+      const tokenPrefix = raw.substring(0, 8);
+
+      const token = await storage.createApiToken({
+        name,
+        tokenHash,
+        tokenPrefix,
+        permissions: perms,
+        createdBy: (req.user as any)?.id || "api",
+        expiresAt: expiresAt || undefined,
+      });
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "api-tokens",
+        message: `API token '${name}' created (prefix: ${tokenPrefix})`,
+      });
+
+      // Return the raw token ONLY on creation — never again
+      const { tokenHash: _th, ...safe } = token;
+      res.status(201).json({ ...safe, token: raw });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.delete("/api/tokens/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = String(req.params.id);
+      const deleted = await storage.deleteApiToken(id);
+      if (!deleted) return res.status(404).json({ message: "Token not found" });
+      await storage.insertLog({
+        level: "INFO",
+        source: "api-tokens",
+        message: `API token revoked (id: ${id})`,
+      });
+      res.json({ message: "Token revoked" });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }

@@ -298,3 +298,28 @@ export const unbanIp = (ip: string) =>
     request<{ message: string }>(`/blacklist/${encodeURIComponent(ip)}`, { method: "DELETE" });
 export const cleanupBlacklist = () =>
     request<{ message: string }>("/blacklist/cleanup", { method: "POST" });
+
+// ── API Tokens ──────────────────────────────────────────────────
+export interface ApiTokenEntry {
+    id: string;
+    name: string;
+    tokenPrefix: string;
+    permissions: string;
+    createdBy: string;
+    lastUsedAt: string | null;
+    expiresAt: string | null;
+    createdAt: string;
+}
+
+export interface CreateTokenResponse extends ApiTokenEntry {
+    token: string; // Only returned on creation
+}
+
+export const getApiTokens = () => request<ApiTokenEntry[]>("/tokens");
+export const createApiToken = (name: string, permissions?: string, expiresAt?: string) =>
+    request<CreateTokenResponse>("/tokens", {
+        method: "POST",
+        body: JSON.stringify({ name, permissions, expiresAt }),
+    });
+export const revokeApiToken = (id: string) =>
+    request<{ message: string }>(`/tokens/${id}`, { method: "DELETE" });
