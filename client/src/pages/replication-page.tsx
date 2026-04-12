@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, getHealthChecks, runHealthChecks, getNotificationChannels, createNotificationChannel, deleteNotificationChannel, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry, type HealthCheckEntry, type NotificationChannelEntry } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, getHealthChecks, runHealthChecks, getNotificationChannels, createNotificationChannel, deleteNotificationChannel, getSyncHistory, getSyncMetrics, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry, type HealthCheckEntry, type NotificationChannelEntry, type SyncHistoryEntry, type SyncMetrics } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -110,6 +110,16 @@ export default function ReplicationPage() {
   const { data: channels } = useQuery<NotificationChannelEntry[]>({
     queryKey: ["notification-channels"],
     queryFn: getNotificationChannels,
+  });
+
+  const { data: syncMetrics } = useQuery<SyncMetrics>({
+    queryKey: ["sync-metrics"],
+    queryFn: () => getSyncMetrics(),
+  });
+
+  const { data: syncHistoryData } = useQuery<SyncHistoryEntry[]>({
+    queryKey: ["sync-history"],
+    queryFn: () => getSyncHistory(undefined, 20),
   });
 
   const [addChannelOpen, setAddChannelOpen] = useState(false);
@@ -299,7 +309,7 @@ export default function ReplicationPage() {
 
       {/* Insights Summary */}
       {stats && (
-        <div className="grid gap-4 md:grid-cols-4 mb-6">
+        <div className="grid gap-4 md:grid-cols-5 mb-6">
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -348,6 +358,20 @@ export default function ReplicationPage() {
               <p className="text-xs text-muted-foreground mt-1">{stats.failedServers} failed, {stats.neverSyncedServers} never synced</p>
             </CardContent>
           </Card>
+          {syncMetrics && (
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Sync Rate</p>
+                    <p className="text-2xl font-bold">{syncMetrics.total > 0 ? Math.round(syncMetrics.success / syncMetrics.total * 100) : 0}%</p>
+                  </div>
+                  <Activity className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{syncMetrics.success}/{syncMetrics.total} OK, avg {syncMetrics.avgDurationMs}ms</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -655,6 +679,47 @@ export default function ReplicationPage() {
           </Card>
         )}
       </div>
+
+      {/* Sync History */}
+      {syncHistoryData && syncHistoryData.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+            <RefreshCw className="h-5 w-5" />
+            Recent Sync History
+          </h3>
+          <Card>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Zone</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Action</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Status</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Duration</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncHistoryData.map(h => (
+                    <tr key={h.id} className="border-b last:border-0 hover:bg-muted/50">
+                      <td className="px-4 py-2 font-mono">{h.zoneDomain}</td>
+                      <td className="px-4 py-2"><Badge variant="outline" className="capitalize">{h.action}</Badge></td>
+                      <td className="px-4 py-2">
+                        {h.success
+                          ? <span className="text-green-600 flex items-center gap-1"><CheckCircle className="h-3.5 w-3.5" /> OK</span>
+                          : <span className="text-red-600 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Fail</span>
+                        }
+                      </td>
+                      <td className="px-4 py-2 text-muted-foreground">{h.durationMs != null ? `${h.durationMs}ms` : "—"}</td>
+                      <td className="px-4 py-2 text-muted-foreground">{new Date(h.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Notification Channels */}
       <div className="mt-8">

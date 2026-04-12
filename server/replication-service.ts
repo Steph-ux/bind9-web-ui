@@ -90,6 +90,7 @@ class ReplicationService {
   /** Push zones to a single replication server */
   private async syncToServer(server: ReplicationServer, zones: any[]): Promise<SyncResult> {
     const timestamp = new Date().toISOString();
+    const serverStart = Date.now();
 
     try {
       await storage.updateReplicationSyncStatus(server.id, "pending");
@@ -100,6 +101,7 @@ class ReplicationService {
       try {
         // Push each zone file
         for (const zone of zones) {
+          const zoneStart = Date.now();
           try {
             // Read zone file from master
             const zoneContent = await this.readZoneFile(zone);
@@ -109,8 +111,25 @@ class ReplicationService {
             const remotePath = `${server.bind9ZoneDir}/db.${zone.domain}`;
             await this.sftpWriteFile(client, remotePath, zoneContent);
             zonesPushed++;
+            // Record sync history
+            await storage.createSyncHistoryEntry({
+              serverId: server.id,
+              zoneDomain: zone.domain,
+              action: "push",
+              success: true,
+              durationMs: Date.now() - zoneStart,
+              details: `Pushed to ${server.host}`,
+            });
           } catch (zoneErr: any) {
             console.error(`[replication] Failed to push zone ${zone.domain} to ${server.host}: ${zoneErr.message}`);
+            await storage.createSyncHistoryEntry({
+              serverId: server.id,
+              zoneDomain: zone.domain,
+              action: "push",
+              success: false,
+              durationMs: Date.now() - zoneStart,
+              details: zoneErr.message,
+            });
           }
         }
 

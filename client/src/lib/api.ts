@@ -492,3 +492,27 @@ export const updateNotificationChannel = (id: string, data: Partial<Notification
     });
 export const deleteNotificationChannel = (id: string) =>
     request<{ message: string }>(`/notification-channels/${id}`, { method: "DELETE" });
+
+// ── Sync History & Metrics ──────────────────────────────────────
+export interface SyncHistoryEntry {
+    id: string;
+    serverId: string;
+    zoneDomain: string;
+    action: "push" | "pull" | "notify";
+    success: boolean;
+    durationMs: number | null;
+    details: string;
+    createdAt: string;
+}
+
+export interface SyncMetrics {
+    total: number;
+    success: number;
+    failed: number;
+    avgDurationMs: number;
+}
+
+export const getSyncHistory = (serverId?: string, limit?: number) =>
+    request<SyncHistoryEntry[]>(`/sync-history${serverId ? `?serverId=${serverId}` : ""}${limit ? `${serverId ? "&" : "?"}limit=${limit}` : ""}`);
+export const getSyncMetrics = (serverId?: string) =>
+    request<SyncMetrics>(`/sync-metrics${serverId ? `?serverId=${serverId}` : ""}`);

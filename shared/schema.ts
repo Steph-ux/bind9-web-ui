@@ -291,3 +291,17 @@ export const notificationChannels = sqliteTable("notification_channels", {
 });
 
 export type NotificationChannel = typeof notificationChannels.$inferSelect;
+
+// ── Sync History ──────────────────────────────────────────────
+export const syncHistory = sqliteTable("sync_history", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  zoneDomain: text("zone_domain").notNull(),
+  action: text("action", { enum: ["push", "pull", "notify"] }).notNull(),
+  success: integer("success", { mode: "boolean" }).notNull(),
+  durationMs: integer("duration_ms"),
+  details: text("details").default(""),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type SyncHistoryEntry = typeof syncHistory.$inferSelect;

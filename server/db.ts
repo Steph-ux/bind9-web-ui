@@ -189,6 +189,16 @@ if (DB_TYPE === "sqlite") {
       events TEXT NOT NULL DEFAULT 'server_down,conflict_detected,health_degraded',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS sync_history (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      zone_domain TEXT NOT NULL,
+      action TEXT NOT NULL,
+      success INTEGER NOT NULL,
+      duration_ms INTEGER,
+      details TEXT DEFAULT '',
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

@@ -20,6 +20,7 @@ import {
   replicationZoneBindings, type ReplicationZoneBinding,
   healthChecks, type HealthCheck,
   notificationChannels, type NotificationChannel,
+  syncHistory, type SyncHistoryEntry,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -108,6 +109,10 @@ export interface IStorage {
   createNotificationChannel(data: Omit<NotificationChannel, "id" | "createdAt">): Promise<NotificationChannel>;
   updateNotificationChannel(id: string, data: Partial<NotificationChannel>): Promise<NotificationChannel>;
   deleteNotificationChannel(id: string): Promise<boolean>;
+  // Sync History
+  getSyncHistory(serverId?: string, limit?: number): Promise<SyncHistoryEntry[]>;
+  createSyncHistoryEntry(data: Omit<SyncHistoryEntry, "id" | "createdAt">): Promise<SyncHistoryEntry>;
+  getSyncMetrics(serverId?: string): Promise<{ total: number; success: number; failed: number; avgDurationMs: number }>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -940,6 +945,44 @@ export class DatabaseStorage implements IStorage {
     await this.ensureDb();
     const result = await db.delete(notificationChannels).where(eq(notificationChannels.id, id));
     return (result as any).changes > 0;
+  }
+
+  // ── Sync History ────────────────────────────────────────────
+  async getSyncHistory(serverId?: string, limit = 100): Promise<SyncHistoryEntry[]> {
+    await this.ensureDb();
+    if (serverId) {
+      return db.select().from(syncHistory)
+        .where(eq(syncHistory.serverId, serverId))
+        .orderBy(desc(syncHistory.createdAt))
+        .limit(limit);
+    }
+    return db.select().from(syncHistory)
+      .orderBy(desc(syncHistory.createdAt))
+      .limit(limit);
+  }
+
+  async createSyncHistoryEntry(data: Omit<SyncHistoryEntry, "id" | "createdAt">): Promise<SyncHistoryEntry> {
+    await this.ensureDb();
+    const [entry] = await db.insert(syncHistory).values({
+      ...data,
+      createdAt: new Date().toISOString(),
+    }).returning();
+    return entry;
+  }
+
+  async getSyncMetrics(serverId?: string): Promise<{ total: number; success: number; failed: number; avgDurationMs: number }> {
+    await this.ensureDb();
+    const entries = serverId
+      ? await db.select().from(syncHistory).where(eq(syncHistory.serverId, serverId))
+      : await db.select().from(syncHistory);
+    const total = entries.length;
+    const success = entries.filter((e: SyncHistoryEntry) => e.success).length;
+    const failed = total - success;
+    const withDuration = entries.filter((e: SyncHistoryEntry) => e.durationMs != null);
+    const avgDurationMs = withDuration.length > 0
+      ? Math.round(withDuration.reduce((sum: number, e: SyncHistoryEntry) => sum + (e.durationMs || 0), 0) / withDuration.length)
+      : 0;
+    return { total, success, failed, avgDurationMs };
   }
 }
 

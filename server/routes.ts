@@ -1120,6 +1120,28 @@ export async function registerRoutes(
     }
   });
 
+  // ── Sync History & Metrics ─────────────────────────────────────
+  app.get("/api/sync-history", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const serverId = req.query.serverId as string | undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const history = await storage.getSyncHistory(serverId, limit);
+      res.json(history);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.get("/api/sync-metrics", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const serverId = req.query.serverId as string | undefined;
+      const metrics = await storage.getSyncMetrics(serverId);
+      res.json(metrics);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
 
   // ── Restore active SSH connection on startup ──────────────────
   try {
