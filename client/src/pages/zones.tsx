@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Plus, Search, FileEdit, Trash2, Globe, RefreshCcw, Loader2, LayoutGrid, List as ListIcon, MoreHorizontal } from "lucide-react";
+import { Plus, Search, FileEdit, Trash2, Globe, RefreshCcw, Loader2, LayoutGrid, List as ListIcon, MoreHorizontal, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -227,6 +227,24 @@ export default function Zones() {
                       <div className="flex items-center gap-2">
                         <span className={`inline-block h-2.5 w-2.5 rounded-full animate-pulse ${statusColor(zone.status)}`} />
                         <small className="text-muted-foreground capitalize">{zone.status}</small>
+                        {zone.type === "master" && (
+                          <button
+                            className={`ml-1 flex items-center gap-0.5 text-[10px] ${zone.replicationEnabled !== false ? "text-green-600" : "text-muted-foreground line-through"}`}
+                            title={zone.replicationEnabled !== false ? "Replication enabled (click to disable)" : "Replication disabled (click to enable)"}
+                            onClick={async () => {
+                              try {
+                                await fetch(`/api/zones/${zone.id}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ replicationEnabled: zone.replicationEnabled === false }),
+                                });
+                                setZones(prev => prev.map(z => z.id === zone.id ? { ...z, replicationEnabled: zone.replicationEnabled === false } : z));
+                              } catch {}
+                            }}
+                          >
+                            <Copy className="h-3 w-3" />Repl
+                          </button>
+                        )}
                       </div>
                       {canManageDNS && (
                         <Button

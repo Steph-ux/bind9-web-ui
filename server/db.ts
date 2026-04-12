@@ -181,6 +181,8 @@ if (DB_TYPE === "sqlite") {
   try { sqlite.exec(`ALTER TABLE rpz_entries ADD COLUMN comment TEXT DEFAULT ''`); } catch {}
   // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
   try { sqlite.exec(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
+  // Migrate: add replication_enabled column to zones
+  try { sqlite.exec(`ALTER TABLE zones ADD COLUMN replication_enabled INTEGER NOT NULL DEFAULT 1`); } catch {}
   // Index on type for faster filtering
   try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks

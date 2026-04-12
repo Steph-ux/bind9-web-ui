@@ -41,6 +41,7 @@ export interface ZoneData {
     serial: string;
     filePath: string;
     adminEmail: string;
+    replicationEnabled: boolean;
     records: number;
     createdAt: string;
     updatedAt: string;

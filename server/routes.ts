@@ -1484,7 +1484,7 @@ export async function registerRoutes(
       if (!zone) return res.status(404).json({ message: "Zone not found" });
       // Only allow specific fields to be updated
       const allowed: Record<string, any> = {};
-      const { domain, type, status, adminEmail, filePath } = req.body;
+      const { domain, type, status, adminEmail, filePath, replicationEnabled } = req.body;
       const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
       const ALLOWED_ZONE_STATUSES = ["active", "inactive"];
       if (domain !== undefined) {
@@ -1504,6 +1504,7 @@ export async function registerRoutes(
         if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(filePath))) return res.status(400).json({ message: "Invalid file path" });
         allowed.filePath = String(filePath);
       }
+      if (replicationEnabled !== undefined) allowed.replicationEnabled = Boolean(replicationEnabled);
       const updated = await storage.updateZone(id, allowed);
       res.json(updated);
     } catch (error: any) {
@@ -1583,14 +1584,16 @@ export async function registerRoutes(
       await bind9Service.rndc(`reload ${zone.domain}`);
       console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
 
-      // Auto-notify replication servers
-      try {
-        const replServers = await storage.getReplicationServers();
-        if (replServers.some(s => s.enabled)) {
-          await replicationService.notifyZone(zone.domain);
+      // Auto-notify replication servers (skip if replication disabled for this zone)
+      if (zone.replicationEnabled !== false) {
+        try {
+          const replServers = await storage.getReplicationServers();
+          if (replServers.some(s => s.enabled)) {
+            await replicationService.notifyZone(zone.domain);
+          }
+        } catch (replErr: any) {
+          console.error(`[replication] Auto-notify failed for ${zone.domain}: ${replErr.message}`);
         }
-      } catch (replErr: any) {
-        console.error(`[replication] Auto-notify failed for ${zone.domain}: ${replErr.message}`);
       }
     } catch (error: any) {
       console.error(`[bind9] Failed to sync zone file: ${error.message}`);

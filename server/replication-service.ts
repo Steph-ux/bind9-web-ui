@@ -32,7 +32,7 @@ class ReplicationService {
     const servers = await storage.getReplicationServers();
     const enabled = servers.filter(s => s.enabled);
     const zones = await storage.getZones();
-    const masterZones = zones.filter(z => z.type === "master" && z.status === "active");
+    const masterZones = zones.filter(z => z.type === "master" && z.status === "active" && z.replicationEnabled !== false);
 
     const results: SyncResult[] = [];
 
@@ -65,6 +65,7 @@ class ReplicationService {
     const start = Date.now();
     const zone = await storage.getZone(zoneId);
     if (!zone) throw new Error("Zone not found");
+    if (zone.replicationEnabled === false) throw new Error("Replication is disabled for this zone");
 
     const servers = await storage.getReplicationServers();
     const enabled = servers.filter(s => s.enabled);
@@ -175,7 +176,7 @@ class ReplicationService {
     const servers = await storage.getReplicationServers();
     const enabled = servers.filter(s => s.enabled);
     const zones = await storage.getZones();
-    const masterZones = zones.filter(z => z.type === "master" && z.status === "active");
+    const masterZones = zones.filter(z => z.type === "master" && z.status === "active" && z.replicationEnabled !== false);
     const newConflicts: ReplicationConflict[] = [];
 
     // Get existing unresolved conflicts to avoid duplicates

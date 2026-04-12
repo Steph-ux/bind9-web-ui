@@ -31,6 +31,7 @@ export const zones = sqliteTable("zones", {
   serial: text("serial").notNull().default(""),
   filePath: text("file_path").notNull().default(""),
   adminEmail: text("admin_email").default(""),
+  replicationEnabled: integer("replication_enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
