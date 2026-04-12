@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
 import { useReplicationWs } from "@/hooks/use-repl-ws";
-import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe, Heart, Activity, Mail, Webhook, MessageSquare } from "lucide-react";
+import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe, Heart, Activity, Mail, Webhook, MessageSquare, Archive, RotateCcw } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, getHealthChecks, runHealthChecks, getNotificationChannels, createNotificationChannel, deleteNotificationChannel, getSyncHistory, getSyncMetrics, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry, type HealthCheckEntry, type NotificationChannelEntry, type SyncHistoryEntry, type SyncMetrics } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, getHealthChecks, runHealthChecks, getNotificationChannels, createNotificationChannel, deleteNotificationChannel, getSyncHistory, getSyncMetrics, getBackups, createBackup, restoreBackup, deleteBackup, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry, type HealthCheckEntry, type NotificationChannelEntry, type SyncHistoryEntry, type SyncMetrics, type BackupEntry } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -120,6 +120,11 @@ export default function ReplicationPage() {
   const { data: syncHistoryData } = useQuery<SyncHistoryEntry[]>({
     queryKey: ["sync-history"],
     queryFn: () => getSyncHistory(undefined, 20),
+  });
+
+  const { data: backups } = useQuery<BackupEntry[]>({
+    queryKey: ["backups"],
+    queryFn: () => getBackups(),
   });
 
   const [addChannelOpen, setAddChannelOpen] = useState(false);
@@ -842,6 +847,96 @@ export default function ReplicationPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Backups & Disaster Recovery */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Archive className="h-5 w-5" />
+            Backups & Disaster Recovery
+          </h3>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
+              try {
+                await createBackup("manual", "full");
+                toast({ title: "Full backup created" });
+                queryClient.invalidateQueries({ queryKey: ["backups"] });
+              } catch (err: any) { toast({ variant: "destructive", title: "Backup failed", description: err.message }); }
+            }}>
+              <Archive className="h-4 w-4" /> Full Backup
+            </Button>
+            <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
+              try {
+                await createBackup("manual", "zones");
+                toast({ title: "Zone backup created" });
+                queryClient.invalidateQueries({ queryKey: ["backups"] });
+              } catch (err: any) { toast({ variant: "destructive", title: "Backup failed", description: err.message }); }
+            }}>
+              <Globe className="h-4 w-4" /> Zones Only
+            </Button>
+          </div>
+        </div>
+        {backups && backups.length > 0 ? (
+          <Card>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Type</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Scope</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Description</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Size</th>
+                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Created</th>
+                    <th className="h-10 px-4 text-right font-medium text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {backups.map(b => (
+                    <tr key={b.id} className="border-b last:border-0 hover:bg-muted/50">
+                      <td className="px-4 py-2">
+                        <Badge variant={b.type === "auto" ? "secondary" : b.type === "snapshot" ? "outline" : "default"}>
+                          {b.type}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2"><span className="capitalize">{b.scope.replace("_", " ")}</span></td>
+                      <td className="px-4 py-2 text-muted-foreground">{b.description}</td>
+                      <td className="px-4 py-2 text-muted-foreground">{b.sizeBytes ? `${(b.sizeBytes / 1024).toFixed(1)} KB` : "—"}</td>
+                      <td className="px-4 py-2 text-muted-foreground">{new Date(b.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-2 text-right flex gap-1 justify-end">
+                        <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={async () => {
+                          try {
+                            const res = await restoreBackup(b.id);
+                            toast({ title: res.success ? "Restored" : "Failed", description: res.message, variant: res.success ? "default" : "destructive" });
+                            if (res.success) queryClient.invalidateQueries();
+                          } catch (err: any) { toast({ variant: "destructive", title: "Restore failed", description: err.message }); }
+                        }}>
+                          <RotateCcw className="h-3 w-3" /> Restore
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7" onClick={async () => {
+                          try {
+                            await deleteBackup(b.id);
+                            toast({ title: "Backup deleted" });
+                            queryClient.invalidateQueries({ queryKey: ["backups"] });
+                          } catch (err: any) { toast({ variant: "destructive", title: "Failed", description: err.message }); }
+                        }}>
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col items-center py-8">
+              <Archive className="h-10 w-10 text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">No backups yet. Auto-backups run every 6 hours.</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </DashboardLayout>
   );
 }

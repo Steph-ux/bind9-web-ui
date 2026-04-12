@@ -22,6 +22,7 @@ import {
   notificationChannels, type NotificationChannel,
   syncHistory, type SyncHistoryEntry,
   dnssecKeys, type DnssecKey,
+  backups, type Backup,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -120,6 +121,11 @@ export interface IStorage {
   createDnssecKey(data: Omit<DnssecKey, "id" | "createdAt">): Promise<DnssecKey>;
   updateDnssecKey(id: string, data: Partial<DnssecKey>): Promise<DnssecKey>;
   deleteDnssecKey(id: string): Promise<boolean>;
+  // Backups
+  getBackups(type?: string): Promise<Backup[]>;
+  getBackup(id: string): Promise<Backup | undefined>;
+  createBackup(data: Omit<Backup, "id" | "createdAt">): Promise<Backup>;
+  deleteBackup(id: string): Promise<boolean>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -1032,6 +1038,41 @@ export class DatabaseStorage implements IStorage {
   async deleteDnssecKey(id: string): Promise<boolean> {
     await this.ensureDb();
     const result = await db.delete(dnssecKeys).where(eq(dnssecKeys.id, id));
+    return (result as any).changes > 0;
+  }
+
+  // ── Backups ────────────────────────────────────────────────────
+  async getBackups(type?: string): Promise<Backup[]> {
+    await this.ensureDb();
+    if (type) {
+      return db.select().from(backups)
+        .where(eq(backups.type, type as "auto" | "manual" | "snapshot"))
+        .orderBy(desc(backups.createdAt));
+    }
+    return db.select().from(backups)
+      .orderBy(desc(backups.createdAt));
+  }
+
+  async getBackup(id: string): Promise<Backup | undefined> {
+    await this.ensureDb();
+    const [b] = await db.select().from(backups)
+      .where(eq(backups.id, id))
+      .limit(1);
+    return b;
+  }
+
+  async createBackup(data: Omit<Backup, "id" | "createdAt">): Promise<Backup> {
+    await this.ensureDb();
+    const [b] = await db.insert(backups).values({
+      ...data,
+      createdAt: new Date().toISOString(),
+    }).returning();
+    return b;
+  }
+
+  async deleteBackup(id: string): Promise<boolean> {
+    await this.ensureDb();
+    const result = await db.delete(backups).where(eq(backups.id, id));
     return (result as any).changes > 0;
   }
 }

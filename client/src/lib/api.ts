@@ -553,3 +553,27 @@ export const retireDnssecKey = (keyId: string) =>
     request<{ success: boolean; message: string }>(`/dnssec/retire-key/${keyId}`, { method: "POST" });
 export const deleteDnssecKey = (keyId: string) =>
     request<{ success: boolean; message: string }>(`/dnssec/keys/${keyId}`, { method: "DELETE" });
+
+// ── Backups ─────────────────────────────────────────────────────
+export interface BackupEntry {
+    id: string;
+    type: "auto" | "manual" | "snapshot";
+    scope: "full" | "zones" | "configs" | "single_zone";
+    zoneId: string | null;
+    filePath: string;
+    sizeBytes: number | null;
+    description: string;
+    createdAt: string;
+}
+
+export const getBackups = (type?: string) =>
+    request<BackupEntry[]>(`/backups${type ? `?type=${type}` : ""}`);
+export const createBackup = (type: "auto" | "manual" | "snapshot", scope: "full" | "zones" | "configs" | "single_zone", zoneId?: string) =>
+    request<BackupEntry>("/backups", {
+        method: "POST",
+        body: JSON.stringify({ type, scope, zoneId }),
+    });
+export const restoreBackup = (id: string) =>
+    request<{ success: boolean; message: string }>(`/backups/${id}/restore`, { method: "POST" });
+export const deleteBackup = (id: string) =>
+    request<{ success: boolean; message: string }>(`/backups/${id}`, { method: "DELETE" });

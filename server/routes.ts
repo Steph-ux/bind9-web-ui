@@ -13,6 +13,7 @@ import { firewallService } from "./firewall-service";
 import { replicationService } from "./replication-service";
 import { healthService } from "./health-service";
 import { dnssecService } from "./dnssec-service";
+import { backupService } from "./backup-service";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -1202,6 +1203,50 @@ export async function registerRoutes(
     try {
       const keyId = req.params.keyId as string;
       const result = await dnssecService.deleteKey(keyId);
+      if (!result.success) return res.status(400).json({ message: result.message });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  // ── Backups ───────────────────────────────────────────────────
+  app.get("/api/backups", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const type = req.query.type as string | undefined;
+      const list = await storage.getBackups(type);
+      res.json(list);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/backups", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const { type, scope, zoneId } = req.body;
+      if (!type || !scope) return res.status(400).json({ message: "type and scope required" });
+      const backup = await backupService.createBackup(type, scope, zoneId);
+      res.json(backup);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/backups/:id/restore", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const result = await backupService.restore(id);
+      if (!result.success) return res.status(400).json({ message: result.message });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.delete("/api/backups/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const result = await backupService.deleteBackup(id);
       if (!result.success) return res.status(400).json({ message: result.message });
       res.json(result);
     } catch (error: any) {
@@ -2794,6 +2839,9 @@ export async function registerRoutes(
 
   // Start periodic health checks (every 60s)
   healthService.start(60_000);
+
+  // Start auto-backup scheduler (every 6 hours)
+  backupService.start(6 * 60 * 60 * 1000);
 
   return httpServer;
 }

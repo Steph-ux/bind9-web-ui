@@ -212,6 +212,16 @@ if (DB_TYPE === "sqlite") {
       activated_at TEXT,
       retired_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS backups (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      zone_id TEXT,
+      file_path TEXT NOT NULL,
+      size_bytes INTEGER,
+      description TEXT DEFAULT '',
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

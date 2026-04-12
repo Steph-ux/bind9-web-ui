@@ -322,3 +322,17 @@ export const dnssecKeys = sqliteTable("dnssec_keys", {
 });
 
 export type DnssecKey = typeof dnssecKeys.$inferSelect;
+
+// ── Backups ───────────────────────────────────────────────────
+export const backups = sqliteTable("backups", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  type: text("type", { enum: ["auto", "manual", "snapshot"] }).notNull(),
+  scope: text("scope", { enum: ["full", "zones", "configs", "single_zone"] }).notNull(),
+  zoneId: text("zone_id"),
+  filePath: text("file_path").notNull(),
+  sizeBytes: integer("size_bytes"),
+  description: text("description").default(""),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type Backup = typeof backups.$inferSelect;
