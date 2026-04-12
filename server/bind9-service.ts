@@ -110,6 +110,36 @@ class Bind9Service {
         await fsPromises.writeFile(filePath, content, "utf-8");
     }
 
+    /** Write a file with non-destructive backup — preserves the original as .bak before overwriting */
+    private async writeWithBackup(filePath: string, content: string): Promise<void> {
+        // Preserve original file as .bak (only if it exists)
+        try {
+            const existing = await this.readRemoteFile(filePath);
+            if (existing) {
+                const backupPath = filePath + ".bak";
+                await this.writeRemoteFile(backupPath, existing);
+            }
+        } catch {
+            // File doesn't exist yet — no backup needed
+        }
+        await this.writeRemoteFile(filePath, content);
+    }
+
+    /** Restore a file from its .bak backup */
+    async restoreFromBackup(filePath: string): Promise<boolean> {
+        const backupPath = filePath + ".bak";
+        try {
+            const backup = await this.readRemoteFile(backupPath);
+            if (backup) {
+                await this.writeRemoteFile(filePath, backup);
+                return true;
+            }
+        } catch {
+            // No backup exists
+        }
+        return false;
+    }
+
     /** Check if BIND9/rndc is available */
     async isAvailable(): Promise<boolean> {
         if (this.available !== null) return this.available;
@@ -198,7 +228,7 @@ class Bind9Service {
     ): Promise<string> {
         const newSerial = serial || this.generateSerial();
         const content = this.generateZoneFile(domain, records, newSerial, options);
-        await this.writeRemoteFile(filePath, content);
+        await this.writeWithBackup(filePath, content);
         return newSerial;
     }
 
@@ -285,7 +315,7 @@ class Bind9Service {
             content += `};\n\n`;
         }
         const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
-        await this.writeRemoteFile(confPath, content);
+        await this.writeWithBackup(confPath, content);
     }
 
     /** Write TSIG Keys to named.conf.keys */
@@ -301,7 +331,7 @@ class Bind9Service {
             content += `};\n\n`;
         }
         const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.keys");
-        await this.writeRemoteFile(confPath, content);
+        await this.writeWithBackup(confPath, content);
     }
 
     /** Add a zone to named.conf.local */
@@ -331,7 +361,7 @@ zone "${safeDomain}" {
     file "${safeFile}";
 };
 `;
-            await this.writeRemoteFile(confPath, content + newBlock);
+            await this.writeWithBackup(confPath, content + newBlock);
             console.log(`[bind9] Added zone ${safeDomain} to named.conf.local`);
         } catch (error: any) {
             throw new Error(`Failed to add zone to config: ${error.message}`);
@@ -361,7 +391,7 @@ zone "${safeDomain}" {
             }
 
             const newContent = content.replace(regex, "");
-            await this.writeRemoteFile(confPath, newContent.trim() + "\n");
+            await this.writeWithBackup(confPath, newContent.trim() + "\n");
             console.log(`[bind9] Removed zone ${safeDomain} from named.conf.local`);
         } catch (error: any) {
             throw new Error(`Failed to remove zone from config: ${error.message}`);
@@ -395,7 +425,7 @@ zone "${safeDomain}" {
             }
 
             if (modified) {
-                await this.writeRemoteFile(namedConfPath, content);
+                await this.writeWithBackup(namedConfPath, content);
                 console.log("[bind9] Added missing includes to named.conf");
             }
         } catch (error: any) {
@@ -1139,7 +1169,7 @@ zone "${safeDomain}" {
             }
         }
 
-        await this.writeRemoteFile(filePath, lines.join("\n") + "\n");
+        await this.writeWithBackup(filePath, lines.join("\n") + "\n");
     }
 
 

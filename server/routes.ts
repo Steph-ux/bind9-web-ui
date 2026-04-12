@@ -4,6 +4,7 @@ import { createServer, type Server } from "http";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import os from "os";
+import path from "path";
 import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
@@ -1431,6 +1432,51 @@ export async function registerRoutes(
       });
 
       res.json(snapshot);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════
+  //  ROLLBACK — Restore BIND9 files from .bak backups
+  // ══════════════════════════════════════════════════════════════
+  app.post("/api/rollback/:file", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const file = String(req.params.file);
+      // Only allow known BIND9 config/zone file names to prevent path traversal
+      const allowedFiles = [
+        "named.conf", "named.conf.local", "named.conf.acls", "named.conf.keys", "named.conf.options",
+        "db.rpz.intra",
+      ];
+      // Also allow db.* zone files
+      if (!allowedFiles.includes(file) && !/^db\.[a-z0-9._-]+$/i.test(file)) {
+        return res.status(400).json({ message: "Unknown file — rollback not allowed" });
+      }
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const BIND9_CONF_DIR = process.env.BIND9_CONF_DIR || "/etc/bind";
+      const BIND9_ZONE_DIR = process.env.BIND9_ZONE_DIR || "/var/lib/bind";
+      // Determine path: zone files in zone dir, config files in conf dir
+      const isZone = file.startsWith("db.");
+      const filePath = isZone
+        ? path.posix.join(BIND9_ZONE_DIR, file)
+        : path.posix.join(BIND9_CONF_DIR, file);
+
+      const restored = await bind9Service.restoreFromBackup(filePath);
+      if (!restored) {
+        return res.status(404).json({ message: `No .bak backup found for ${file}` });
+      }
+      // Validate + reload
+      try {
+        await bind9Service.reload();
+      } catch (reloadErr: any) {
+        // File restored but reload failed — still report success with warning
+        await storage.insertLog({ level: "WARN", source: "rollback", message: `Restored ${file} from backup but reload failed: ${reloadErr.message}` });
+        return res.json({ message: `Restored ${file} from backup but BIND9 reload failed`, warning: reloadErr.message });
+      }
+      await storage.insertLog({ level: "INFO", source: "rollback", message: `Restored ${file} from .bak backup and reloaded BIND9` });
+      res.json({ message: `Restored ${file} from backup and reloaded BIND9` });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
