@@ -323,3 +323,19 @@ export const createApiToken = (name: string, permissions?: string, expiresAt?: s
     });
 export const revokeApiToken = (id: string) =>
     request<{ message: string }>(`/tokens/${id}`, { method: "DELETE" });
+
+// ── Domain Jailing ──────────────────────────────────────────────
+export interface UserDomainAssignment {
+    id: string;
+    userId: string;
+    zoneId: string;
+    createdAt: string;
+}
+
+export const getUserDomains = (userId: string) =>
+    request<UserDomainAssignment[]>(`/users/${userId}/domains`);
+export const setUserDomains = (userId: string, zoneIds: string[]) =>
+    request<{ message: string }>(`/users/${userId}/domains`, {
+        method: "PUT",
+        body: JSON.stringify({ zoneIds }),
+    });

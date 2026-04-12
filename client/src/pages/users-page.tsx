@@ -5,7 +5,7 @@ import { User, InsertUser, insertUserSchema } from "@shared/schema";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, UserPlus, Loader2, Users, ShieldAlert, Pencil } from "lucide-react";
+import { Trash2, UserPlus, Loader2, Users, ShieldAlert, Pencil, Globe } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { getUserDomains, setUserDomains } from "@/lib/api";
 
 export default function UsersPage() {
   const { user } = useAuth();
@@ -22,6 +24,10 @@ export default function UsersPage() {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [jailTarget, setJailTarget] = useState<User | null>(null);
+  const [jailZoneIds, setJailZoneIds] = useState<string[]>([]);
+  const [jailAllZones, setJailAllZones] = useState<{ id: string; domain: string }[]>([]);
+  const [jailLoading, setJailLoading] = useState(false);
   const [editRole, setEditRole] = useState<string>("viewer");
   const [editPassword, setEditPassword] = useState<string>("");
 
@@ -246,6 +252,29 @@ export default function UsersPage() {
                           >
                             <Pencil className="h-4 w-4 text-muted-foreground" />
                           </Button>
+                          {u.role === "viewer" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={async () => {
+                                setJailTarget(u);
+                                setJailLoading(true);
+                                try {
+                                  const [assignments, allZones] = await Promise.all([
+                                    getUserDomains(u.id),
+                                    fetch("/api/zones").then(r => r.json()),
+                                  ]);
+                                  setJailZoneIds(assignments.map((a: any) => a.zoneId));
+                                  setJailAllZones(allZones.map((z: any) => ({ id: z.id, domain: z.domain })));
+                                } catch {}
+                                setJailLoading(false);
+                              }}
+                              title="Manage domain access"
+                            >
+                              <Globe className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -338,6 +367,60 @@ export default function UsersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Domain Jailing Dialog */}
+      <Dialog open={!!jailTarget} onOpenChange={(open) => { if (!open) setJailTarget(null); }}>
+        <DialogContent className="max-w-md max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" /> Domain Access: {jailTarget?.username}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Select which zones this viewer can access. Admins and operators always see all zones.
+          </p>
+          {jailLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : jailAllZones.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">No zones available</p>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-y-auto py-2">
+              {jailAllZones.map(z => (
+                <label key={z.id} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50 cursor-pointer">
+                  <Checkbox
+                    checked={jailZoneIds.includes(z.id)}
+                    onCheckedChange={(checked) => {
+                      setJailZoneIds(prev =>
+                        checked ? [...prev, z.id] : prev.filter(id => id !== z.id)
+                      );
+                    }}
+                  />
+                  <span className="text-sm">{z.domain}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setJailTarget(null)}>Cancel</Button>
+            <Button
+              className="gap-2"
+              disabled={jailLoading}
+              onClick={async () => {
+                if (!jailTarget) return;
+                try {
+                  await setUserDomains(jailTarget.id, jailZoneIds);
+                  toast({ title: "Domain access updated" });
+                  setJailTarget(null);
+                } catch (err: any) {
+                  toast({ variant: "destructive", title: "Failed", description: err.message });
+                }
+              }}
+            >
+              Save Access
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

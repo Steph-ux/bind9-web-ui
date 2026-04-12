@@ -721,6 +721,35 @@ export async function registerRoutes(
     }
   });
 
+  // ── Domain Jailing (User-Domain assignments) ────────────────────
+  app.get("/api/users/:id/domains", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userId = String(req.params.id);
+      const assignments = await storage.getUserDomains(userId);
+      res.json(assignments);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.put("/api/users/:id/domains", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userId = String(req.params.id);
+      const { zoneIds } = req.body;
+      if (!Array.isArray(zoneIds)) {
+        return res.status(400).json({ message: "zoneIds must be an array" });
+      }
+      await storage.setUserDomains(userId, zoneIds);
+      await storage.insertLog({
+        level: "INFO",
+        source: "users",
+        message: `Domain assignments updated for user ${userId} (${zoneIds.length} zones)`,
+      });
+      res.json({ message: "Domain assignments updated" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
 
 
 
@@ -943,9 +972,16 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  ZONES
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/zones", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/zones", requireOperator, async (req: Request, res: Response) => {
     try {
-      const allZones = await storage.getZones();
+      let allZones = await storage.getZones();
+      // Domain jailing: viewers only see their assigned zones
+      const user = req.user as any;
+      if (user?.role === "viewer" && user?.id) {
+        const assignments = await storage.getUserDomains(user.id);
+        const allowedIds = new Set(assignments.map(a => a.zoneId));
+        allZones = allZones.filter(z => allowedIds.has(z.id));
+      }
       const enriched = await Promise.all(allZones.map(async (zone) => ({
         ...zone,
         records: await storage.getZoneRecordCount(zone.id),
@@ -1062,6 +1098,12 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
+      // Domain jailing check
+      const user = req.user as any;
+      if (user?.role === "viewer" && user?.id) {
+        const accessible = await storage.isZoneAccessibleByUser(id, user.id, user.role);
+        if (!accessible) return res.status(403).json({ message: "You do not have access to this zone" });
+      }
       const records = await storage.getRecords(zone.id);
       res.json({ ...zone, records });
     } catch (error: any) {

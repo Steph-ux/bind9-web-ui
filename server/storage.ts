@@ -14,6 +14,7 @@ import {
   rpzEntries, type RpzEntry, type InsertRpzEntry,
   ipBlacklist, type IpBlacklist,
   apiTokens, type ApiToken,
+  userDomains, type UserDomain,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -70,6 +71,11 @@ export interface IStorage {
   createApiToken(data: { name: string; tokenHash: string; tokenPrefix: string; permissions: string; createdBy: string; expiresAt?: string }): Promise<ApiToken>;
   deleteApiToken(id: string): Promise<boolean>;
   updateTokenLastUsed(tokenHash: string): Promise<void>;
+
+  // Domain Jailing
+  getUserDomains(userId: string): Promise<UserDomain[]>;
+  setUserDomains(userId: string, zoneIds: string[]): Promise<void>;
+  isZoneAccessibleByUser(zoneId: string, userId: string, userRole: string): Promise<boolean>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -685,6 +691,38 @@ export class DatabaseStorage implements IStorage {
     await db.update(apiTokens).set({
       lastUsedAt: new Date().toISOString(),
     }).where(eq(apiTokens.tokenHash, tokenHash));
+  }
+
+  // ── Domain Jailing ──────────────────────────────────────────
+  async getUserDomains(userId: string): Promise<UserDomain[]> {
+    await this.ensureDb();
+    return db.select().from(userDomains).where(eq(userDomains.userId, userId));
+  }
+
+  async setUserDomains(userId: string, zoneIds: string[]): Promise<void> {
+    await this.ensureDb();
+    // Delete existing assignments
+    await db.delete(userDomains).where(eq(userDomains.userId, userId));
+    // Insert new assignments
+    if (zoneIds.length > 0) {
+      await db.insert(userDomains).values(
+        zoneIds.map(zoneId => ({
+          userId,
+          zoneId,
+        }))
+      );
+    }
+  }
+
+  async isZoneAccessibleByUser(zoneId: string, userId: string, userRole: string): Promise<boolean> {
+    // Admins and operators can access all zones
+    if (userRole === "admin" || userRole === "operator") return true;
+    // Viewers are restricted to their assigned domains
+    await this.ensureDb();
+    const assignments = await db.select().from(userDomains)
+      .where(and(eq(userDomains.userId, userId), eq(userDomains.zoneId, zoneId)))
+      .limit(1);
+    return assignments.length > 0;
   }
 }
 

@@ -205,3 +205,13 @@ export const apiTokens = sqliteTable("api_tokens", {
 });
 
 export type ApiToken = typeof apiTokens.$inferSelect;
+
+// ── User-Domain assignments (Domain Jailing) ────────────────────
+export const userDomains = sqliteTable("user_domains", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull(),
+  zoneId: text("zone_id").notNull(),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type UserDomain = typeof userDomains.$inferSelect;
