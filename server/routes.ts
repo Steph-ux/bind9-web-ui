@@ -12,6 +12,7 @@ import { sshManager } from "./ssh-manager";
 import { firewallService } from "./firewall-service";
 import { replicationService } from "./replication-service";
 import { healthService } from "./health-service";
+import { dnssecService } from "./dnssec-service";
 import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -1137,6 +1138,72 @@ export async function registerRoutes(
       const serverId = req.query.serverId as string | undefined;
       const metrics = await storage.getSyncMetrics(serverId);
       res.json(metrics);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  // ── DNSSEC ─────────────────────────────────────────────────────
+  app.get("/api/dnssec/keys", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const zoneId = req.query.zoneId as string | undefined;
+      const keys = await storage.getDnssecKeys(zoneId);
+      res.json(keys);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/dnssec/generate-key", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const { zoneId, keyType, algorithm, keySize } = req.body;
+      if (!zoneId || !keyType) return res.status(400).json({ message: "zoneId and keyType required" });
+      const result = await dnssecService.generateKey(zoneId, keyType, algorithm, keySize);
+      if (!result.success) return res.status(400).json({ message: result.message });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/dnssec/sign-zone/:zoneId", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const zoneId = req.params.zoneId as string;
+      const result = await dnssecService.signZone(zoneId);
+      if (!result.success) return res.status(400).json({ message: result.message });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.get("/api/dnssec/status/:zoneId", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const zoneId = req.params.zoneId as string;
+      const status = await dnssecService.getSigningStatus(zoneId);
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/dnssec/retire-key/:keyId", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const keyId = req.params.keyId as string;
+      const result = await dnssecService.retireKey(keyId);
+      if (!result.success) return res.status(400).json({ message: result.message });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.delete("/api/dnssec/keys/:keyId", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const keyId = req.params.keyId as string;
+      const result = await dnssecService.deleteKey(keyId);
+      if (!result.success) return res.status(400).json({ message: result.message });
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }

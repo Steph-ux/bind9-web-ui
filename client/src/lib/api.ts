@@ -516,3 +516,40 @@ export const getSyncHistory = (serverId?: string, limit?: number) =>
     request<SyncHistoryEntry[]>(`/sync-history${serverId ? `?serverId=${serverId}` : ""}${limit ? `${serverId ? "&" : "?"}limit=${limit}` : ""}`);
 export const getSyncMetrics = (serverId?: string) =>
     request<SyncMetrics>(`/sync-metrics${serverId ? `?serverId=${serverId}` : ""}`);
+
+// ── DNSSEC ──────────────────────────────────────────────────────
+export interface DnssecKeyEntry {
+    id: string;
+    zoneId: string;
+    keyTag: string;
+    keyType: "KSK" | "ZSK";
+    algorithm: string;
+    keySize: number;
+    status: "active" | "published" | "retired" | "revoked";
+    filePath: string | null;
+    createdAt: string;
+    activatedAt: string | null;
+    retiredAt: string | null;
+}
+
+export interface DnssecStatus {
+    signed: boolean;
+    keys: DnssecKeyEntry[];
+    details: string;
+}
+
+export const getDnssecKeys = (zoneId?: string) =>
+    request<DnssecKeyEntry[]>(`/dnssec/keys${zoneId ? `?zoneId=${zoneId}` : ""}`);
+export const generateDnssecKey = (zoneId: string, keyType: "KSK" | "ZSK", algorithm?: string, keySize?: number) =>
+    request<{ success: boolean; message: string; key?: DnssecKeyEntry }>("/dnssec/generate-key", {
+        method: "POST",
+        body: JSON.stringify({ zoneId, keyType, algorithm, keySize }),
+    });
+export const signZone = (zoneId: string) =>
+    request<{ success: boolean; message: string }>(`/dnssec/sign-zone/${zoneId}`, { method: "POST" });
+export const getDnssecStatus = (zoneId: string) =>
+    request<DnssecStatus>(`/dnssec/status/${zoneId}`);
+export const retireDnssecKey = (keyId: string) =>
+    request<{ success: boolean; message: string }>(`/dnssec/retire-key/${keyId}`, { method: "POST" });
+export const deleteDnssecKey = (keyId: string) =>
+    request<{ success: boolean; message: string }>(`/dnssec/keys/${keyId}`, { method: "DELETE" });

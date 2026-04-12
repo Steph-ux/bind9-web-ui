@@ -21,6 +21,7 @@ import {
   healthChecks, type HealthCheck,
   notificationChannels, type NotificationChannel,
   syncHistory, type SyncHistoryEntry,
+  dnssecKeys, type DnssecKey,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -113,6 +114,12 @@ export interface IStorage {
   getSyncHistory(serverId?: string, limit?: number): Promise<SyncHistoryEntry[]>;
   createSyncHistoryEntry(data: Omit<SyncHistoryEntry, "id" | "createdAt">): Promise<SyncHistoryEntry>;
   getSyncMetrics(serverId?: string): Promise<{ total: number; success: number; failed: number; avgDurationMs: number }>;
+  // DNSSEC Keys
+  getDnssecKeys(zoneId?: string): Promise<DnssecKey[]>;
+  getDnssecKey(id: string): Promise<DnssecKey | undefined>;
+  createDnssecKey(data: Omit<DnssecKey, "id" | "createdAt">): Promise<DnssecKey>;
+  updateDnssecKey(id: string, data: Partial<DnssecKey>): Promise<DnssecKey>;
+  deleteDnssecKey(id: string): Promise<boolean>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -983,6 +990,49 @@ export class DatabaseStorage implements IStorage {
       ? Math.round(withDuration.reduce((sum: number, e: SyncHistoryEntry) => sum + (e.durationMs || 0), 0) / withDuration.length)
       : 0;
     return { total, success, failed, avgDurationMs };
+  }
+
+  // ── DNSSEC Keys ────────────────────────────────────────────────
+  async getDnssecKeys(zoneId?: string): Promise<DnssecKey[]> {
+    await this.ensureDb();
+    if (zoneId) {
+      return db.select().from(dnssecKeys)
+        .where(eq(dnssecKeys.zoneId, zoneId))
+        .orderBy(desc(dnssecKeys.createdAt));
+    }
+    return db.select().from(dnssecKeys)
+      .orderBy(desc(dnssecKeys.createdAt));
+  }
+
+  async getDnssecKey(id: string): Promise<DnssecKey | undefined> {
+    await this.ensureDb();
+    const [key] = await db.select().from(dnssecKeys)
+      .where(eq(dnssecKeys.id, id))
+      .limit(1);
+    return key;
+  }
+
+  async createDnssecKey(data: Omit<DnssecKey, "id" | "createdAt">): Promise<DnssecKey> {
+    await this.ensureDb();
+    const [key] = await db.insert(dnssecKeys).values({
+      ...data,
+      createdAt: new Date().toISOString(),
+    }).returning();
+    return key;
+  }
+
+  async updateDnssecKey(id: string, data: Partial<DnssecKey>): Promise<DnssecKey> {
+    await this.ensureDb();
+    const [key] = await db.update(dnssecKeys).set(data)
+      .where(eq(dnssecKeys.id, id))
+      .returning();
+    return key;
+  }
+
+  async deleteDnssecKey(id: string): Promise<boolean> {
+    await this.ensureDb();
+    const result = await db.delete(dnssecKeys).where(eq(dnssecKeys.id, id));
+    return (result as any).changes > 0;
   }
 }
 

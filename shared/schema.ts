@@ -305,3 +305,20 @@ export const syncHistory = sqliteTable("sync_history", {
 });
 
 export type SyncHistoryEntry = typeof syncHistory.$inferSelect;
+
+// ── DNSSEC Keys ───────────────────────────────────────────────
+export const dnssecKeys = sqliteTable("dnssec_keys", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  zoneId: text("zone_id").notNull(),
+  keyTag: text("key_tag").notNull(),
+  keyType: text("key_type", { enum: ["KSK", "ZSK"] }).notNull(),
+  algorithm: text("algorithm").notNull().default("ECDSAP256SHA256"),
+  keySize: integer("key_size").notNull().default(256),
+  status: text("status", { enum: ["active", "published", "retired", "revoked"] }).notNull().default("active"),
+  filePath: text("file_path"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  activatedAt: text("activated_at"),
+  retiredAt: text("retired_at"),
+});
+
+export type DnssecKey = typeof dnssecKeys.$inferSelect;

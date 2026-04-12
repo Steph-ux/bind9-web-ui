@@ -199,6 +199,19 @@ if (DB_TYPE === "sqlite") {
       details TEXT DEFAULT '',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS dnssec_keys (
+      id TEXT PRIMARY KEY,
+      zone_id TEXT NOT NULL,
+      key_tag TEXT NOT NULL,
+      key_type TEXT NOT NULL,
+      algorithm TEXT NOT NULL DEFAULT 'ECDSAP256SHA256',
+      key_size INTEGER NOT NULL DEFAULT 256,
+      status TEXT NOT NULL DEFAULT 'active',
+      file_path TEXT,
+      created_at TEXT NOT NULL,
+      activated_at TEXT,
+      retired_at TEXT
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases
