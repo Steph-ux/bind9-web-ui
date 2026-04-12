@@ -60,6 +60,7 @@ export async function registerRoutes(
   app.post("/api/firewall/toggle", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { enable } = req.body;
+      if (typeof enable !== "boolean") return res.status(400).json({ message: "enable must be a boolean" });
       await firewallService.toggle(enable);
       res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
     } catch (error: any) {
@@ -221,7 +222,7 @@ export async function registerRoutes(
   app.put("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
-      const { password, role, ...rest } = req.body;
+      const { password, role, username, mustChangePassword } = req.body;
 
       const ALLOWED_ROLES = ["admin", "operator", "viewer"];
       const updateData: any = {};
@@ -234,6 +235,8 @@ export async function registerRoutes(
         updateData.password = await hashPassword(password);
         updateData.mustChangePassword = false;
       }
+      if (username !== undefined) updateData.username = String(username);
+      if (mustChangePassword !== undefined) updateData.mustChangePassword = !!mustChangePassword;
 
       const updated = await storage.updateUser(id, updateData);
       // exclude password
@@ -943,7 +946,11 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   app.get("/api/config/:section", async (req: Request, res: Response) => {
     try {
-      const { section } = req.params;
+      const section = String(req.params.section);
+      // Validate section name to prevent path traversal
+      if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
+        return res.status(400).json({ message: "Invalid section name" });
+      }
 
       let content = "";
       try {
@@ -970,6 +977,10 @@ export async function registerRoutes(
   app.put("/api/config/:section", requireAdmin, async (req: Request, res: Response) => {
     try {
       const section = req.params.section as string;
+      // Validate section name to prevent path traversal
+      if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
+        return res.status(400).json({ message: "Invalid section name" });
+      }
       const { content } = req.body;
 
       if (!content || typeof content !== "string") {
@@ -1196,7 +1207,7 @@ export async function registerRoutes(
         level: req.query.level as string | undefined,
         source: req.query.source as string | undefined,
         search: req.query.search as string | undefined,
-        limit: req.query.limit ? parseInt(req.query.limit as string) : 200,
+        limit: req.query.limit ? Math.min(parseInt(req.query.limit as string) || 200, 1000) : 200,
       };
       // Combine app logs with real BIND9 logs
       const appLogs = await storage.getLogs(filter);
@@ -1244,7 +1255,7 @@ export async function registerRoutes(
   /** Get only real BIND9 daemon logs */
   app.get("/api/logs/bind9", async (req: Request, res: Response) => {
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 200;
+      const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string) || 200, 1000) : 200;
       const logs = await bind9Service.readBind9Logs(limit);
       res.json(logs);
     } catch (error: any) {
@@ -1252,7 +1263,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/logs", async (_req: Request, res: Response) => {
+  app.delete("/api/logs", requireAdmin, async (_req: Request, res: Response) => {
     try {
       await storage.clearLogs();
       res.json({ message: "Logs cleared" });
@@ -1360,12 +1371,22 @@ export async function registerRoutes(
       const conn = await storage.getConnection(id);
       if (!conn) return res.status(404).json({ message: "Connection not found" });
 
+      // Only allow specific fields to be updated
+      const allowed: Record<string, any> = {};
+      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, rndcBin } = req.body;
+      if (name !== undefined) allowed.name = String(name);
+      if (host !== undefined) allowed.host = String(host);
+      if (port !== undefined) allowed.port = parseInt(port, 10) || 22;
+      if (username !== undefined) allowed.username = String(username);
+      if (authType !== undefined) allowed.authType = String(authType);
+      if (bind9ConfDir !== undefined) allowed.bind9ConfDir = String(bind9ConfDir);
+      if (bind9ZoneDir !== undefined) allowed.bind9ZoneDir = String(bind9ZoneDir);
+      if (rndcBin !== undefined) allowed.rndcBin = String(rndcBin);
       // Don't overwrite password/key if they come as "***"
-      const updates = { ...req.body };
-      if (updates.password === "***") delete updates.password;
-      if (updates.privateKey === "***") delete updates.privateKey;
+      if (password !== undefined && password !== "***") allowed.password = String(password);
+      if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
 
-      const updated = await storage.updateConnection(id, updates);
+      const updated = await storage.updateConnection(id, allowed);
       res.json({
         ...updated,
         password: updated.password ? "***" : "",
@@ -1447,14 +1468,24 @@ export async function registerRoutes(
       if (!host || !username) {
         return res.status(400).json({ message: "host and username are required" });
       }
+      // Validate host: prevent SSRF — only allow hostnames/IPs, no schemes or internal addrs
+      const safeHost = String(host).trim();
+      if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) {
+        return res.status(400).json({ message: "Invalid host format" });
+      }
+      const safePort = parseInt(port, 10) || 22;
+      if (safePort < 1 || safePort > 65535) {
+        return res.status(400).json({ message: "Invalid port number" });
+      }
+      const safeAuthType = authType === "key" ? "key" : "password";
 
       const result = await sshManager.testConnection({
-        host,
-        port: port || 22,
-        username,
-        authType: authType || "password",
-        password,
-        privateKey,
+        host: safeHost,
+        port: safePort,
+        username: String(username),
+        authType: safeAuthType,
+        password: password ? String(password) : undefined,
+        privateKey: privateKey ? String(privateKey) : undefined,
       });
 
       res.json(result);

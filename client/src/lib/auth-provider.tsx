@@ -13,7 +13,7 @@ type AuthContextType = {
     canManageDNS: boolean;
     isReadOnly: boolean;
     mustChangePassword: boolean;
-    changeOwnPassword: (newPassword: string) => Promise<void>;
+    changeOwnPassword: (newPassword: string, currentPassword?: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -105,20 +105,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
-    const changeOwnPassword = async (newPassword: string) => {
-        if (!user) return;
-        const res = await fetch(`/api/users/${user.id}`, {
+    const changeOwnPassword = async (newPassword: string, currentPassword?: string) => {
+        const res = await fetch("/api/auth/password", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify({ password: newPassword }),
+            body: JSON.stringify({ newPassword, currentPassword }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ message: "Failed to change password" }));
             throw new Error(err.message);
         }
-        const updated = await res.json();
-        setUser({ ...user, mustChangePassword: false });
+        setUser({ ...user!, mustChangePassword: false });
         setLocation("/");
         toast({ title: "Password changed", description: "Your password has been updated successfully." });
     };

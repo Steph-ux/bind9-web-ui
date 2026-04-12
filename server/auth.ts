@@ -161,6 +161,36 @@ export function setupAuth(app: Express) {
         res.json(userWithoutPassword);
     });
 
+    // Allow any authenticated user to change their own password
+    app.put("/api/auth/password", async (req, res) => {
+        if (!req.isAuthenticated()) {
+            return res.status(401).json({ message: "Not authenticated" });
+        }
+        const { currentPassword, newPassword } = req.body;
+        if (!newPassword || typeof newPassword !== "string" || newPassword.length < 4) {
+            return res.status(400).json({ message: "New password must be at least 4 characters" });
+        }
+        const user = req.user as User;
+        // Verify current password if user doesn't have mustChangePassword flag
+        if (!user.mustChangePassword) {
+            if (!currentPassword) {
+                return res.status(400).json({ message: "Current password is required" });
+            }
+            const isValid = await comparePasswords(currentPassword, user.password);
+            if (!isValid) {
+                return res.status(401).json({ message: "Current password is incorrect" });
+            }
+        }
+        const hashedPassword = await hashPassword(newPassword);
+        await storage.updateUser(user.id, { password: hashedPassword, mustChangePassword: false });
+        // Update req.user so subsequent /me calls reflect the change
+        const updated = await storage.getUser(user.id);
+        if (updated) {
+            req.login(updated, () => {});
+        }
+        res.json({ message: "Password changed successfully" });
+    });
+
     // Seed Admin User
     (async () => {
         const existingAdmin = await storage.getUserByUsername("admin");
