@@ -127,6 +127,7 @@ export default function AuthPage() {
             ))}
           </div>
         </div>
+        <p className="mt-auto text-white/40 text-xs">Copyright &copy; 2025 Stephane ASSOGBA</p>
       </div>
     </div>
   );

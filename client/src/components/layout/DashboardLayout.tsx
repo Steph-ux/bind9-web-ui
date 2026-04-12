@@ -174,6 +174,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             })}
           </nav>
         </ScrollArea>
+        <div className="border-t px-3 py-3 text-center">
+          {!sidebarCollapsed ? (
+            <p className="text-[10px] text-muted-foreground leading-tight">
+              Copyright &copy; 2025 Stephane ASSOGBA
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">&copy;</p>
+          )}
+        </div>
       </aside>
 
       {/* ── Main content area ── */}
