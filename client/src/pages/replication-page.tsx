@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
+import { useReplicationWs } from "@/hooks/use-repl-ws";
 import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe, Heart, Activity, Mail, Webhook, MessageSquare } from "lucide-react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ export default function ReplicationPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  useReplicationWs();
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ReplicationServerEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReplicationServerEntry | null>(null);

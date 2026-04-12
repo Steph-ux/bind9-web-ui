@@ -2630,6 +2630,42 @@ export async function registerRoutes(
     });
   });
 
+  // ── Replication/Health WebSocket ────────────────────────────────
+  const replWss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws/replication",
+    verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
+      // Same auth as log WS — cookie-based
+      const cookie = info.req.headers.cookie || "";
+      const sessionMatch = cookie.match(/connect\.sid=([^;]+)/);
+      callback(!!sessionMatch);
+    },
+  });
+
+  replWss.on("connection", (ws: WebSocket) => {
+    console.log("[ws] Replication monitor client connected");
+    // Send current health snapshot
+    storage.getHealthChecks(undefined, 50).then(checks => {
+      ws.send(JSON.stringify({ type: "health-snapshot", data: checks }));
+    });
+    ws.on("close", () => {
+      console.log("[ws] Replication monitor client disconnected");
+    });
+  });
+
+  // Broadcast health check results to replication WS clients
+  const originalRunCheck = healthService.runCheck.bind(healthService);
+  healthService.runCheck = async function () {
+    const results = await originalRunCheck();
+    const message = JSON.stringify({ type: "health-update", data: results });
+    replWss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+    return results;
+  };
+
   // Broadcast new logs to all connected clients
   const originalInsertLog = storage.insertLog.bind(storage);
   storage.insertLog = async (entry) => {
