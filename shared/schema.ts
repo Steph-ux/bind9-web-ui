@@ -177,3 +177,16 @@ export const insertRpzEntrySchema = createInsertSchema(rpzEntries).pick({
 });
 export type InsertRpzEntry = z.infer<typeof insertRpzEntrySchema>;
 export type RpzEntry = typeof rpzEntries.$inferSelect;
+
+// ── IP Blacklist ─────────────────────────────────────────────────
+export const ipBlacklist = sqliteTable("ip_blacklist", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  ip: text("ip").notNull().unique(),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  reason: text("reason", { enum: ["login_failed", "api_abuse", "brute_force", "manual"] }).notNull().default("login_failed"),
+  bannedAt: text("banned_at").notNull().$defaultFn(() => new Date().toISOString()),
+  expiresAt: text("expires_at"), // null = permanent ban
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type IpBlacklist = typeof ipBlacklist.$inferSelect;

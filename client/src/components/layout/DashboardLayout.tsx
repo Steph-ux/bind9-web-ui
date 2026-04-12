@@ -29,6 +29,7 @@ import {
   LogOut,
   ShieldCheck,
   ShieldAlert,
+  ShieldBan,
   Bell,
   Search,
   Menu,
@@ -116,6 +117,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   if (user?.role === "admin") {
     navItems.push({ label: "Firewall", icon: ShieldCheck, href: "/firewall" });
     navItems.push({ label: "DNS Firewall", icon: ShieldAlert, href: "/firewall-rpz" });
+    navItems.push({ label: "IP Blacklist", icon: ShieldBan, href: "/blacklist" });
     navItems.push({ label: "Users", icon: Users, href: "/users" });
   }
 

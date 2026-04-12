@@ -279,3 +279,22 @@ export const addFirewallRule = (data: AddFirewallRuleData) =>
     request<{ message: string }>("/firewall/rules", { method: "POST", body: JSON.stringify(data) });
 export const deleteFirewallRule = (id: number) =>
     request<{ message: string }>(`/firewall/rules/${id}`, { method: "DELETE" });
+
+// ── IP Blacklist ──────────────────────────────────────────
+export interface IpBlacklistEntry {
+    id: string;
+    ip: string;
+    attemptCount: number;
+    reason: "login_failed" | "api_abuse" | "brute_force" | "manual";
+    bannedAt: string;
+    expiresAt: string | null;
+    createdAt: string;
+}
+
+export const getIpBlacklist = () => request<IpBlacklistEntry[]>("/blacklist");
+export const banIp = (ip: string, reason?: string, durationMs?: number) =>
+    request<{ message: string }>("/blacklist", { method: "POST", body: JSON.stringify({ ip, reason, durationMs }) });
+export const unbanIp = (ip: string) =>
+    request<{ message: string }>(`/blacklist/${encodeURIComponent(ip)}`, { method: "DELETE" });
+export const cleanupBlacklist = () =>
+    request<{ message: string }>("/blacklist/cleanup", { method: "POST" });

@@ -12,6 +12,7 @@ import {
   type ConfigSnapshot,
   type Connection, type InsertConnection,
   rpzEntries, type RpzEntry, type InsertRpzEntry,
+  ipBlacklist, type IpBlacklist,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -54,6 +55,14 @@ export interface IStorage {
   createKey(key: InsertTsigKey): Promise<TsigKey>;
   deleteKey(id: string): Promise<void>;
   // RPZ
+  // IP Blacklist
+  getIpBlacklist(): Promise<IpBlacklist[]>;
+  isIpBanned(ip: string): Promise<boolean>;
+  recordFailedAttempt(ip: string, reason: "login_failed" | "api_abuse" | "brute_force" | "manual"): Promise<void>;
+  unbanIp(ip: string): Promise<void>;
+  banIp(ip: string, reason: "login_failed" | "api_abuse" | "brute_force" | "manual", durationMs?: number): Promise<void>;
+  cleanupExpiredBans(): Promise<void>;
+
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
   deleteRpzEntry(id: string): Promise<boolean>;
@@ -520,6 +529,99 @@ export class DatabaseStorage implements IStorage {
       if (row.type === "redirect") stats.redirect = Number(row.count);
     }
     return stats;
+  }
+
+  // ── IP Blacklist ──────────────────────────────────────────
+  private static readonly BAN_THRESHOLD = 10;      // attempts before auto-ban
+  private static readonly BAN_DURATION_MS = 24 * 60 * 60 * 1000; // 24h default ban
+
+  async getIpBlacklist(): Promise<IpBlacklist[]> {
+    await this.ensureDb();
+    return db.select().from(ipBlacklist).orderBy(desc(ipBlacklist.bannedAt));
+  }
+
+  async isIpBanned(ip: string): Promise<boolean> {
+    await this.ensureDb();
+    const row = await db.select().from(ipBlacklist).where(eq(ipBlacklist.ip, ip)).limit(1);
+    if (row.length === 0) return false;
+    const entry = row[0];
+    // If expiresAt is set and has passed, the ban is expired
+    if (entry.expiresAt && new Date(entry.expiresAt) < new Date()) {
+      await db.delete(ipBlacklist).where(eq(ipBlacklist.ip, ip));
+      return false;
+    }
+    return true;
+  }
+
+  async recordFailedAttempt(ip: string, reason: "login_failed" | "api_abuse" | "brute_force" | "manual"): Promise<void> {
+    await this.ensureDb();
+    const existing = await db.select().from(ipBlacklist).where(eq(ipBlacklist.ip, ip)).limit(1);
+
+    if (existing.length > 0) {
+      const entry = existing[0];
+      const newCount = entry.attemptCount + 1;
+      // If threshold reached and not already banned, auto-ban
+      if (newCount >= DatabaseStorage.BAN_THRESHOLD && !entry.expiresAt && entry.reason !== "manual") {
+        const expiresAt = new Date(Date.now() + DatabaseStorage.BAN_DURATION_MS).toISOString();
+        await db.update(ipBlacklist).set({
+          attemptCount: newCount,
+          reason: "brute_force",
+          bannedAt: new Date().toISOString(),
+          expiresAt,
+        }).where(eq(ipBlacklist.ip, ip));
+      } else {
+        await db.update(ipBlacklist).set({
+          attemptCount: newCount,
+        }).where(eq(ipBlacklist.ip, ip));
+      }
+    } else {
+      // First offense — just record it, don't ban yet
+      await db.insert(ipBlacklist).values({
+        ip,
+        attemptCount: 1,
+        reason,
+        bannedAt: new Date().toISOString(),
+        expiresAt: null,
+      });
+    }
+  }
+
+  async unbanIp(ip: string): Promise<void> {
+    await this.ensureDb();
+    await db.delete(ipBlacklist).where(eq(ipBlacklist.ip, ip));
+  }
+
+  async banIp(ip: string, reason: "login_failed" | "api_abuse" | "brute_force" | "manual", durationMs?: number): Promise<void> {
+    await this.ensureDb();
+    const expiresAt = durationMs ? new Date(Date.now() + durationMs).toISOString() : null;
+    // Upsert: if IP already tracked, update; otherwise insert
+    const existing = await db.select().from(ipBlacklist).where(eq(ipBlacklist.ip, ip)).limit(1);
+    if (existing.length > 0) {
+      await db.update(ipBlacklist).set({
+        reason,
+        bannedAt: new Date().toISOString(),
+        expiresAt,
+      }).where(eq(ipBlacklist.ip, ip));
+    } else {
+      await db.insert(ipBlacklist).values({
+        ip,
+        attemptCount: 0,
+        reason,
+        bannedAt: new Date().toISOString(),
+        expiresAt,
+      });
+    }
+  }
+
+  async cleanupExpiredBans(): Promise<void> {
+    await this.ensureDb();
+    const now = new Date().toISOString();
+    await db.delete(ipBlacklist).where(
+      and(
+        sql`${ipBlacklist.expiresAt} IS NOT NULL`,
+        sql`${ipBlacklist.expiresAt} < ${now}`
+      )
+    );
   }
 }
 

@@ -19,6 +19,7 @@ import ZoneEditor from "@/pages/zone-editor";
 import UsersPage from "@/pages/users-page";
 import FirewallPage from "@/pages/firewall";
 import FirewallDNS from "@/pages/firewall-dns";
+import BlacklistPage from "@/pages/blacklist";
 
 function Router() {
   return (
@@ -36,6 +37,7 @@ function Router() {
       <ProtectedRoute path="/users" component={UsersPage} adminOnly />
       <ProtectedRoute path="/firewall" component={FirewallPage} adminOnly />
       <ProtectedRoute path="/firewall-rpz" component={FirewallDNS} adminOnly />
+      <ProtectedRoute path="/blacklist" component={BlacklistPage} adminOnly />
       <Route component={NotFound} />
     </Switch>
   );

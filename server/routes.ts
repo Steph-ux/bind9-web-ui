@@ -162,6 +162,65 @@ export async function registerRoutes(
     }
   });
 
+  // ── IP Blacklist ─────────────────────────────────────────────────
+  app.get("/api/blacklist", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const list = await storage.getIpBlacklist();
+      res.json(list);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.delete("/api/blacklist/:ip", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const ip = String(req.params.ip);
+      await storage.unbanIp(ip);
+      await storage.insertLog({
+        level: "INFO",
+        source: "blacklist",
+        message: `IP ${ip} unbanned by admin`,
+      });
+      res.json({ message: `IP ${ip} unbanned` });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/blacklist", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { ip, reason, durationMs } = req.body;
+      if (!ip || typeof ip !== "string") {
+        return res.status(400).json({ message: "IP address is required" });
+      }
+      // Basic IP format validation
+      if (!/^[0-9a-f.:]+$/i.test(ip)) {
+        return res.status(400).json({ message: "Invalid IP address format" });
+      }
+      const validReasons = ["login_failed", "api_abuse", "brute_force", "manual"];
+      const safeReason = validReasons.includes(reason) ? reason : "manual";
+      const safeDuration = durationMs && typeof durationMs === "number" && durationMs > 0 ? durationMs : undefined;
+      await storage.banIp(ip, safeReason, safeDuration);
+      await storage.insertLog({
+        level: "WARN",
+        source: "blacklist",
+        message: `IP ${ip} manually banned (reason: ${safeReason})`,
+      });
+      res.json({ message: `IP ${ip} banned` });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/blacklist/cleanup", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      await storage.cleanupExpiredBans();
+      res.json({ message: "Expired bans cleaned up" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
   // ── DNS Firewall (RPZ) ────────────────────────────────────────
   app.get("/api/rpz", requireOperator, async (req: Request, res: Response) => {
     try {

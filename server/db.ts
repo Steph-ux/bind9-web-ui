@@ -108,6 +108,15 @@ if (DB_TYPE === "sqlite") {
       last_status TEXT DEFAULT 'unknown',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS ip_blacklist (
+      id TEXT PRIMARY KEY,
+      ip TEXT NOT NULL UNIQUE,
+      attempt_count INTEGER NOT NULL DEFAULT 1,
+      reason TEXT NOT NULL DEFAULT 'login_failed',
+      banned_at TEXT NOT NULL,
+      expires_at TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

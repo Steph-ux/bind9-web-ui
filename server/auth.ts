@@ -25,31 +25,11 @@ async function comparePasswords(supplied: string, stored: string) {
     return match;
 }
 
-// Simple in-memory rate limiter for login attempts
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-const LOGIN_RATE_LIMIT = 5;       // max attempts per window
-const LOGIN_RATE_WINDOW = 60000;  // 60 seconds
-
-function checkLoginRate(ip: string): boolean {
-    const now = Date.now();
-    const entry = loginAttempts.get(ip);
-    if (!entry || now > entry.resetAt) {
-        loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_RATE_WINDOW });
-        return true;
-    }
-    entry.count++;
-    return entry.count <= LOGIN_RATE_LIMIT;
-}
-
-// Clean up old entries every 5 minutes
+// IP Blacklisting is now handled via persistent DB storage (storage.recordFailedAttempt, storage.isIpBanned)
+// Cleanup expired bans every hour
 setInterval(() => {
-    const now = Date.now();
-    const expired: string[] = [];
-    loginAttempts.forEach((entry, ip) => {
-        if (now > entry.resetAt) expired.push(ip);
-    });
-    expired.forEach(ip => loginAttempts.delete(ip));
-}, 5 * 60 * 1000);
+    storage.cleanupExpiredBans().catch(() => {});
+}, 60 * 60 * 1000);
 
 export function setupAuth(app: Express) {
     // Enforce a strong session secret — in production, MUST be set via env
@@ -124,16 +104,19 @@ export function setupAuth(app: Express) {
     });
 
     // Auth Routes
-    app.post("/api/auth/login", (req, res, next) => {
-        // Rate limit login attempts by IP
+    app.post("/api/auth/login", async (req, res, next) => {
+        // Check if IP is banned (persistent blacklist)
         const ip = req.ip || req.socket.remoteAddress || "unknown";
-        if (!checkLoginRate(ip)) {
-            return res.status(429).json({ message: "Too many login attempts. Try again in 60 seconds." });
+        const banned = await storage.isIpBanned(ip);
+        if (banned) {
+            return res.status(429).json({ message: "Your IP has been banned due to too many failed attempts. Contact an administrator." });
         }
 
-        passport.authenticate("local", (err: any, user: any, info: any) => {
+        passport.authenticate("local", async (err: any, user: any, info: any) => {
             if (err) return next(err);
             if (!user) {
+                // Record failed attempt in persistent blacklist
+                await storage.recordFailedAttempt(ip, "login_failed");
                 return res.status(401).json({ message: "Invalid credentials" });
             }
             req.login(user, (err) => {
