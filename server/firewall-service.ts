@@ -40,13 +40,26 @@ function shellSafe(input: string): string {
     throw new Error(`Invalid characters in input: ${input}`);
 }
 
+export type RuleDirection = "in" | "out";
+export type RuleType = "port" | "service" | "portRange" | "multiPort" | "icmp" | "raw";
+
 export interface FirewallRule {
     id: number;
     to: string;
     action: "ALLOW" | "DENY" | "REJECT" | "LIMIT";
     from: string;
     ipv6: boolean;
+    direction: RuleDirection;
+    ruleType: RuleType;
+    proto: string;
+    toPortEnd?: string;           // For port ranges (e.g. "1000-2000" → toPort="1000", toPortEnd="2000")
+    service?: string;             // Service name (ssh, http, dns, etc.)
+    interface?: string;           // Network interface (eth0, wlan0, etc.)
+    rateLimit?: string;           // Rate limit (e.g. "6/min", "10/hour")
+    icmpType?: string;            // ICMP type (echo-request, echo-reply, etc.)
+    log?: boolean;                // Log matches for this rule
     comment?: string;
+    rawRule?: string;             // Custom raw rule for advanced users
 }
 
 export interface FirewallStatus {
@@ -57,13 +70,36 @@ export interface FirewallStatus {
     availableBackends: FirewallBackend[];
 }
 
+export interface AddRuleParams {
+    toPort: string;
+    proto: string;
+    action: string;
+    fromIp: string;
+    direction?: RuleDirection;
+    ruleType?: RuleType;
+    toPortEnd?: string;
+    service?: string;
+    interface_?: string;          // 'interface' is reserved in strict mode
+    rateLimit?: string;
+    icmpType?: string;
+    log?: boolean;
+    comment?: string;
+    rawRule?: string;
+}
+
+const ALLOWED_DIRECTIONS: RuleDirection[] = ["in", "out"];
+const ALLOWED_RULE_TYPES: RuleType[] = ["port", "service", "portRange", "multiPort", "icmp", "raw"];
+const ALLOWED_ICMP_TYPES = ["echo-request", "echo-reply", "destination-unreachable", "time-exceeded", "redirect", "router-advertisement", "router-solicitation", "parameter-problem", "timestamp-request", "timestamp-reply"];
+const KNOWN_SERVICES = ["ssh", "http", "https", "dns", "ftp", "smtp", "smtps", "imap", "imaps", "pop3", "pop3s", "mysql", "postgresql", "redis", "mongodb", "nfs", "samba", "ntp", "syslog", "snmp", "rsync", "vnc", "rdp", "openvpn", "wireguard"];
+
 class FirewallService {
     private mockRules: FirewallRule[] = [
-        { id: 1, to: "22/tcp", action: "ALLOW", from: "Anywhere", ipv6: false },
-        { id: 2, to: "53", action: "ALLOW", from: "Anywhere", ipv6: false },
-        { id: 3, to: "80/tcp", action: "ALLOW", from: "Anywhere", ipv6: false },
-        { id: 4, to: "22/tcp (v6)", action: "ALLOW", from: "Anywhere (v6)", ipv6: true },
-        { id: 5, to: "53 (v6)", action: "ALLOW", from: "Anywhere (v6)", ipv6: true },
+        { id: 1, to: "22", action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "service", proto: "tcp", service: "ssh" },
+        { id: 2, to: "53", action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "port", proto: "any" },
+        { id: 3, to: "80", action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "service", proto: "tcp", service: "http" },
+        { id: 4, to: "443", action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "service", proto: "tcp", service: "https" },
+        { id: 5, to: "22", action: "ALLOW", from: "Anywhere (v6)", ipv6: true, direction: "in", ruleType: "service", proto: "tcp", service: "ssh" },
+        { id: 6, to: "53", action: "ALLOW", from: "Anywhere (v6)", ipv6: true, direction: "in", ruleType: "port", proto: "any" },
     ];
     private mockActive = true;
     private detectedBackend: FirewallBackend | null = null;
@@ -243,7 +279,7 @@ class FirewallService {
             const port = portMatch ? portMatch[1] : "8080";
             const protoMatch = command.match(/proto\s+(\w+)/);
             const proto = protoMatch ? protoMatch[1] : "tcp";
-            this.mockRules.push({ id: newId, to: `${port}/${proto}`, action: "ALLOW", from: "Anywhere", ipv6: false });
+            this.mockRules.push({ id: newId, to: `${port}/${proto}`, action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "port", proto });
             return "Rule added";
         }
         if (command.includes("ufw delete")) {
@@ -266,11 +302,41 @@ class FirewallService {
         for (const line of output.split("\n")) {
             const match = line.match(regex);
             if (match) {
-                const [_, id, to, action, _dir, from] = match;
+                const [_, id, to, action, dir, from] = match;
+                const toStr = to.trim();
+                const fromStr = from.trim();
+                const isV6 = fromStr.includes("(v6)") || toStr.includes("(v6)");
+                // Determine rule type from 'to' field
+                let ruleType: RuleType = "port";
+                let proto = "tcp";
+                let service: string | undefined;
+                const toLower = toStr.toLowerCase();
+
+                if (toLower.match(/^\d+\/tcp$/)) {
+                    ruleType = "port"; proto = "tcp";
+                } else if (toLower.match(/^\d+\/udp$/)) {
+                    ruleType = "port"; proto = "udp";
+                } else if (toLower.match(/^\d+\/(tcp|udp)$/)) {
+                    ruleType = "port";
+                    const pMatch = toLower.match(/\/(tcp|udp)$/); if (pMatch) proto = pMatch[1];
+                } else if (toLower.match(/^\d+:(\d+)\/(tcp|udp)$/)) {
+                    ruleType = "portRange";
+                    const pMatch = toLower.match(/(\d+):(\d+)\/(tcp|udp)$/);
+                    if (pMatch) proto = pMatch[3];
+                } else if (toLower.match(/^\d+,\d+/)) {
+                    ruleType = "multiPort";
+                } else if (toLower === "anywhere" || toStr === "") {
+                    ruleType = "port";
+                } else if (/^[a-z]/.test(toLower) && !toLower.includes("/")) {
+                    ruleType = "service"; service = toLower;
+                }
+
                 rules.push({
-                    id: parseInt(id), to: to.trim(),
-                    action: action as any, from: from.trim(),
-                    ipv6: from.includes("(v6)") || to.includes("(v6)"),
+                    id: parseInt(id), to: toStr,
+                    action: action as any, from: fromStr,
+                    ipv6: isV6,
+                    direction: (dir === "OUT" ? "out" : "in") as RuleDirection,
+                    ruleType, proto, service,
                 });
             }
         }
@@ -282,17 +348,88 @@ class FirewallService {
         if (enable) await this.execCommand("sudo -n ufw allow 22/tcp");
     }
 
-    private async addRuleUfw(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+    private async addRuleUfw(params: AddRuleParams): Promise<void> {
+        const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface_: iface, rateLimit, icmpType, log, comment, rawRule } = params;
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+
+        // Raw rule: execute directly
+        if (ruleType === "raw" && rawRule) {
+            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
+            await this.execCommand(`sudo -n ufw ${rawRule}`);
+            return;
+        }
+
+        // ICMP rule
+        if (ruleType === "icmp") {
+            const safeIcmp = ALLOWED_ICMP_TYPES.includes(icmpType || "") ? icmpType : "echo-request";
+            let cmd = `sudo -n ufw ${action === "allow" ? "allow" : "deny"} proto icmp`;
+            if (icmpType) cmd += ` icmp type ${shellSafe(safeIcmp!)}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` from ${safeIp}`; }
+            if (direction === "out") cmd += ` out`;
+            if (iface) cmd += ` on ${shellSafe(iface)}`;
+            if (log) cmd += ` log`;
+            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Service rule
+        if (ruleType === "service") {
+            const safeSvc = KNOWN_SERVICES.includes(service || "") ? service : "ssh";
+            let cmd = `sudo -n ufw ${action} ${safeSvc}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` from ${safeIp}`; }
+            if (direction === "out") cmd += ` out`;
+            if (iface) cmd += ` on ${shellSafe(iface)}`;
+            if (rateLimit && action === "allow") cmd = cmd.replace("allow", "limit");
+            if (log) cmd += ` log`;
+            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Port range rule
+        if (ruleType === "portRange") {
+            const safeStart = validatePort(toPort);
+            const safeEnd = validatePort(toPortEnd || toPort);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            let cmd = `sudo -n ufw ${action} ${safeStart}:${safeEnd}/${proto}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` from ${safeIp}`; }
+            if (direction === "out") cmd += ` out`;
+            if (iface) cmd += ` on ${shellSafe(iface)}`;
+            if (log) cmd += ` log`;
+            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Multi-port rule
+        if (ruleType === "multiPort") {
+            if (!/^\d+(,\d+)*$/.test(toPort)) throw new Error("Multi-port requires comma-separated port numbers");
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            let cmd = `sudo -n ufw ${action} proto ${proto} to any port ${toPort}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` from ${safeIp}`; }
+            if (direction === "out") cmd += ` out`;
+            if (iface) cmd += ` on ${shellSafe(iface)}`;
+            if (log) cmd += ` log`;
+            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Standard port rule (default)
         const safePort = validatePort(toPort);
         if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
-        const safeIp = validateIp(fromIp);
         let cmd = `sudo -n ufw ${action}`;
-        if (safeIp && safeIp !== "any") cmd += ` from ${safeIp}`;
+        if (rateLimit && action === "allow") cmd = `sudo -n ufw limit`;
+        if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` from ${safeIp}`; }
         if (safePort) {
             cmd += ` to any port ${safePort}`;
             if (proto !== "any") cmd += ` proto ${proto}`;
         }
+        if (direction === "out") cmd += ` out`;
+        if (iface) cmd += ` on ${shellSafe(iface)}`;
+        if (log) cmd += ` log`;
+        if (comment) cmd += ` comment "${shellSafe(comment)}"`;
         await this.execCommand(cmd);
     }
 
@@ -314,10 +451,10 @@ class FirewallService {
             let id = 1;
 
             for (const svc of services.trim().split(/\s+/).filter(Boolean)) {
-                rules.push({ id: id++, to: `${svc}`, action: "ALLOW", from: "Anywhere", ipv6: false });
+                rules.push({ id: id++, to: `${svc}`, action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "service", proto: "tcp", service: svc });
             }
             for (const port of ports.trim().split(/\s+/).filter(Boolean)) {
-                rules.push({ id: id++, to: port, action: "ALLOW", from: "Anywhere", ipv6: false });
+                rules.push({ id: id++, to: port, action: "ALLOW", from: "Anywhere", ipv6: false, direction: "in", ruleType: "port", proto: port.includes("/tcp") ? "tcp" : port.includes("/udp") ? "udp" : "tcp" });
             }
         }
         return { active, rules, installed: true, backend: "firewalld", availableBackends: available };
@@ -335,25 +472,118 @@ class FirewallService {
         }
     }
 
-    private async addRuleFirewalld(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+    private async addRuleFirewalld(params: AddRuleParams): Promise<void> {
+        const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface_: iface, rateLimit, icmpType, log, comment, rawRule } = params;
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const safeIp = fromIp && fromIp !== "any" ? validateIp(fromIp) : null;
+        const family = safeIp?.includes(":") ? "ipv6" : "ipv4";
+        const perm = "--permanent";
+
+        // Raw rule
+        if (ruleType === "raw" && rawRule) {
+            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
+            await this.execCommand(`sudo -n firewall-cmd ${perm} ${rawRule}`);
+            await this.execCommand("sudo -n firewall-cmd --reload");
+            return;
+        }
+
+        // ICMP rule
+        if (ruleType === "icmp") {
+            const safeIcmp = ALLOWED_ICMP_TYPES.includes(icmpType || "") ? icmpType : "echo-request";
+            const fwAction = action === "allow" ? "add" : "remove";
+            let richRule = `rule family="${family}"`;
+            if (safeIp) richRule += ` source address="${safeIp}"`;
+            richRule += ` icmp-type name="${safeIcmp}" ${action === "allow" ? "accept" : "reject"}`;
+            if (direction === "out") richRule += ` direction="out"`;
+            await this.execCommand(`sudo -n firewall-cmd ${perm} --${fwAction}-rich-rule='${richRule}'`);
+            await this.execCommand("sudo -n firewall-cmd --reload");
+            return;
+        }
+
+        // Service rule
+        if (ruleType === "service") {
+            const safeSvc = KNOWN_SERVICES.includes(service || "") ? service : "ssh";
+            const fwAction = action === "allow" ? "add" : "remove";
+            if (safeIp || iface || direction === "out" || rateLimit) {
+                // Need rich rule for complex service rules
+                let richRule = `rule family="${family}"`;
+                if (safeIp) richRule += ` source address="${safeIp}"`;
+                if (iface) richRule += ` interface="${shellSafe(iface!)}"`;
+                if (direction === "out") richRule += ` direction="out"`;
+                richRule += ` service name="${safeSvc}" ${action === "allow" ? "accept" : "reject"}`;
+                if (rateLimit && action === "allow") {
+                    const limitVal = rateLimit || "6/min";
+                    richRule += ` limit value="${shellSafe(limitVal)}"`;
+                }
+                if (log) richRule += ` log`;
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='${richRule}'`);
+            } else {
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --${fwAction}-service=${safeSvc}`);
+            }
+            await this.execCommand("sudo -n firewall-cmd --reload");
+            return;
+        }
+
+        // Port range rule
+        if (ruleType === "portRange") {
+            const safeStart = validatePort(toPort);
+            const safeEnd = validatePort(toPortEnd || toPort);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            if (safeIp || iface || direction === "out") {
+                let richRule = `rule family="${family}"`;
+                if (safeIp) richRule += ` source address="${safeIp}"`;
+                if (iface) richRule += ` interface="${shellSafe(iface!)}"`;
+                richRule += ` port port="${safeStart}-${safeEnd}" protocol="${proto}" ${action === "allow" ? "accept" : "reject"}`;
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='${richRule}'`);
+            } else {
+                const fwAction = action === "allow" ? "add" : "remove";
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --${fwAction}-port=${safeStart}-${safeEnd}/${proto}`);
+            }
+            await this.execCommand("sudo -n firewall-cmd --reload");
+            return;
+        }
+
+        // Multi-port rule
+        if (ruleType === "multiPort") {
+            if (!/^\d+(,\d+)*$/.test(toPort)) throw new Error("Multi-port requires comma-separated port numbers");
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            const ports = toPort.split(",").map(p => p.trim()).filter(Boolean);
+            for (const port of ports) {
+                const fwAction = action === "allow" ? "add" : "remove";
+                if (safeIp || iface) {
+                    let richRule = `rule family="${family}"`;
+                    if (safeIp) richRule += ` source address="${safeIp}"`;
+                    richRule += ` port port="${port}" protocol="${proto}" ${action === "allow" ? "accept" : "reject"}`;
+                    await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='${richRule}'`);
+                } else {
+                    await this.execCommand(`sudo -n firewall-cmd ${perm} --${fwAction}-port=${port}/${proto}`);
+                }
+            }
+            await this.execCommand("sudo -n firewall-cmd --reload");
+            return;
+        }
+
+        // Standard port rule
         const safePort = validatePort(toPort);
         if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
-        const safeIp = validateIp(fromIp);
-        const perm = "--permanent";
-        if (action === "allow") {
-            if (safeIp && safeIp !== "any") {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='rule family="ipv4" source address="${safeIp}" port port="${safePort}" protocol="${proto}" accept'`);
-            } else if (/^\d+$/.test(safePort)) {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-port=${safePort}/${proto}`);
-            } else {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-service=${safePort}`);
+        if (safeIp || iface || direction === "out" || rateLimit) {
+            let richRule = `rule family="${family}"`;
+            if (safeIp) richRule += ` source address="${safeIp}"`;
+            if (iface) richRule += ` interface="${shellSafe(iface!)}"`;
+            if (direction === "out") richRule += ` direction="out"`;
+            richRule += ` port port="${safePort}" protocol="${proto}" ${action === "allow" ? "accept" : "reject"}`;
+            if (rateLimit && action === "allow") {
+                const limitVal = rateLimit || "6/min";
+                richRule += ` limit value="${shellSafe(limitVal)}"`;
             }
+            if (log) richRule += ` log`;
+            await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='${richRule}'`);
         } else {
-            if (safeIp && safeIp !== "any") {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --add-rich-rule='rule family="ipv4" source address="${safeIp}" port port="${safePort}" protocol="${proto}" reject'`);
+            const fwAction = action === "allow" ? "add" : "remove";
+            if (/^\d+$/.test(safePort)) {
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --${fwAction}-port=${safePort}/${proto}`);
             } else {
-                await this.execCommand(`sudo -n firewall-cmd ${perm} --remove-port=${safePort}/${proto}`);
+                await this.execCommand(`sudo -n firewall-cmd ${perm} --${fwAction}-service=${safePort}`);
             }
         }
         await this.execCommand("sudo -n firewall-cmd --reload");
@@ -383,12 +613,16 @@ class FirewallService {
                 const action = act === "ACCEPT" ? "ALLOW" : act === "DROP" ? "DENY" : "REJECT";
                 const portMatch = extra.match(/dpt:(\S+)/);
                 const protoMatch = extra.match(/proto\s+(\w+)/);
+                const resolvedProto = protoMatch?.[1] || "tcp";
                 rules.push({
                     id: parseInt(id),
-                    to: portMatch ? `${portMatch[1]}/${protoMatch?.[1] || "tcp"}` : extra.substring(0, 30),
+                    to: portMatch ? `${portMatch[1]}/${resolvedProto}` : extra.substring(0, 30),
                     action: action as any,
                     from: src === "0.0.0.0/0" ? "Anywhere" : src,
                     ipv6: false,
+                    direction: "in" as RuleDirection,
+                    ruleType: "port" as RuleType,
+                    proto: resolvedProto,
                 });
             }
         }
@@ -409,15 +643,82 @@ class FirewallService {
         }
     }
 
-    private async addRuleIptables(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+    private async addRuleIptables(params: AddRuleParams): Promise<void> {
+        const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface_: iface, rateLimit, icmpType, log, comment, rawRule } = params;
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const iptAction = action === "allow" ? "ACCEPT" : action === "deny" ? "DROP" : "REJECT";
+        const chain = direction === "out" ? "OUTPUT" : "INPUT";
+
+        // Raw rule
+        if (ruleType === "raw" && rawRule) {
+            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
+            await this.execCommand(`sudo -n iptables ${rawRule}`);
+            return;
+        }
+
+        // ICMP rule
+        if (ruleType === "icmp") {
+            const safeIcmp = ALLOWED_ICMP_TYPES.includes(icmpType || "") ? icmpType : "echo-request";
+            let cmd = `sudo -n iptables -A ${chain}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` -s ${safeIp}`; }
+            cmd += ` -p icmp --icmp-type ${shellSafe(safeIcmp!)} -j ${iptAction}`;
+            if (iface) cmd += ` -i ${shellSafe(iface!)}`;
+            if (log) cmd += ` -j LOG --log-prefix "[FW-ICMP] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Service rule — resolve service to port
+        if (ruleType === "service") {
+            const svcToPort: Record<string, string> = { ssh: "22", http: "80", https: "443", dns: "53", ftp: "21", smtp: "25", smtps: "465", imap: "143", imaps: "993", pop3: "110", pop3s: "995", mysql: "3306", postgresql: "5432", redis: "6379", mongodb: "27017", nfs: "2049", samba: "139", ntp: "123", syslog: "514", snmp: "161", rsync: "873", vnc: "5900", rdp: "3389", openvpn: "1194", wireguard: "51820" };
+            const resolvedPort = svcToPort[service || ""] || toPort;
+            const safePort = validatePort(resolvedPort);
+            let cmd = `sudo -n iptables -A ${chain}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` -s ${safeIp}`; }
+            cmd += ` -p tcp --dport ${safePort} -j ${iptAction}`;
+            if (iface) cmd += ` -i ${shellSafe(iface!)}`;
+            if (rateLimit && action === "allow") cmd += ` -m limit --limit ${shellSafe(rateLimit)}`;
+            if (log) cmd += ` -j LOG --log-prefix "[FW-SVC] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Port range rule
+        if (ruleType === "portRange") {
+            const safeStart = validatePort(toPort);
+            const safeEnd = validatePort(toPortEnd || toPort);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            let cmd = `sudo -n iptables -A ${chain}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` -s ${safeIp}`; }
+            cmd += ` -p ${proto} --dport ${safeStart}:${safeEnd} -j ${iptAction}`;
+            if (iface) cmd += ` -i ${shellSafe(iface!)}`;
+            if (log) cmd += ` -j LOG --log-prefix "[FW-RANGE] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Multi-port rule
+        if (ruleType === "multiPort") {
+            if (!/^\d+(,\d+)*$/.test(toPort)) throw new Error("Multi-port requires comma-separated port numbers");
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            let cmd = `sudo -n iptables -A ${chain}`;
+            if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` -s ${safeIp}`; }
+            cmd += ` -p ${proto} -m multiport --dports ${toPort} -j ${iptAction}`;
+            if (iface) cmd += ` -i ${shellSafe(iface!)}`;
+            if (log) cmd += ` -j LOG --log-prefix "[FW-MPORT] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Standard port rule
         const safePort = validatePort(toPort);
         if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
-        const safeIp = validateIp(fromIp);
-        const iptAction = action === "allow" ? "ACCEPT" : action === "deny" ? "DROP" : "REJECT";
-        let cmd = `sudo -n iptables -A INPUT`;
-        if (safeIp && safeIp !== "any") cmd += ` -s ${safeIp}`;
+        let cmd = `sudo -n iptables -A ${chain}`;
+        if (fromIp && fromIp !== "any") { const safeIp = validateIp(fromIp); cmd += ` -s ${safeIp}`; }
         cmd += ` -p ${proto} --dport ${safePort} -j ${iptAction}`;
+        if (iface) cmd += ` -i ${shellSafe(iface!)}`;
+        if (rateLimit && action === "allow") cmd += ` -m limit --limit ${shellSafe(rateLimit)}`;
+        if (log) cmd += ` -j LOG --log-prefix "[FW] "`;
         await this.execCommand(cmd);
     }
 
@@ -458,6 +759,9 @@ class FirewallService {
                         action: action as any,
                         from: src === "0.0.0.0/0" || src === "::/0" ? "Anywhere" : src,
                         ipv6: src.includes(":"),
+                        direction: "in" as RuleDirection,
+                        ruleType: "port" as RuleType,
+                        proto,
                     });
                 }
             }
@@ -498,18 +802,103 @@ class FirewallService {
         }
     }
 
-    private async addRuleNftables(toPort: string, proto: string, action: string, fromIp: string): Promise<void> {
+    private async addRuleNftables(params: AddRuleParams): Promise<void> {
+        const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface_: iface, rateLimit, icmpType, log, comment, rawRule } = params;
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
+        const nftAction = action === "allow" ? "accept" : action === "deny" ? "drop" : "reject";
+        const chain = direction === "out" ? "output" : "input";
+
+        // Raw rule
+        if (ruleType === "raw" && rawRule) {
+            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
+            await this.execCommand(`sudo -n nft ${rawRule}`);
+            return;
+        }
+
+        // ICMP rule
+        if (ruleType === "icmp") {
+            const safeIcmp = ALLOWED_ICMP_TYPES.includes(icmpType || "") ? icmpType : "echo-request";
+            let cmd = `sudo -n nft add rule inet filter ${chain}`;
+            if (fromIp && fromIp !== "any") {
+                const safeIp = validateIp(fromIp);
+                const family = safeIp.includes(":") ? "ip6" : "ip";
+                cmd += ` ${family} saddr ${safeIp}`;
+            }
+            cmd += ` icmp type ${shellSafe(safeIcmp!)} ${nftAction}`;
+            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
+            if (log) cmd += ` log prefix "[NFT-ICMP] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Service rule — resolve to port
+        if (ruleType === "service") {
+            const svcToPort: Record<string, string> = { ssh: "22", http: "80", https: "443", dns: "53", ftp: "21", smtp: "25", smtps: "465", imap: "143", imaps: "993", pop3: "110", pop3s: "995", mysql: "3306", postgresql: "5432", redis: "6379", mongodb: "27017", nfs: "2049", samba: "139", ntp: "123", syslog: "514", snmp: "161", rsync: "873", vnc: "5900", rdp: "3389", openvpn: "1194", wireguard: "51820" };
+            const resolvedPort = svcToPort[service || ""] || toPort;
+            const safePort = validatePort(resolvedPort);
+            let cmd = `sudo -n nft add rule inet filter ${chain}`;
+            if (fromIp && fromIp !== "any") {
+                const safeIp = validateIp(fromIp);
+                const family = safeIp.includes(":") ? "ip6" : "ip";
+                cmd += ` ${family} saddr ${safeIp}`;
+            }
+            cmd += ` tcp dport ${safePort} ${nftAction}`;
+            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
+            if (rateLimit && action === "allow") cmd += ` limit rate ${shellSafe(rateLimit)}`;
+            if (log) cmd += ` log prefix "[NFT-SVC] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Port range rule
+        if (ruleType === "portRange") {
+            const safeStart = validatePort(toPort);
+            const safeEnd = validatePort(toPortEnd || toPort);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            let cmd = `sudo -n nft add rule inet filter ${chain}`;
+            if (fromIp && fromIp !== "any") {
+                const safeIp = validateIp(fromIp);
+                const family = safeIp.includes(":") ? "ip6" : "ip";
+                cmd += ` ${family} saddr ${safeIp}`;
+            }
+            cmd += ` ${proto} dport ${safeStart}-${safeEnd} ${nftAction}`;
+            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
+            if (log) cmd += ` log prefix "[NFT-RANGE] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Multi-port rule
+        if (ruleType === "multiPort") {
+            if (!/^\d+(,\d+)*$/.test(toPort)) throw new Error("Multi-port requires comma-separated port numbers");
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
+            const ports = toPort.split(",").map(p => p.trim()).filter(Boolean);
+            let cmd = `sudo -n nft add rule inet filter ${chain}`;
+            if (fromIp && fromIp !== "any") {
+                const safeIp = validateIp(fromIp);
+                const family = safeIp.includes(":") ? "ip6" : "ip";
+                cmd += ` ${family} saddr ${safeIp}`;
+            }
+            cmd += ` ${proto} dport { ${ports.join(", ")} } ${nftAction}`;
+            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
+            if (log) cmd += ` log prefix "[NFT-MPORT] "`;
+            await this.execCommand(cmd);
+            return;
+        }
+
+        // Standard port rule
         const safePort = validatePort(toPort);
         if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
-        const safeIp = validateIp(fromIp);
-        const nftAction = action === "allow" ? "accept" : action === "deny" ? "drop" : "reject";
-        let cmd = `sudo -n nft add rule inet filter input`;
-        if (safeIp && safeIp !== "any") {
+        let cmd = `sudo -n nft add rule inet filter ${chain}`;
+        if (fromIp && fromIp !== "any") {
+            const safeIp = validateIp(fromIp);
             const family = safeIp.includes(":") ? "ip6" : "ip";
             cmd += ` ${family} saddr ${safeIp}`;
         }
         cmd += ` ${proto} dport ${safePort} ${nftAction}`;
+        if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
+        if (rateLimit && action === "allow") cmd += ` limit rate ${shellSafe(rateLimit)}`;
+        if (log) cmd += ` log prefix "[NFT] "`;
         await this.execCommand(cmd);
     }
 
@@ -566,20 +955,40 @@ class FirewallService {
         }
     }
 
-    async addRule(toPort: string, proto: "tcp" | "udp" | "any", action: "allow" | "deny", fromIp: string = "any"): Promise<void> {
+    async addRule(params: AddRuleParams): Promise<void> {
+        // Validate and set defaults
+        const direction: RuleDirection = params.direction && ALLOWED_DIRECTIONS.includes(params.direction) ? params.direction : "in";
+        const ruleType: RuleType = params.ruleType && ALLOWED_RULE_TYPES.includes(params.ruleType) ? params.ruleType : "port";
+        const validatedParams: AddRuleParams = { ...params, direction, ruleType };
+
         const { active: backend } = await this.detectBackend();
         if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
             const newId = this.mockRules.length + 1;
-            const ruleAction = action === "allow" ? "ALLOW" as const : "DENY" as const;
-            this.mockRules.push({ id: newId, to: `${toPort}/${proto}`, action: ruleAction, from: fromIp === "any" ? "Anywhere" : fromIp, ipv6: false });
-            console.log(`[Mock Firewall] Add rule: ${action} ${proto} ${toPort} from ${fromIp}`);
+            const ruleAction = params.action === "allow" ? "ALLOW" as const : params.action === "deny" ? "DENY" as const : params.action === "reject" ? "REJECT" as const : "LIMIT" as const;
+            this.mockRules.push({
+                id: newId,
+                to: ruleType === "portRange" ? `${params.toPort}-${params.toPortEnd || params.toPort}` : params.toPort,
+                action: ruleAction,
+                from: params.fromIp === "any" ? "Anywhere" : params.fromIp,
+                ipv6: false,
+                direction, ruleType,
+                proto: params.proto || "tcp",
+                toPortEnd: params.toPortEnd,
+                service: params.service,
+                interface: params.interface_,
+                rateLimit: params.rateLimit,
+                icmpType: params.icmpType,
+                log: params.log,
+                comment: params.comment,
+            });
+            console.log(`[Mock Firewall] Add rule: ${params.action} ${ruleType} ${params.toPort} from ${params.fromIp}`);
             return;
         }
         switch (backend) {
-            case "ufw": return await this.addRuleUfw(toPort, proto, action, fromIp);
-            case "firewalld": return await this.addRuleFirewalld(toPort, proto, action, fromIp);
-            case "iptables": return await this.addRuleIptables(toPort, proto, action, fromIp);
-            case "nftables": return await this.addRuleNftables(toPort, proto, action, fromIp);
+            case "ufw": return await this.addRuleUfw(validatedParams);
+            case "firewalld": return await this.addRuleFirewalld(validatedParams);
+            case "iptables": return await this.addRuleIptables(validatedParams);
+            case "nftables": return await this.addRuleNftables(validatedParams);
             default: throw new Error("No firewall backend detected");
         }
     }

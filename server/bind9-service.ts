@@ -1276,6 +1276,155 @@ zone "${safeDomain}" {
         }
     }
 
+    /** Read and parse an existing RPZ zone file, returning structured entries */
+    async readRpzZoneFile(zoneName: string = "rpz.intra"): Promise<Array<{ name: string; type: string; target: string; comment?: string }>> {
+        const safeZoneName = this.sanitizeZoneField(zoneName);
+        const filePath = path.posix.join(BIND9_ZONE_DIR, `db.${safeZoneName}`);
+        const content = await this.readRemoteFile(filePath);
+        const entries: Array<{ name: string; type: string; target: string; comment?: string }> = [];
+
+        for (const rawLine of content.split("\n")) {
+            const line = rawLine.trim();
+            // Skip comments, blanks, SOA, NS, $-directives
+            if (!line || line.startsWith(";") || line.startsWith("$") || line.startsWith("@")) continue;
+
+            // Parse RPZ entries: <name> [ttl] [class] <type> <value>
+            // e.g. "example.org    CNAME   ." or "*.example.org  A  192.168.1.1"
+            const parts = line.split(/\s+/);
+            if (parts.length < 3) continue;
+
+            // Find the record type position (skip optional TTL and class)
+            let typeIdx = 1;
+            if (/^\d+$/.test(parts[1])) typeIdx = 2; // skip TTL
+            if (parts[typeIdx] === "IN") typeIdx++; // skip class
+            if (typeIdx >= parts.length) continue;
+
+            const rrName = parts[0];
+            const rrType = parts[typeIdx].toUpperCase();
+            const rrValue = parts.slice(typeIdx + 1).join(" ");
+
+            // Skip SOA/NS records
+            if (rrType === "SOA" || rrType === "NS") continue;
+
+            // Determine RPZ action from CNAME target
+            if (rrType === "CNAME") {
+                if (rrValue === "." || rrValue === "root.zone.") {
+                    // NXDOMAIN — but skip wildcard duplicates
+                    if (!rrName.startsWith("*.")) {
+                        entries.push({ name: rrName, type: "nxdomain", target: "" });
+                    }
+                } else if (rrValue === "*." || rrValue === "*.root.zone.") {
+                    // NODATA — skip wildcard duplicates
+                    if (!rrName.startsWith("*.")) {
+                        entries.push({ name: rrName, type: "nodata", target: "" });
+                    }
+                } else if (rrValue.endsWith("rpz-passthru.") || rrValue === "rpz-passthru.") {
+                    if (!rrName.startsWith("*.")) {
+                        entries.push({ name: rrName, type: "passthru", target: "" });
+                    }
+                } else if (rrValue.endsWith("rpz-drop.") || rrValue === "rpz-drop.") {
+                    if (!rrName.startsWith("*.")) {
+                        entries.push({ name: rrName, type: "drop", target: "" });
+                    }
+                } else if (rrValue.endsWith("rpz-tcp-only.") || rrValue === "rpz-tcp-only.") {
+                    if (!rrName.startsWith("*.")) {
+                        entries.push({ name: rrName, type: "tcp-only", target: "" });
+                    }
+                } else {
+                    // Redirect to CNAME
+                    if (!rrName.startsWith("*.")) {
+                        entries.push({ name: rrName, type: "redirect", target: rrValue.replace(/\.$/, "") });
+                    }
+                }
+            } else if (rrType === "A" || rrType === "AAAA") {
+                // Redirect to IP
+                if (!rrName.startsWith("*.")) {
+                    entries.push({ name: rrName, type: "redirect", target: rrValue });
+                }
+            }
+        }
+
+        return entries;
+    }
+
+    /** Parse an RPZ blocklist file content (zone format or plain domain list) and return entries */
+    parseRpzBlocklist(content: string, sourceName: string = "import"): Array<{ name: string; type: string; target: string; comment: string }> {
+        const entries: Array<{ name: string; type: string; target: string; comment: string }> = [];
+        const lines = content.split("\n");
+
+        // Detect format: if it contains SOA/NS records, it's a zone file; otherwise plain list
+        const isZoneFormat = lines.some(l => /\bSOA\b/i.test(l) || /\bIN\s+NS\b/i.test(l));
+
+        if (isZoneFormat) {
+            // Parse as RPZ zone file
+            for (const rawLine of lines) {
+                const line = rawLine.trim();
+                if (!line || line.startsWith(";") || line.startsWith("$") || line.startsWith("@")) continue;
+
+                const parts = line.split(/\s+/);
+                if (parts.length < 3) continue;
+
+                let typeIdx = 1;
+                if (/^\d+$/.test(parts[1])) typeIdx = 2;
+                if (parts[typeIdx] === "IN") typeIdx++;
+                if (typeIdx >= parts.length) continue;
+
+                const rrName = parts[0];
+                const rrType = parts[typeIdx].toUpperCase();
+                const rrValue = parts.slice(typeIdx + 1).join(" ");
+
+                if (rrType === "SOA" || rrType === "NS") continue;
+                if (rrName.startsWith("*.")) continue; // skip wildcards, we auto-generate them
+
+                // Validate domain name
+                if (!/^[a-zA-Z0-9.*-]+$/.test(rrName) || rrName.length > 253) continue;
+
+                if (rrType === "CNAME") {
+                    if (rrValue === "." || rrValue === "root.zone.") {
+                        entries.push({ name: rrName, type: "nxdomain", target: "", comment: `Imported from ${sourceName}` });
+                    } else if (rrValue === "*." || rrValue === "*.root.zone.") {
+                        entries.push({ name: rrName, type: "nodata", target: "", comment: `Imported from ${sourceName}` });
+                    } else if (rrValue.endsWith("rpz-drop.") || rrValue === "rpz-drop.") {
+                        entries.push({ name: rrName, type: "nxdomain", target: "", comment: `Imported from ${sourceName} (rpz-drop)` });
+                    } else if (rrValue.endsWith("rpz-passthru.") || rrValue === "rpz-passthru.") {
+                        continue; // passthru = whitelist, skip
+                    } else {
+                        entries.push({ name: rrName, type: "redirect", target: rrValue.replace(/\.$/, ""), comment: `Imported from ${sourceName}` });
+                    }
+                } else if (rrType === "A" || rrType === "AAAA") {
+                    if (/^[\d.a-fA-F:]+$/.test(rrValue)) {
+                        entries.push({ name: rrName, type: "redirect", target: rrValue, comment: `Imported from ${sourceName}` });
+                    }
+                }
+            }
+        } else {
+            // Parse as plain domain list (one domain per line)
+            for (const rawLine of lines) {
+                let line = rawLine.trim();
+                if (!line || line.startsWith("#") || line.startsWith("//") || line.startsWith(";")) continue;
+
+                // Remove inline comments
+                const commentIdx = line.indexOf("#");
+                if (commentIdx > 0) line = line.slice(0, commentIdx).trim();
+
+                // Handle "0.0.0.0 domain.com" or "127.0.0.1 domain.com" hosts-file format
+                const parts = line.split(/\s+/);
+                let domain = parts[parts.length - 1];
+                if (parts.length === 2 && /^0\.0\.0\.0$|^127\.0\.0\.1$|^::1$/.test(parts[0])) {
+                    domain = parts[1];
+                }
+
+                // Validate domain
+                domain = domain.toLowerCase().replace(/\.$/, ""); // remove trailing dot
+                if (!/^[a-z0-9][a-z0-9.*-]*$/.test(domain) || domain.length > 253) continue;
+
+                entries.push({ name: domain, type: "nxdomain", target: "", comment: `Imported from ${sourceName}` });
+            }
+        }
+
+        return entries;
+    }
+
 }
 
 export const bind9Service = new Bind9Service();

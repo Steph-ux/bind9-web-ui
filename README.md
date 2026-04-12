@@ -65,6 +65,7 @@ This project solves that by providing a modern, secure and user-friendly control
 - **Zone Transfers** — Configuration simplifiée pour autoriser les transferts vers les serveurs esclaves (Secondary NS)
 - **TSIG Keys** — Gestion des clés d'authentification (hmac-sha256, etc.) avec support des fichiers `.key` inclus
 - **Firewall** — Gestion du pare-feu avec auto-détection du backend (UFW, firewalld, nftables, iptables), ouverture/fermeture de ports, règles par IP, switch de backend en un clic
+- **DNS Firewall (RPZ)** — Blocage DNS via Response Policy Zones : import de blocklists (HaGeZi, etc.), gestion CRUD, filtrage/pagination côté serveur, sync bidirectionnelle avec BIND9, support de 1M+ entrées
 - **RBAC** — Gestion des rôles utilisateurs (Admin, Operator, Viewer)
 
 ### Configuration
@@ -118,7 +119,8 @@ Bind-Config/
 │       │   ├── logs.tsx                  # Logs temps réel (WebSocket)
 │       │   ├── status.tsx                # Métriques serveur
 │       │   ├── connections.tsx           # Connexions SSH distantes
-│       │   └── firewall.tsx              # Gestion du pare-feu
+│       │   ├── firewall.tsx              # Gestion du pare-feu
+│       │   └── firewall-dns.tsx          # DNS Firewall (RPZ)
 │       ├── lib/
 │       │   └── api.ts                    # Client API typé
 │       └── App.tsx                       # Router
@@ -134,7 +136,7 @@ Bind-Config/
 │   └── vite.ts                  # Middleware Vite pour le dev
 │
 ├── shared/
-│   ├── schema.ts                # Schéma Drizzle SQLite (8 tables)
+│   ├── schema.ts                # Schéma Drizzle SQLite (9 tables)
 │   ├── schema-pg.ts             # Schéma Drizzle PostgreSQL
 │   └── schema-mysql.ts          # Schéma Drizzle MySQL
 │
@@ -363,6 +365,24 @@ Commandes autorisées : `reload`, `flush`, `status`, `stats`, `reconfig`, `dumpd
 > L'auto-détection s'exécute en un seul appel SSH (~0.5s) et identifie le backend actif ainsi que tous les backends installés.
 > Les règles configurées sont visibles même si le pare-feu est inactif.
 
+### DNS Firewall (RPZ)
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/rpz?page=&limit=&search=&type=` | Entrées RPZ paginées avec filtrage |
+| GET | `/api/rpz/stats` | Statistiques (total, par type) |
+| POST | `/api/rpz` | Ajouter une entrée RPZ |
+| DELETE | `/api/rpz/:id` | Supprimer une entrée |
+| DELETE | `/api/rpz` | Supprimer toutes les entrées (admin) |
+| GET | `/api/rpz/zone-file` | Lire le fichier de zone RPZ de BIND9 |
+| POST | `/api/rpz/sync` | Synchroniser depuis le fichier de zone BIND9 |
+| POST | `/api/rpz/import` | Importer depuis du texte (zone file ou liste de domaines) |
+| POST | `/api/rpz/import-url` | Importer depuis une URL (max 200MB, 1M entrées, timeout 120s) |
+
+> **Types RPZ :** `nxdomain` (bloquer), `nodata` (bloquer sans erreur), `redirect` (rediriger vers IP/domaine).
+> **Import :** Supporte le format zone file RPZ et les listes de domaines (un par ligne, hosts-file).
+> **Performance :** Pagination côté serveur (50/page), insertion par batch (500), déduplication efficace, sync BIND9 en arrière-plan.
+> **Blocklists compatibles :** HaGeZi (TIF, Ultimate, Light), Steven Black, OISD, etc.
+
 ---
 
 ## Importation de configuration existante
@@ -441,7 +461,7 @@ npx drizzle-kit studio   # Visualiser la DB
    npm run dev
    ```
 
-### Schéma (8 tables, identique pour les 3 moteurs)
+### Schéma (9 tables, identique pour les 3 moteurs)
 
 ```
 users           → Comptes utilisateurs
@@ -452,7 +472,7 @@ tsig_keys       → Clés TSIG pour l'authentification DNS
 config_snapshots → Historique des configurations
 log_entries     → Logs applicatifs
 connections     → Connexions SSH distantes
-rpz_entries     → Entrées DNS Firewall (RPZ)
+rpz_entries     → Entrées DNS Firewall (RPZ) — name, type (nxdomain/nodata/redirect), target, comment
 ```
 
 ### Commandes Drizzle

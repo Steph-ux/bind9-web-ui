@@ -1,5 +1,5 @@
 // Copyright © 2025 Stephane ASSOGBA
-import { eq, desc, like, and, sql } from "drizzle-orm";
+import { eq, desc, like, and, sql, inArray } from "drizzle-orm";
 import { db, dbReady } from "./db";
 import {
   users, zones, dnsRecords, acls, tsigKeys, configSnapshots, logEntries, connections,
@@ -55,8 +55,20 @@ export interface IStorage {
   deleteKey(id: string): Promise<void>;
   // RPZ
   getRpzEntries(): Promise<RpzEntry[]>;
+  getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
   deleteRpzEntry(id: string): Promise<void>;
+  getRpzExistingNames(names: string[]): Promise<Set<string>>;
+  createRpzEntriesBatch(entries: InsertRpzEntry[]): Promise<number>;
+  clearRpzEntries(): Promise<void>;
+  getRpzEntriesPaged(opts: { page: number; limit: number; search: string; type: string }): Promise<{
+    entries: RpzEntry[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }>;
+  getRpzStats(): Promise<{ total: number; nxdomain: number; nodata: number; redirect: number }>;
   // Logs
   getLogs(filter?: LogFilter): Promise<LogEntry[]>;
   insertLog(entry: InsertLogEntry): Promise<LogEntry>;
@@ -387,6 +399,13 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(rpzEntries).orderBy(rpzEntries.name);
   }
 
+  /** Fetch only name/type/target for BIND9 zone file writing (avoids loading full rows) */
+  async getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>> {
+    await this.ensureDb();
+    const rows = await db.select({ name: rpzEntries.name, type: rpzEntries.type, target: rpzEntries.target }).from(rpzEntries);
+    return rows.map((r: { name: string; type: string; target: string | null }) => ({ name: r.name, type: r.type, target: r.target || undefined }));
+  }
+
   async createRpzEntry(insertEntry: InsertRpzEntry): Promise<RpzEntry> {
     await this.ensureDb();
     const [entry] = await db.insert(rpzEntries).values({
@@ -399,6 +418,107 @@ export class DatabaseStorage implements IStorage {
   async deleteRpzEntry(id: string): Promise<void> {
     await this.ensureDb();
     await db.delete(rpzEntries).where(eq(rpzEntries.id, id));
+  }
+
+  async getRpzExistingNames(names: string[]): Promise<Set<string>> {
+    await this.ensureDb();
+    if (names.length === 0) return new Set();
+    // Query in batches to avoid SQL param limit
+    const BATCH = 500;
+    const existing = new Set<string>();
+    for (let i = 0; i < names.length; i += BATCH) {
+      const batch = names.slice(i, i + BATCH);
+      const rows = await db.select({ name: rpzEntries.name })
+        .from(rpzEntries)
+        .where(inArray(rpzEntries.name, batch));
+      for (const row of rows) existing.add(row.name);
+    }
+    return existing;
+  }
+
+  async createRpzEntriesBatch(entries: InsertRpzEntry[]): Promise<number> {
+    await this.ensureDb();
+    const BATCH_SIZE = 500;
+    let inserted = 0;
+    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+      const batch = entries.slice(i, i + BATCH_SIZE).map(e => ({
+        ...e,
+        createdAt: new Date().toISOString(),
+      }));
+      try {
+        const result = await db.insert(rpzEntries).values(batch).onConflictDoNothing().returning();
+        inserted += result.length;
+      } catch (batchErr) {
+        // Fallback: try one by one for this batch
+        console.warn(`[rpz] Batch insert failed, falling back to one-by-one: ${batchErr instanceof Error ? batchErr.message : String(batchErr)}`);
+        for (const entry of batch) {
+          try {
+            const [row] = await db.insert(rpzEntries).values(entry).onConflictDoNothing().returning();
+            if (row) inserted++;
+          } catch {
+            // Skip individual duplicates/errors silently
+          }
+        }
+      }
+    }
+    return inserted;
+  }
+
+  async clearRpzEntries(): Promise<void> {
+    await this.ensureDb();
+    await db.delete(rpzEntries);
+  }
+
+  async getRpzEntriesPaged(opts: { page: number; limit: number; search: string; type: string }): Promise<{
+    entries: RpzEntry[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    await this.ensureDb();
+    const conditions = [];
+    if (opts.search) {
+      // Escape SQL LIKE special characters to prevent injection
+      const escaped = opts.search.replace(/[%_\\]/g, "\\$&");
+      conditions.push(like(rpzEntries.name, `%${escaped}%`));
+    }
+    if (opts.type && ["nxdomain", "nodata", "redirect"].includes(opts.type)) {
+      conditions.push(eq(rpzEntries.type, opts.type as "nxdomain" | "nodata" | "redirect"));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Count total
+    const countResult = await db.select({ count: sql<number>`count(*)` }).from(rpzEntries).where(where);
+    const total = Number(countResult[0]?.count || 0);
+    const totalPages = Math.ceil(total / opts.limit);
+
+    // Fetch page
+    const offset = (opts.page - 1) * opts.limit;
+    const entries = await db.select().from(rpzEntries)
+      .where(where)
+      .orderBy(rpzEntries.name)
+      .limit(opts.limit)
+      .offset(offset);
+
+    return { entries, total, page: opts.page, limit: opts.limit, totalPages };
+  }
+
+  async getRpzStats(): Promise<{ total: number; nxdomain: number; nodata: number; redirect: number }> {
+    await this.ensureDb();
+    const result = await db.select({
+      type: rpzEntries.type,
+      count: sql<number>`count(*)`,
+    }).from(rpzEntries).groupBy(rpzEntries.type);
+
+    const stats = { total: 0, nxdomain: 0, nodata: 0, redirect: 0 };
+    for (const row of result) {
+      stats.total += Number(row.count);
+      if (row.type === "nxdomain") stats.nxdomain = Number(row.count);
+      if (row.type === "nodata") stats.nodata = Number(row.count);
+      if (row.type === "redirect") stats.redirect = Number(row.count);
+    }
+    return stats;
   }
 }
 

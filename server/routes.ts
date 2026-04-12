@@ -102,14 +102,30 @@ export async function registerRoutes(
 
   app.post("/api/firewall/rules", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { toPort, proto, action, fromIp } = req.body;
-      if (!toPort) return res.status(400).json({ message: "Port is required" });
+      const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface: iface, rateLimit, icmpType, log, comment, rawRule } = req.body;
       const ALLOWED_PROTOS = ["tcp", "udp", "any"];
       const ALLOWED_ACTIONS = ["allow", "deny", "reject"];
+      const ALLOWED_DIRECTIONS = ["in", "out"];
+      const ALLOWED_RULE_TYPES = ["port", "service", "portRange", "multiPort", "icmp", "raw"];
+      const ALLOWED_ICMP_TYPES = ["echo-request", "echo-reply", "destination-unreachable", "time-exceeded", "redirect", "router-advertisement", "router-solicitation", "parameter-problem"];
+
+      // Validate required fields based on rule type
+      const resolvedRuleType = ruleType || "port";
+      if (resolvedRuleType !== "icmp" && resolvedRuleType !== "raw" && !toPort && !service) {
+        return res.status(400).json({ message: "Port or service is required" });
+      }
       if (proto && !ALLOWED_PROTOS.includes(proto)) return res.status(400).json({ message: `Invalid protocol. Allowed: ${ALLOWED_PROTOS.join(", ")}` });
       if (action && !ALLOWED_ACTIONS.includes(action)) return res.status(400).json({ message: `Invalid action. Allowed: ${ALLOWED_ACTIONS.join(", ")}` });
+      if (direction && !ALLOWED_DIRECTIONS.includes(direction)) return res.status(400).json({ message: `Invalid direction. Allowed: ${ALLOWED_DIRECTIONS.join(", ")}` });
+      if (ruleType && !ALLOWED_RULE_TYPES.includes(ruleType)) return res.status(400).json({ message: `Invalid rule type. Allowed: ${ALLOWED_RULE_TYPES.join(", ")}` });
+      if (icmpType && !ALLOWED_ICMP_TYPES.includes(icmpType)) return res.status(400).json({ message: `Invalid ICMP type. Allowed: ${ALLOWED_ICMP_TYPES.join(", ")}` });
+      if (rateLimit && !/^\d+\/(sec|min|hour|day)$/.test(rateLimit)) return res.status(400).json({ message: "Invalid rate limit format. Use: N/sec, N/min, N/hour, N/day" });
 
-      await firewallService.addRule(toPort, proto || "tcp", action || "allow", fromIp || "any");
+      await firewallService.addRule({
+        toPort: toPort || "", proto: proto || "tcp", action: action || "allow", fromIp: fromIp || "any",
+        direction, ruleType: resolvedRuleType, toPortEnd, service,
+        interface_: iface, rateLimit, icmpType, log, comment, rawRule,
+      });
       res.json({ message: "Rule added" });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -127,10 +143,23 @@ export async function registerRoutes(
   });
 
   // ── DNS Firewall (RPZ) ────────────────────────────────────────
-  app.get("/api/rpz", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/rpz", requireOperator, async (req: Request, res: Response) => {
     try {
-      const entries = await storage.getRpzEntries();
-      res.json(entries);
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 50));
+      const search = String(req.query.search || "").trim();
+      const type = String(req.query.type || "").trim();
+      const result = await storage.getRpzEntriesPaged({ page, limit, search, type });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.get("/api/rpz/stats", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const stats = await storage.getRpzStats();
+      res.json(stats);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -141,22 +170,43 @@ export async function registerRoutes(
       // Validate input
       const data = insertRpzEntrySchema.parse(req.body);
 
+      // Validate domain name format (allow wildcards like *.example.com)
+      const nameStr = String(data.name).trim().toLowerCase();
+      if (!/^[a-z0-9*.][a-z0-9.*-]*$/.test(nameStr) || nameStr.length > 253) {
+        return res.status(400).json({ message: "Invalid domain name format" });
+      }
+      // Normalize name to lowercase to prevent case-sensitive duplicates
+      data.name = nameStr;
+      // Validate target for redirect type — target is REQUIRED for redirect
+      if (data.type === "redirect") {
+        if (!data.target || !String(data.target).trim()) {
+          return res.status(400).json({ message: "Redirect type requires a target IP or domain" });
+        }
+        const t = String(data.target).trim();
+        const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(t);
+        const isDomain = /^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(t);
+        if (!isIp && !isDomain) {
+          return res.status(400).json({ message: "Invalid redirect target: must be IP or domain" });
+        }
+      }
+      // Sanitize comment — prevent zone file injection
+      if (data.comment && /[\n\r$]/.test(String(data.comment))) {
+        return res.status(400).json({ message: "Comment contains invalid characters" });
+      }
+
       // Create in DB
       const entry = await storage.createRpzEntry(data);
 
-      // Sync to BIND9
-      const allEntries = await storage.getRpzEntries();
-      const zoneEntries = allEntries.map(e => ({
-        name: e.name,
-        type: e.type,
-        target: e.target || undefined
-      }));
-
-      await bind9Service.ensureRpzConfigured(); // Ensure config exists
-      await bind9Service.writeRpzZone("rpz.intra", zoneEntries);
-      await bind9Service.reload();
-
+      // Sync to BIND9 (background — respond first)
       res.json(entry);
+      try {
+        const zoneData = await storage.getRpzZoneData();
+        await bind9Service.ensureRpzConfigured();
+        await bind9Service.writeRpzZone("rpz.intra", zoneData);
+        await bind9Service.reload();
+      } catch (syncErr: any) {
+        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      }
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
@@ -170,19 +220,260 @@ export async function registerRoutes(
       const id = String(req.params.id);
       await storage.deleteRpzEntry(id);
 
-      // Sync to BIND9
-      const allEntries = await storage.getRpzEntries();
-      const zoneEntries = allEntries.map(e => ({
-        name: e.name,
-        type: e.type,
-        target: e.target || undefined
-      }));
-
-      await bind9Service.ensureRpzConfigured();
-      await bind9Service.writeRpzZone("rpz.intra", zoneEntries);
-      await bind9Service.reload();
-
+      // Sync to BIND9 (background — respond first)
       res.json({ message: "Entry deleted" });
+      try {
+        const zoneData = await storage.getRpzZoneData();
+        await bind9Service.ensureRpzConfigured();
+        await bind9Service.writeRpzZone("rpz.intra", zoneData);
+        await bind9Service.reload();
+      } catch (syncErr: any) {
+        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Read existing RPZ zone file from BIND9 (entries not yet in DB) */
+  app.get("/api/rpz/zone-file", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const entries = await bind9Service.readRpzZoneFile("rpz.intra");
+      res.json(entries);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Sync RPZ zone file entries into the database (import existing BIND9 RPZ rules) */
+  app.post("/api/rpz/sync", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const zoneEntries = await bind9Service.readRpzZoneFile("rpz.intra");
+      const dbNames = await storage.getRpzExistingNames(zoneEntries.map(e => e.name));
+
+      // Filter to only new, supported entries
+      const newEntries = zoneEntries.filter(e =>
+        !dbNames.has(e.name) && ["nxdomain", "nodata", "redirect"].includes(e.type)
+      );
+      const skipped = zoneEntries.length - newEntries.length;
+
+      // Batch insert
+      const entriesToInsert = newEntries.map(entry => ({
+        name: entry.name,
+        type: entry.type as any,
+        target: entry.target || "",
+        comment: entry.comment || "Synced from BIND9 zone file",
+      }));
+      const imported = entriesToInsert.length > 0
+        ? await storage.createRpzEntriesBatch(entriesToInsert)
+        : 0;
+
+      // Respond first, then sync BIND9 in background
+      res.json({ message: `Synced ${imported} entries, ${skipped} skipped`, imported, skipped });
+
+      // Background: re-sync zone file from DB (to ensure consistency)
+      try {
+        const zoneData = await storage.getRpzZoneData();
+        await bind9Service.ensureRpzConfigured();
+        await bind9Service.writeRpzZone("rpz.intra", zoneData);
+        await bind9Service.reload();
+      } catch (syncErr: any) {
+        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      }
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "rpz",
+        message: `RPZ sync: ${imported} imported, ${skipped} skipped from zone file`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Import RPZ blocklist from text content (zone file or plain domain list) */
+  app.post("/api/rpz/import", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { content, sourceName } = req.body;
+      if (!content || typeof content !== "string") {
+        return res.status(400).json({ message: "content is required and must be a string" });
+      }
+      if (content.length > 200 * 1024 * 1024) { // 200MB limit
+        return res.status(400).json({ message: "File too large (max 200MB)" });
+      }
+      const safeSource = String(sourceName || "import").replace(/[\n\r$]/g, "").slice(0, 100);
+
+      const parsed = bind9Service.parseRpzBlocklist(content, safeSource);
+      if (parsed.length === 0) {
+        return res.status(400).json({ message: "No valid RPZ entries found in the provided content" });
+      }
+      if (parsed.length > 1000000) {
+        return res.status(400).json({ message: `Too many entries (${parsed.length}), maximum 1000000 per import` });
+      }
+
+      // Filter out duplicates against existing DB entries (only fetch names, not full rows)
+      const dbNames = await storage.getRpzExistingNames(parsed.map(e => e.name));
+      const newEntries = parsed.filter(e => !dbNames.has(e.name));
+      const duplicates = parsed.length - newEntries.length;
+
+      // Batch insert new entries
+      const entriesToInsert = newEntries.map(entry => ({
+        name: entry.name,
+        type: entry.type as any,
+        target: entry.target || "",
+        comment: entry.comment || `Imported from ${safeSource}`,
+      }));
+      const imported = entriesToInsert.length > 0
+        ? await storage.createRpzEntriesBatch(entriesToInsert)
+        : 0;
+
+      // Sync to BIND9 (non-blocking — respond first, sync in background)
+      res.json({
+        message: `Imported ${imported} entries, ${duplicates} duplicates skipped`,
+        total: parsed.length,
+        imported,
+        duplicates,
+      });
+
+      // Background sync to BIND9 zone file
+      try {
+        const zoneData = await storage.getRpzZoneData();
+        await bind9Service.ensureRpzConfigured();
+        await bind9Service.writeRpzZone("rpz.intra", zoneData);
+        await bind9Service.reload();
+      } catch (syncErr: any) {
+        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      }
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "rpz",
+        message: `RPZ import from '${safeSource}': ${imported} added, ${duplicates} duplicates skipped, ${parsed.length} total parsed`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Import RPZ blocklist from a URL */
+  app.post("/api/rpz/import-url", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { url, sourceName } = req.body;
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ message: "url is required" });
+      }
+      // Validate URL — only allow http/https
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        return res.status(400).json({ message: "Invalid URL format" });
+      }
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ message: "Only http/https URLs are allowed" });
+      }
+      // Prevent SSRF — block internal/private IPs
+      const hostname = parsedUrl.hostname;
+      if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd)/i.test(hostname)) {
+        return res.status(400).json({ message: "Private/internal URLs are not allowed" });
+      }
+
+      const safeSource = String(sourceName || parsedUrl.hostname).replace(/[\n\r$]/g, "").slice(0, 100);
+
+      // Fetch the blocklist
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(120000), // 120s timeout for large blocklists
+        headers: { "User-Agent": "BIND9-Admin-Panel/RPZ-Import" },
+      });
+      if (!response.ok) {
+        return res.status(400).json({ message: `Failed to fetch URL: HTTP ${response.status}` });
+      }
+      const content = await response.text();
+      if (content.length > 200 * 1024 * 1024) {
+        return res.status(400).json({ message: "File too large (max 200MB)" });
+      }
+
+      const parsed = bind9Service.parseRpzBlocklist(content, safeSource);
+      if (parsed.length === 0) {
+        return res.status(400).json({ message: "No valid RPZ entries found in the fetched content" });
+      }
+      if (parsed.length > 1000000) {
+        return res.status(400).json({ message: `Too many entries (${parsed.length}), maximum 1000000 per import` });
+      }
+
+      // Filter out duplicates against existing DB entries (only fetch names, not full rows)
+      const dbNames = await storage.getRpzExistingNames(parsed.map(e => e.name));
+      const newEntries = parsed.filter(e => !dbNames.has(e.name));
+      const duplicates = parsed.length - newEntries.length;
+
+      // Batch insert new entries
+      const entriesToInsert = newEntries.map(entry => ({
+        name: entry.name,
+        type: entry.type as any,
+        target: entry.target || "",
+        comment: entry.comment || `Imported from ${safeSource}`,
+      }));
+      const imported = entriesToInsert.length > 0
+        ? await storage.createRpzEntriesBatch(entriesToInsert)
+        : 0;
+
+      // Respond first, then sync to BIND9 in background
+      res.json({
+        message: `Imported ${imported} entries, ${duplicates} duplicates skipped`,
+        total: parsed.length,
+        imported,
+        duplicates,
+      });
+
+      // Background sync to BIND9 zone file
+      try {
+        const zoneData = await storage.getRpzZoneData();
+        await bind9Service.ensureRpzConfigured();
+        await bind9Service.writeRpzZone("rpz.intra", zoneData);
+        await bind9Service.reload();
+      } catch (syncErr: any) {
+        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      }
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "rpz",
+        message: `RPZ import from URL '${safeSource}': ${imported} added, ${duplicates} duplicates skipped, ${parsed.length} total parsed`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Clear all RPZ entries */
+  app.delete("/api/rpz", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const stats = await storage.getRpzStats();
+      const count = stats.total;
+      await storage.clearRpzEntries();
+
+      // Respond first, then sync BIND9 in background
+      res.json({ message: `All ${count} RPZ entries cleared` });
+
+      try {
+        await bind9Service.ensureRpzConfigured();
+        await bind9Service.writeRpzZone("rpz.intra", []);
+        await bind9Service.reload();
+      } catch (syncErr: any) {
+        console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
+      }
+
+      await storage.insertLog({
+        level: "WARN",
+        source: "rpz",
+        message: `All RPZ entries cleared (${count} removed)`,
+      });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -231,7 +522,7 @@ export async function registerRoutes(
   app.put("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
-      const { password, role, username, mustChangePassword } = req.body;
+      const { password, role, username, mustChangePassword, newPassword } = req.body;
 
       const ALLOWED_ROLES = ["admin", "operator", "viewer"];
       const updateData: any = {};
@@ -239,9 +530,11 @@ export async function registerRoutes(
         if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ message: `Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}` });
         updateData.role = role;
       }
-      if (password) {
-        if (password.length < 4) return res.status(400).json({ message: "Password must be at least 4 characters" });
-        updateData.password = await hashPassword(password);
+      if (newPassword) {
+        if (typeof newPassword !== "string" || newPassword.length < 8) {
+          return res.status(400).json({ message: "New password must be at least 8 characters" });
+        }
+        updateData.password = await hashPassword(newPassword);
         updateData.mustChangePassword = false;
       }
       if (username !== undefined) {
@@ -362,6 +655,7 @@ export async function registerRoutes(
     if (await bind9Service.isAvailable()) {
       console.log("[startup] Starting zone sync...");
       const configZones = await bind9Service.syncZonesFromConfig();
+      const existingZones = await storage.getZones();
       let synced = 0;
       let errors = 0;
 
@@ -373,18 +667,56 @@ export async function registerRoutes(
             continue;
           }
 
-          const existing = await storage.getZones();
-          const found = existing.find(z => z.domain === cz.domain);
+          let zoneId = "";
+          const found = existingZones.find(z => z.domain === cz.domain);
 
-          if (!found) {
+          if (found) {
+            zoneId = found.id;
+            await storage.updateZone(found.id, { filePath: cz.filePath });
+          } else {
             const zone = await storage.createZone({
               domain: cz.domain,
               type: cz.type as any,
             });
-            // Update filePath
+            zoneId = zone.id;
             await storage.updateZone(zone.id, { filePath: cz.filePath });
-            synced++;
           }
+
+          // Import records from zone file (same as manual sync)
+          if (cz.filePath) {
+            try {
+              const records = await bind9Service.readZoneFile(cz.filePath);
+              if (records.length > 0) {
+                const currentRecords = await storage.getRecords(zoneId);
+                // Only re-import if DB has fewer records than zone file (avoid overwriting unsynced changes)
+                const nonSoaRecords = records.filter(r => r.type !== "SOA");
+                if (currentRecords.length < nonSoaRecords.length) {
+                  for (const r of currentRecords) {
+                    await storage.deleteRecord(r.id);
+                  }
+                  let importedCount = 0;
+                  for (const rec of nonSoaRecords) {
+                    try {
+                      await storage.createRecord({
+                        zoneId: zoneId,
+                        name: rec.name,
+                        type: rec.type as any,
+                        value: rec.value,
+                        ttl: rec.ttl,
+                        priority: rec.priority,
+                      });
+                      importedCount++;
+                    } catch {}
+                  }
+                  console.log(`[startup] Imported ${importedCount} records for zone ${cz.domain}`);
+                }
+              }
+            } catch (recError: any) {
+              console.warn(`[startup] Failed to read records for zone ${cz.domain}: ${recError.message}`);
+            }
+          }
+
+          synced++;
         } catch (err: any) {
           console.error(`[startup] Failed to sync zone ${cz.domain}: ${err.message}`);
           errors++;
@@ -392,11 +724,11 @@ export async function registerRoutes(
       }
 
       if (synced > 0 || errors > 0) {
-        console.log(`[startup] Sync result: ${synced} imported, ${errors} failed`);
+        console.log(`[startup] Sync result: ${synced} synced, ${errors} failed`);
         await storage.insertLog({
           level: "INFO",
           source: "zones",
-          message: `Auto-sync: ${synced} imported, ${errors} failed`,
+          message: `Auto-sync: ${synced} synced, ${errors} failed`,
         });
       }
     }
@@ -407,7 +739,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  DASHBOARD
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/dashboard", async (_req: Request, res: Response) => {
+  app.get("/api/dashboard", requireOperator, async (_req: Request, res: Response) => {
     try {
       const allZones = await storage.getZones();
       const bind9Status = await bind9Service.getStatus();
@@ -456,7 +788,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  ZONES
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/zones", async (_req: Request, res: Response) => {
+  app.get("/api/zones", requireOperator, async (_req: Request, res: Response) => {
     try {
       const allZones = await storage.getZones();
       const enriched = await Promise.all(allZones.map(async (zone) => ({
@@ -570,7 +902,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/zones/:id", async (req: Request, res: Response) => {
+  app.get("/api/zones/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -884,7 +1216,7 @@ export async function registerRoutes(
     }
   };
 
-  app.get("/api/zones/:id/records", async (req: Request, res: Response) => {
+  app.get("/api/zones/:id/records", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -915,7 +1247,7 @@ export async function registerRoutes(
       await syncZoneFile(id);
 
       // Auto-update reverse DNS
-      updateReverseRecord("create", record);
+      await updateReverseRecord("create", record);
 
       res.status(201).json(record);
     } catch (error: any) {
@@ -949,7 +1281,7 @@ export async function registerRoutes(
       await syncZoneFile(record.zoneId);
 
       // Auto-update reverse DNS
-      updateReverseRecord("update", updated, record);
+      await updateReverseRecord("update", updated, record);
 
       res.json(updated);
     } catch (error: any) {
@@ -969,7 +1301,7 @@ export async function registerRoutes(
       await syncZoneFile(record.zoneId);
 
       // Auto-update reverse DNS
-      updateReverseRecord("delete", record);
+      await updateReverseRecord("delete", record);
 
       res.json({ message: "Record deleted" });
     } catch (error: any) {
@@ -980,7 +1312,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  CONFIG
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/config/:section", async (req: Request, res: Response) => {
+  app.get("/api/config/:section", requireOperator, async (req: Request, res: Response) => {
     try {
       const section = String(req.params.section);
       // Validate section name to prevent path traversal
@@ -1053,7 +1385,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  ACLs
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/acls", async (_req: Request, res: Response) => {
+  app.get("/api/acls", requireOperator, async (_req: Request, res: Response) => {
     try {
       res.json(await storage.getAcls());
     } catch (error: any) {
@@ -1156,7 +1488,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  TSIG KEYS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/keys", async (_req: Request, res: Response) => {
+  app.get("/api/keys", requireOperator, async (_req: Request, res: Response) => {
     try {
       const keys = await storage.getKeys();
       // Hide secrets
@@ -1237,7 +1569,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  LOGS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/logs", async (req: Request, res: Response) => {
+  app.get("/api/logs", requireOperator, async (req: Request, res: Response) => {
     try {
       const filter = {
         level: req.query.level as string | undefined,
@@ -1289,7 +1621,7 @@ export async function registerRoutes(
   });
 
   /** Get only real BIND9 daemon logs */
-  app.get("/api/logs/bind9", async (req: Request, res: Response) => {
+  app.get("/api/logs/bind9", requireOperator, async (req: Request, res: Response) => {
     try {
       const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string) || 200, 1000) : 200;
       const logs = await bind9Service.readBind9Logs(limit);
@@ -1311,7 +1643,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  SERVER STATUS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/status", async (_req: Request, res: Response) => {
+  app.get("/api/status", requireOperator, async (_req: Request, res: Response) => {
     try {
       const bind9Status = await bind9Service.getStatus();
       const metrics = await bind9Service.getSystemMetrics();
