@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats } from "@/lib/api";
+import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry } from "@/lib/api";
 
 export default function ReplicationPage() {
   const { user } = useAuth();
@@ -23,6 +23,9 @@ export default function ReplicationPage() {
   const [deleteTarget, setDeleteTarget] = useState<ReplicationServerEntry | null>(null);
   const [testTarget, setTestTarget] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [bindingTarget, setBindingTarget] = useState<ReplicationServerEntry | null>(null);
+  const [bindingZones, setBindingZones] = useState<{ id: string; domain: string; enabled: boolean; mode: "push" | "pull" | "both" }[]>([]);
+  const [bindingLoading, setBindingLoading] = useState(false);
 
   // Form state
   const [formName, setFormName] = useState("");
@@ -371,6 +374,28 @@ export default function ReplicationPage() {
                   <Button variant="ghost" size="sm" className="gap-1 h-8" onClick={() => updateMutation.mutate({ id: s.id, data: { enabled: !s.enabled } as any })}>
                     {s.enabled ? <><PowerOff className="h-3 w-3" /> Disable</> : <><Power className="h-3 w-3" /> Enable</>}
                   </Button>
+                  <Button variant="ghost" size="sm" className="h-8" title="Manage zones" onClick={async () => {
+                    setBindingTarget(s);
+                    setBindingLoading(true);
+                    try {
+                      const [bindings, allZones] = await Promise.all([
+                        getReplicationZoneBindings(s.id),
+                        fetch("/api/zones").then(r => r.json()),
+                      ]);
+                      const bindingMap = new Map(bindings.map((b: ReplicationZoneBindingEntry) => [b.zoneId, b]));
+                      setBindingZones(allZones
+                        .filter((z: any) => z.type === "master" && z.status === "active")
+                        .map((z: any) => ({
+                          id: z.id,
+                          domain: z.domain,
+                          enabled: bindingMap.has(z.id) ? bindingMap.get(z.id)!.enabled : true,
+                          mode: bindingMap.get(z.id)?.mode || "push" as const,
+                        })));
+                    } catch {}
+                    setBindingLoading(false);
+                  }}>
+                    <Globe className="h-3 w-3" />
+                  </Button>
                   <Button variant="ghost" size="sm" className="h-8" onClick={() => openEdit(s)}>
                     <Pencil className="h-3 w-3" />
                   </Button>
@@ -468,6 +493,62 @@ export default function ReplicationPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Zone Bindings Dialog */}
+      <Dialog open={!!bindingTarget} onOpenChange={open => { if (!open) setBindingTarget(null); }}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Manage Zones — {bindingTarget?.name}</DialogTitle>
+          </DialogHeader>
+          {bindingLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          ) : bindingZones.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">No master zones available.</p>
+          ) : (
+            <div className="space-y-3">
+              {bindingZones.map(z => (
+                <div key={z.id} className="flex items-center justify-between gap-3 border rounded-md px-3 py-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={z.enabled}
+                      onChange={e => setBindingZones(prev => prev.map(b => b.id === z.id ? { ...b, enabled: e.target.checked } : b))}
+                      className="h-4 w-4"
+                    />
+                    <span className="font-mono text-sm truncate">{z.domain}</span>
+                  </div>
+                  <Select value={z.mode} onValueChange={v => setBindingZones(prev => prev.map(b => b.id === z.id ? { ...b, mode: v as "push" | "pull" | "both" } : b))}>
+                    <SelectTrigger className="w-24 h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="push">Push</SelectItem>
+                      <SelectItem value="pull">Pull</SelectItem>
+                      <SelectItem value="both">Both</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBindingTarget(null)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (!bindingTarget) return;
+              try {
+                await setReplicationZoneBindings(bindingTarget.id, bindingZones.map(z => ({ zoneId: z.id, mode: z.mode, enabled: z.enabled })));
+                toast({ title: "Zone bindings updated" });
+                setBindingTarget(null);
+                queryClient.invalidateQueries({ queryKey: ["replication"] });
+              } catch (err: any) {
+                toast({ variant: "destructive", title: "Failed to save bindings", description: err.message });
+              }
+            }}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Conflicts Section */}
       <div className="mt-8">

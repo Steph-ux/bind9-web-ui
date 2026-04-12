@@ -252,3 +252,16 @@ export const replicationConflicts = sqliteTable("replication_conflicts", {
 });
 
 export type ReplicationConflict = typeof replicationConflicts.$inferSelect;
+
+// ── Replication Zone Bindings (per-zone replication control) ────
+export const replicationZoneBindings = sqliteTable("replication_zone_bindings", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  zoneId: text("zone_id").notNull(),
+  mode: text("mode", { enum: ["push", "pull", "both"] }).notNull().default("push"),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  lastSyncAt: text("last_sync_at"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ReplicationZoneBinding = typeof replicationZoneBindings.$inferSelect;

@@ -17,6 +17,7 @@ import {
   userDomains, type UserDomain,
   replicationServers, type ReplicationServer,
   replicationConflicts, type ReplicationConflict,
+  replicationZoneBindings, type ReplicationZoneBinding,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -91,6 +92,10 @@ export interface IStorage {
   createReplicationConflict(data: Omit<ReplicationConflict, "id" | "detectedAt" | "resolvedAt">): Promise<ReplicationConflict>;
   resolveReplicationConflict(id: string): Promise<void>;
   resolveAllReplicationConflicts(): Promise<void>;
+  // Replication Zone Bindings
+  getReplicationZoneBindings(serverId?: string, zoneId?: string): Promise<ReplicationZoneBinding[]>;
+  setReplicationZoneBindings(serverId: string, bindings: { zoneId: string; mode: "push" | "pull" | "both"; enabled: boolean }[]): Promise<void>;
+  getReplicationZoneBinding(serverId: string, zoneId: string): Promise<ReplicationZoneBinding | undefined>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -816,6 +821,44 @@ export class DatabaseStorage implements IStorage {
       resolved: true,
       resolvedAt: new Date().toISOString(),
     }).where(eq(replicationConflicts.resolved, false));
+  }
+
+  // ── Replication Zone Bindings ─────────────────────────────
+  async getReplicationZoneBindings(serverId?: string, zoneId?: string): Promise<ReplicationZoneBinding[]> {
+    await this.ensureDb();
+    const conditions = [];
+    if (serverId) conditions.push(eq(replicationZoneBindings.serverId, serverId));
+    if (zoneId) conditions.push(eq(replicationZoneBindings.zoneId, zoneId));
+    if (conditions.length > 0) {
+      return db.select().from(replicationZoneBindings).where(and(...conditions));
+    }
+    return db.select().from(replicationZoneBindings);
+  }
+
+  async setReplicationZoneBindings(serverId: string, bindings: { zoneId: string; mode: "push" | "pull" | "both"; enabled: boolean }[]): Promise<void> {
+    await this.ensureDb();
+    // Delete existing bindings for this server
+    await db.delete(replicationZoneBindings).where(eq(replicationZoneBindings.serverId, serverId));
+    // Insert new bindings
+    if (bindings.length > 0) {
+      await db.insert(replicationZoneBindings).values(
+        bindings.map(b => ({
+          serverId,
+          zoneId: b.zoneId,
+          mode: b.mode,
+          enabled: b.enabled,
+          createdAt: new Date().toISOString(),
+        }))
+      );
+    }
+  }
+
+  async getReplicationZoneBinding(serverId: string, zoneId: string): Promise<ReplicationZoneBinding | undefined> {
+    await this.ensureDb();
+    const [binding] = await db.select().from(replicationZoneBindings)
+      .where(and(eq(replicationZoneBindings.serverId, serverId), eq(replicationZoneBindings.zoneId, zoneId)))
+      .limit(1);
+    return binding;
   }
 }
 

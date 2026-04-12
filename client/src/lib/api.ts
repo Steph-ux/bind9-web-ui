@@ -430,3 +430,23 @@ export const resolveReplicationConflict = (id: string) =>
     request<{ message: string }>(`/replication/conflicts/${id}/resolve`, { method: "PUT" });
 export const resolveAllReplicationConflicts = () =>
     request<{ message: string }>("/replication/conflicts/resolve-all", { method: "PUT" });
+
+// ── Replication Zone Bindings ───────────────────────────────────
+export interface ReplicationZoneBindingEntry {
+    id: string;
+    serverId: string;
+    zoneId: string;
+    zoneDomain: string;
+    mode: "push" | "pull" | "both";
+    enabled: boolean;
+    lastSyncAt: string | null;
+    createdAt: string;
+}
+
+export const getReplicationZoneBindings = (serverId: string) =>
+    request<ReplicationZoneBindingEntry[]>(`/replication/${serverId}/bindings`);
+export const setReplicationZoneBindings = (serverId: string, bindings: { zoneId: string; mode: "push" | "pull" | "both"; enabled: boolean }[]) =>
+    request<{ message: string }>(`/replication/${serverId}/bindings`, {
+        method: "PUT",
+        body: JSON.stringify({ bindings }),
+    });

@@ -1001,6 +1001,37 @@ export async function registerRoutes(
     }
   });
 
+  // ── Replication Zone Bindings ─────────────────────────────────
+  app.get("/api/replication/:serverId/bindings", requireOperator, async (req: Request, res: Response) => {
+    try {
+      const serverId = req.params.serverId as string;
+      const bindings = await storage.getReplicationZoneBindings(serverId);
+      // Enrich with zone domain
+      const zones = await storage.getZones();
+      const zoneMap = new Map(zones.map(z => [z.id, z.domain]));
+      res.json(bindings.map(b => ({ ...b, zoneDomain: zoneMap.get(b.zoneId) || "unknown" })));
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.put("/api/replication/:serverId/bindings", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const serverId = req.params.serverId as string;
+      const { bindings } = req.body;
+      if (!Array.isArray(bindings)) return res.status(400).json({ message: "bindings must be an array" });
+      await storage.setReplicationZoneBindings(serverId, bindings);
+      await storage.insertLog({
+        level: "INFO",
+        source: "replication",
+        message: `Zone bindings updated for server ${serverId} (${bindings.length} zones)`,
+      });
+      res.json({ message: "Zone bindings updated" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
 
   // ── Restore active SSH connection on startup ──────────────────
   try {

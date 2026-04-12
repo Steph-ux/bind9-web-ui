@@ -26,7 +26,7 @@ export interface FullSyncResult {
 
 class ReplicationService {
 
-  /** Push all zones to all enabled replication servers */
+  /** Push all zones to all enabled replication servers (respecting zone bindings) */
   async syncAll(): Promise<FullSyncResult> {
     const start = Date.now();
     const servers = await storage.getReplicationServers();
@@ -37,7 +37,19 @@ class ReplicationService {
     const results: SyncResult[] = [];
 
     for (const server of enabled) {
-      const result = await this.syncToServer(server, masterZones);
+      // Get zone bindings for this server
+      const bindings = await storage.getReplicationZoneBindings(server.id);
+      let zonesToSync = masterZones;
+
+      if (bindings.length > 0) {
+        // If bindings exist, only sync zones that are enabled in bindings
+        const enabledZoneIds = new Set(
+          bindings.filter(b => b.enabled).map(b => b.zoneId)
+        );
+        zonesToSync = masterZones.filter(z => enabledZoneIds.has(z.id));
+      }
+
+      const result = await this.syncToServer(server, zonesToSync);
       results.push(result);
     }
 
@@ -48,7 +60,7 @@ class ReplicationService {
     };
   }
 
-  /** Push specific zone to all enabled replication servers */
+  /** Push specific zone to all enabled replication servers (respecting zone bindings) */
   async syncZone(zoneId: string): Promise<FullSyncResult> {
     const start = Date.now();
     const zone = await storage.getZone(zoneId);
@@ -59,6 +71,10 @@ class ReplicationService {
     const results: SyncResult[] = [];
 
     for (const server of enabled) {
+      // Check if this zone is bound and enabled for this server
+      const binding = await storage.getReplicationZoneBinding(server.id, zoneId);
+      if (binding && !binding.enabled) continue; // Skip disabled bindings
+
       const result = await this.syncToServer(server, [zone]);
       results.push(result);
     }

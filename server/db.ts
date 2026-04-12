@@ -163,6 +163,15 @@ if (DB_TYPE === "sqlite") {
       detected_at TEXT NOT NULL,
       resolved_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS replication_zone_bindings (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      zone_id TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'push',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_sync_at TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases
