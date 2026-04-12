@@ -33,6 +33,7 @@ export function setupAuth(app: Express) {
         cookie: {
             secure: app.get("env") === "production",
             httpOnly: true,
+            sameSite: app.get("env") === "production" ? "lax" : "lax",
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         }
     };
@@ -92,8 +93,11 @@ export function setupAuth(app: Express) {
             }
             req.login(user, (err) => {
                 if (err) return next(err);
-                const { password, ...userWithoutPassword } = user;
-                return res.json(userWithoutPassword);
+                // Express 5 compat: manually save session so cookie is set
+                req.session.save(() => {
+                    const { password, ...userWithoutPassword } = user;
+                    return res.json(userWithoutPassword);
+                });
             });
         })(req, res, next);
     });
