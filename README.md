@@ -574,6 +574,23 @@ L'application intègre de multiples couches de sécurité :
 > - Activer la vérification des clés hôtes SSH pour prévenir les attaques MITM
 > - Implémenter un journal d'audit pour les actions administrateurs
 
+### DNS Firewall (RPZ) — Hardening
+
+Le module RPZ a été renforcé pour supporter des blocklists volumineuses (jusqu'à 1M entrées, ex: HaGeZi TIF) :
+
+| Protection | Description |
+|------------|-------------|
+| **Mutex BIND9** | `syncRpzZone()` sérialise les écritures zone — empêche les race conditions |
+| **Async parse** | `parseRpzBlocklist()` yield toutes les 50K lignes — ne bloque pas l'event loop |
+| **Batch 5000** | `getRpzExistingNames()` réduit les round trips SQL de 1940 à 194 pour 970K noms |
+| **Debounce 300ms** | La recherche frontend ne déclenche plus d'API à chaque frappe |
+| **Index name** | `idx_rpz_entries_name` accélère LIKE prefix + dédup |
+| **Chunks 4MB** | Upload de fichier en morceaux — pas de crash RAM à 200MB |
+| **LIKE escape** | Les wildcards SQL (`%`, `_`, `\`) sont échappés — pas d'injection |
+| **SSRF complet** | Blocage des ranges privés : RFC1918, CGN, link-local, unique-local |
+| **404 sur delete** | `DELETE /api/rpz/:id` retourne 404 si l'entrée n'existe pas |
+| **Lowercase forcé** | Les noms de domaine sont normalisés en minuscules — pas de doublons casse |
+
 ### Configuration sudoers pour SSH distant
 
 Pour que les commandes BIND9 et pare-feu fonctionnent sans mot de passe sudo sur le serveur distant, ajoutez cette entrée dans `/etc/sudoers.d/bind9` :
