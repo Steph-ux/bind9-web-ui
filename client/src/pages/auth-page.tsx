@@ -102,32 +102,34 @@ export default function AuthPage() {
       </div>
 
       {/* ── Right panel – Branding ─── */}
-      <div className="hidden lg:flex flex-col items-center justify-center p-10 flex-1 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white">
-        <div className="max-w-[480px]">
-          <h1 className="font-bold mb-3 text-4xl tracking-tight leading-tight">DNS Management<br />Made Simple</h1>
-          <p className="mb-8 opacity-75 text-lg">
-            Manage your BIND9 zones, records, ACLs, and TSIG keys through a modern, secure interface.
-          </p>
+      <div className="hidden lg:flex flex-col p-10 flex-1 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white">
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <div className="max-w-[480px]">
+            <h1 className="font-bold mb-3 text-4xl tracking-tight leading-tight">DNS Management<br />Made Simple</h1>
+            <p className="mb-8 opacity-75 text-lg">
+              Manage your BIND9 zones, records, ACLs, and TSIG keys through a modern, secure interface.
+            </p>
 
-          <div className="flex flex-col gap-5">
-            {[
-              { icon: Globe, title: "Zone Management", desc: "Create and edit DNS zones and records with ease" },
-              { icon: Shield, title: "Security Controls", desc: "ACLs, TSIG keys and firewall RPZ rules" },
-              { icon: Server, title: "Server Monitoring", desc: "Real-time CPU, memory and BIND9 process stats" },
-            ].map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-lg shrink-0 bg-white/10">
-                  <Icon className="h-5 w-5" />
+            <div className="flex flex-col gap-5">
+              {[
+                { icon: Globe, title: "Zone Management", desc: "Create and edit DNS zones and records with ease" },
+                { icon: Shield, title: "Security Controls", desc: "ACLs, TSIG keys and firewall RPZ rules" },
+                { icon: Server, title: "Server Monitoring", desc: "Real-time CPU, memory and BIND9 process stats" },
+              ].map(({ icon: Icon, title, desc }) => (
+                <div key={title} className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-lg shrink-0 bg-white/10">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold">{title}</div>
+                    <div className="opacity-60 text-sm">{desc}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-semibold">{title}</div>
-                  <div className="opacity-60 text-sm">{desc}</div>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
-        <p className="mt-auto text-white/40 text-xs">Copyright &copy; 2025 Stephane ASSOGBA</p>
+        <p className="text-center text-white/40 text-xs">Copyright &copy; 2025 Stephane ASSOGBA</p>
       </div>
     </div>
   );
