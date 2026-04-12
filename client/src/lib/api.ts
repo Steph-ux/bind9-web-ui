@@ -339,3 +339,41 @@ export const setUserDomains = (userId: string, zoneIds: string[]) =>
         method: "PUT",
         body: JSON.stringify({ zoneIds }),
     });
+
+// ── Replication Servers ─────────────────────────────────────────
+export interface ReplicationServerEntry {
+    id: string;
+    name: string;
+    host: string;
+    port: number;
+    username: string;
+    authType: "password" | "key";
+    password: string;
+    privateKey: string;
+    bind9ConfDir: string | null;
+    bind9ZoneDir: string | null;
+    role: "slave" | "secondary";
+    lastSyncAt: string | null;
+    lastSyncStatus: "success" | "failed" | "pending" | "never";
+    enabled: boolean;
+    createdAt: string;
+}
+
+export const getReplicationServers = () =>
+    request<ReplicationServerEntry[]>("/replication");
+export const createReplicationServer = (data: Partial<ReplicationServerEntry> & { name: string; host: string }) =>
+    request<ReplicationServerEntry>("/replication", {
+        method: "POST",
+        body: JSON.stringify(data),
+    });
+export const updateReplicationServer = (id: string, data: Partial<ReplicationServerEntry>) =>
+    request<ReplicationServerEntry>(`/replication/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+    });
+export const deleteReplicationServer = (id: string) =>
+    request<{ message: string }>(`/replication/${id}`, { method: "DELETE" });
+export const testReplicationServer = (id: string) =>
+    request<{ success: boolean; message: string; serverInfo?: any }>(`/replication/${id}/test`, {
+        method: "POST",
+    });

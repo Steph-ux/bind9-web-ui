@@ -44,6 +44,7 @@ import {
   AlertTriangle,
   Info,
   CheckCircle2,
+  Copy,
 } from "lucide-react";
 
 interface DashboardLayoutProps {
@@ -121,6 +122,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     navItems.push({ label: "DNS Firewall", icon: ShieldAlert, href: "/firewall-rpz" });
     navItems.push({ label: "IP Blacklist", icon: ShieldBan, href: "/blacklist" });
     navItems.push({ label: "API Tokens", icon: Key, href: "/api-tokens" });
+    navItems.push({ label: "Replication", icon: Copy, href: "/replication" });
     navItems.push({ label: "Users", icon: Users, href: "/users" });
   }
 

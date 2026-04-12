@@ -215,3 +215,24 @@ export const userDomains = sqliteTable("user_domains", {
 });
 
 export type UserDomain = typeof userDomains.$inferSelect;
+
+// ── Replication Servers ─────────────────────────────────────────
+export const replicationServers = sqliteTable("replication_servers", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  host: text("host").notNull(),
+  port: integer("port").notNull().default(22),
+  username: text("username").notNull().default("root"),
+  authType: text("auth_type", { enum: ["password", "key"] }).notNull().default("password"),
+  password: text("password").default(""),
+  privateKey: text("private_key").default(""),
+  bind9ConfDir: text("bind9_conf_dir").default("/etc/bind"),
+  bind9ZoneDir: text("bind9_zone_dir").default("/var/lib/bind"),
+  role: text("role", { enum: ["slave", "secondary"] }).notNull().default("slave"),
+  lastSyncAt: text("last_sync_at"),
+  lastSyncStatus: text("last_sync_status", { enum: ["success", "failed", "pending", "never"] }).notNull().default("never"),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ReplicationServer = typeof replicationServers.$inferSelect;

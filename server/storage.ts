@@ -15,6 +15,7 @@ import {
   ipBlacklist, type IpBlacklist,
   apiTokens, type ApiToken,
   userDomains, type UserDomain,
+  replicationServers, type ReplicationServer,
 } from "@shared/schema";
 
 export interface LogFilter {
@@ -76,6 +77,14 @@ export interface IStorage {
   getUserDomains(userId: string): Promise<UserDomain[]>;
   setUserDomains(userId: string, zoneIds: string[]): Promise<void>;
   isZoneAccessibleByUser(zoneId: string, userId: string, userRole: string): Promise<boolean>;
+
+  // Replication Servers
+  getReplicationServers(): Promise<ReplicationServer[]>;
+  getReplicationServer(id: string): Promise<ReplicationServer | undefined>;
+  createReplicationServer(data: Omit<ReplicationServer, "id" | "createdAt" | "lastSyncAt" | "lastSyncStatus">): Promise<ReplicationServer>;
+  updateReplicationServer(id: string, data: Partial<ReplicationServer>): Promise<ReplicationServer>;
+  deleteReplicationServer(id: string): Promise<boolean>;
+  updateReplicationSyncStatus(id: string, status: ReplicationServer["lastSyncStatus"]): Promise<void>;
 
   getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
@@ -723,6 +732,48 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(userDomains.userId, userId), eq(userDomains.zoneId, zoneId)))
       .limit(1);
     return assignments.length > 0;
+  }
+
+  // ── Replication Servers ─────────────────────────────────────
+  async getReplicationServers(): Promise<ReplicationServer[]> {
+    await this.ensureDb();
+    return db.select().from(replicationServers).orderBy(replicationServers.name);
+  }
+
+  async getReplicationServer(id: string): Promise<ReplicationServer | undefined> {
+    await this.ensureDb();
+    const [server] = await db.select().from(replicationServers).where(eq(replicationServers.id, id)).limit(1);
+    return server;
+  }
+
+  async createReplicationServer(data: Omit<ReplicationServer, "id" | "createdAt" | "lastSyncAt" | "lastSyncStatus">): Promise<ReplicationServer> {
+    await this.ensureDb();
+    const [server] = await db.insert(replicationServers).values({
+      ...data,
+      createdAt: new Date().toISOString(),
+    }).returning();
+    return server;
+  }
+
+  async updateReplicationServer(id: string, data: Partial<ReplicationServer>): Promise<ReplicationServer> {
+    await this.ensureDb();
+    const [server] = await db.update(replicationServers).set(data).where(eq(replicationServers.id, id)).returning();
+    if (!server) throw new Error("Replication server not found");
+    return server;
+  }
+
+  async deleteReplicationServer(id: string): Promise<boolean> {
+    await this.ensureDb();
+    const result = await db.delete(replicationServers).where(eq(replicationServers.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async updateReplicationSyncStatus(id: string, status: ReplicationServer["lastSyncStatus"]): Promise<void> {
+    await this.ensureDb();
+    await db.update(replicationServers).set({
+      lastSyncStatus: status,
+      lastSyncAt: status === "success" || status === "failed" ? new Date().toISOString() : undefined,
+    }).where(eq(replicationServers.id, id));
   }
 }
 

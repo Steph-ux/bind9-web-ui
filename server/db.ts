@@ -134,6 +134,23 @@ if (DB_TYPE === "sqlite") {
       zone_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS replication_servers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL DEFAULT 22,
+      username TEXT NOT NULL DEFAULT 'root',
+      auth_type TEXT NOT NULL DEFAULT 'password',
+      password TEXT DEFAULT '',
+      private_key TEXT DEFAULT '',
+      bind9_conf_dir TEXT DEFAULT '/etc/bind',
+      bind9_zone_dir TEXT DEFAULT '/var/lib/bind',
+      role TEXT NOT NULL DEFAULT 'slave',
+      last_sync_at TEXT,
+      last_sync_status TEXT NOT NULL DEFAULT 'never',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrate: add columns that may be missing on existing databases

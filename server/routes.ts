@@ -751,6 +751,138 @@ export async function registerRoutes(
     }
   });
 
+  // ── Replication Servers ────────────────────────────────────────
+  app.get("/api/replication", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const servers = await storage.getReplicationServers();
+      // Mask credentials
+      res.json(servers.map(s => ({
+        ...s,
+        password: s.password ? "***" : "",
+        privateKey: s.privateKey ? "***" : "",
+      })));
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.post("/api/replication", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, role, enabled } = req.body;
+      if (!name || !host) return res.status(400).json({ message: "name and host are required" });
+      const safeHost = String(host).trim();
+      if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
+      const safePort = parseInt(port, 10) || 22;
+      if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port" });
+
+      const server = await storage.createReplicationServer({
+        name: String(name),
+        host: safeHost,
+        port: safePort,
+        username: String(username || "root"),
+        authType: authType === "key" ? "key" : "password",
+        password: password ? String(password) : "",
+        privateKey: privateKey ? String(privateKey) : "",
+        bind9ConfDir: bind9ConfDir || "/etc/bind",
+        bind9ZoneDir: bind9ZoneDir || "/var/lib/bind",
+        role: role === "secondary" ? "secondary" : "slave",
+        enabled: enabled !== false,
+      });
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "replication",
+        message: `Replication server '${name}' added (${safeHost}:${safePort})`,
+      });
+
+      res.status(201).json({
+        ...server,
+        password: server.password ? "***" : "",
+        privateKey: server.privateKey ? "***" : "",
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.put("/api/replication/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const existing = await storage.getReplicationServer(id);
+      if (!existing) return res.status(404).json({ message: "Server not found" });
+
+      const allowed: Record<string, any> = {};
+      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, role, enabled } = req.body;
+      if (name !== undefined) allowed.name = String(name);
+      if (host !== undefined) {
+        const safeHost = String(host).trim();
+        if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
+        allowed.host = safeHost;
+      }
+      if (port !== undefined) {
+        const safePort = parseInt(port, 10) || 22;
+        if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port" });
+        allowed.port = safePort;
+      }
+      if (username !== undefined) allowed.username = String(username);
+      if (authType !== undefined) allowed.authType = authType === "key" ? "key" : "password";
+      if (password !== undefined && password !== "***") allowed.password = String(password);
+      if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
+      if (bind9ConfDir !== undefined) allowed.bind9ConfDir = String(bind9ConfDir);
+      if (bind9ZoneDir !== undefined) allowed.bind9ZoneDir = String(bind9ZoneDir);
+      if (role !== undefined) allowed.role = role === "secondary" ? "secondary" : "slave";
+      if (enabled !== undefined) allowed.enabled = !!enabled;
+
+      const updated = await storage.updateReplicationServer(id, allowed);
+      res.json({
+        ...updated,
+        password: updated.password ? "***" : "",
+        privateKey: updated.privateKey ? "***" : "",
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  app.delete("/api/replication/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const deleted = await storage.deleteReplicationServer(id);
+      if (!deleted) return res.status(404).json({ message: "Server not found" });
+      await storage.insertLog({
+        level: "WARN",
+        source: "replication",
+        message: `Replication server removed (id: ${id})`,
+      });
+      res.json({ message: "Server deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Test SSH connectivity to a replication server */
+  app.post("/api/replication/:id/test", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const server = await storage.getReplicationServer(id);
+      if (!server) return res.status(404).json({ message: "Server not found" });
+
+      const result = await sshManager.testConnection({
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        authType: server.authType as "password" | "key",
+        password: server.password || undefined,
+        privateKey: server.privateKey || undefined,
+      });
+
+      await storage.updateReplicationSyncStatus(id, result.success ? "success" : "failed");
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
 
 
   // ── Restore active SSH connection on startup ──────────────────
