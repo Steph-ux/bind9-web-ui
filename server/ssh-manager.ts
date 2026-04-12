@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 /**
  * SSH Connection Manager
  * Manages SSH connections to remote BIND9 servers.

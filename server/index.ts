@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -59,7 +60,12 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        // Mask sensitive fields before logging
+        const safe = { ...capturedJsonResponse };
+        if (safe.password) safe.password = "***";
+        if (safe.privateKey) safe.privateKey = "***";
+        if (safe.secret) safe.secret = "***";
+        logLine += ` :: ${JSON.stringify(safe)}`;
       }
 
       log(logLine);
@@ -82,8 +88,8 @@ app.use((req, res, next) => {
       return next(err);
     }
 
-    // In production, don't leak internal error details
-    if (process.env.NODE_ENV === "production" && status === 500) {
+    // In production, don't leak internal error details for any 5xx
+    if (process.env.NODE_ENV === "production" && status >= 500) {
       return res.status(status).json({ message: "Internal Server Error" });
     }
 

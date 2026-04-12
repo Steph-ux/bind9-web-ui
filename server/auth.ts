@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { type Express } from "express";

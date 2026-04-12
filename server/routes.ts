@@ -1,3 +1,4 @@
+// Copyright © 2025 Stephane ASSOGBA
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import http from "http";
@@ -12,6 +13,14 @@ import { z } from "zod";
 
 import { hashPassword } from "./auth";
 import { insertUserSchema } from "@shared/schema";
+
+/** Sanitize error messages — in production, hide internal details for 500 errors */
+function safeError(status: number, message: string): string {
+  if (process.env.NODE_ENV === "production" && status >= 500) {
+    return "Internal Server Error";
+  }
+  return message;
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -53,7 +62,7 @@ export async function registerRoutes(
       const status = await firewallService.getStatus();
       res.json(status);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -64,7 +73,7 @@ export async function registerRoutes(
       await firewallService.toggle(enable);
       res.json({ message: `Firewall ${enable ? 'enabled' : 'disabled'}` });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -87,7 +96,7 @@ export async function registerRoutes(
       const { rules } = await firewallService.getStatus();
       res.json(rules);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -113,7 +122,7 @@ export async function registerRoutes(
       await firewallService.deleteRule(id);
       res.json({ message: "Rule deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -123,7 +132,7 @@ export async function registerRoutes(
       const entries = await storage.getRpzEntries();
       res.json(entries);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -152,7 +161,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -175,7 +184,7 @@ export async function registerRoutes(
 
       res.json({ message: "Entry deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -191,7 +200,7 @@ export async function registerRoutes(
       });
       res.json(safeUsers);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -215,7 +224,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -235,7 +244,11 @@ export async function registerRoutes(
         updateData.password = await hashPassword(password);
         updateData.mustChangePassword = false;
       }
-      if (username !== undefined) updateData.username = String(username);
+      if (username !== undefined) {
+        if (typeof username !== 'string' || username.trim().length < 2) return res.status(400).json({ message: "Username must be at least 2 characters" });
+        if (!/^[a-zA-Z0-9._-]+$/.test(username)) return res.status(400).json({ message: "Username contains invalid characters" });
+        updateData.username = username.trim();
+      }
       if (mustChangePassword !== undefined) updateData.mustChangePassword = !!mustChangePassword;
 
       const updated = await storage.updateUser(id, updateData);
@@ -243,7 +256,7 @@ export async function registerRoutes(
       const { password: _, ...safe } = updated;
       res.json(safe);
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      res.status(500).json({ message: safeError(500, e.message) });
     }
   });
 
@@ -256,7 +269,7 @@ export async function registerRoutes(
       await storage.deleteUser(id);
       res.json({ message: "User deleted" });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      res.status(500).json({ message: safeError(500, e.message) });
     }
   });
 
@@ -436,7 +449,7 @@ export async function registerRoutes(
         sshState: sshManager.getState(),
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -452,7 +465,7 @@ export async function registerRoutes(
       })));
       res.json(enriched);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -553,7 +566,7 @@ export async function registerRoutes(
 
     } catch (error: any) {
       console.error(`[api] Sync fatal error: ${error.message}`);
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -565,7 +578,7 @@ export async function registerRoutes(
       const records = await storage.getRecords(zone.id);
       res.json({ ...zone, records });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -651,7 +664,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -663,15 +676,29 @@ export async function registerRoutes(
       // Only allow specific fields to be updated
       const allowed: Record<string, any> = {};
       const { domain, type, status, adminEmail, filePath } = req.body;
-      if (domain !== undefined) allowed.domain = String(domain);
-      if (type !== undefined) allowed.type = String(type);
-      if (status !== undefined) allowed.status = String(status);
+      const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
+      const ALLOWED_ZONE_STATUSES = ["active", "inactive"];
+      if (domain !== undefined) {
+        if (!/^[a-zA-Z0-9._-]+$/.test(String(domain))) return res.status(400).json({ message: "Invalid domain name" });
+        allowed.domain = String(domain);
+      }
+      if (type !== undefined) {
+        if (!ALLOWED_ZONE_TYPES.includes(String(type))) return res.status(400).json({ message: `Invalid zone type. Allowed: ${ALLOWED_ZONE_TYPES.join(", ")}` });
+        allowed.type = String(type);
+      }
+      if (status !== undefined) {
+        if (!ALLOWED_ZONE_STATUSES.includes(String(status))) return res.status(400).json({ message: `Invalid status. Allowed: ${ALLOWED_ZONE_STATUSES.join(", ")}` });
+        allowed.status = String(status);
+      }
       if (adminEmail !== undefined) allowed.adminEmail = String(adminEmail);
-      if (filePath !== undefined) allowed.filePath = String(filePath);
+      if (filePath !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(filePath))) return res.status(400).json({ message: "Invalid file path" });
+        allowed.filePath = String(filePath);
+      }
       const updated = await storage.updateZone(id, allowed);
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -700,7 +727,7 @@ export async function registerRoutes(
 
       res.json({ message: "Zone deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -739,6 +766,11 @@ export async function registerRoutes(
       );
 
       // Reload zone
+      // Validate domain before passing to rndc to prevent command injection
+      if (!/^[a-zA-Z0-9._-]+$/.test(zone.domain)) {
+        console.error(`[bind9] Invalid zone domain for rndc reload: ${zone.domain}`);
+        return;
+      }
       await bind9Service.rndc(`reload ${zone.domain}`);
       console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
     } catch (error: any) {
@@ -860,7 +892,7 @@ export async function registerRoutes(
       const records = await storage.getRecords(id);
       res.json(records);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -890,7 +922,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -902,8 +934,12 @@ export async function registerRoutes(
       // Only allow specific fields to be updated
       const allowed: Record<string, any> = {};
       const { name, type, value, ttl, priority } = req.body;
+      const ALLOWED_DNS_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SRV", "CAA", "SOA", "TLSA", "DS", "DNSKEY"];
       if (name !== undefined) allowed.name = String(name);
-      if (type !== undefined) allowed.type = String(type);
+      if (type !== undefined) {
+        if (!ALLOWED_DNS_TYPES.includes(String(type).toUpperCase())) return res.status(400).json({ message: `Invalid record type. Allowed: ${ALLOWED_DNS_TYPES.join(", ")}` });
+        allowed.type = String(type).toUpperCase();
+      }
       if (value !== undefined) allowed.value = String(value);
       if (ttl !== undefined) allowed.ttl = parseInt(ttl, 10) || 3600;
       if (priority !== undefined) allowed.priority = parseInt(priority, 10) || null;
@@ -917,7 +953,7 @@ export async function registerRoutes(
 
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -937,7 +973,7 @@ export async function registerRoutes(
 
       res.json({ message: "Record deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -970,7 +1006,7 @@ export async function registerRoutes(
 
       res.json({ section, content });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1010,7 +1046,7 @@ export async function registerRoutes(
 
       res.json(snapshot);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1021,7 +1057,7 @@ export async function registerRoutes(
     try {
       res.json(await storage.getAcls());
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1052,7 +1088,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1082,7 +1118,7 @@ export async function registerRoutes(
 
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1112,7 +1148,7 @@ export async function registerRoutes(
 
       res.json({ message: "ACL deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1130,7 +1166,7 @@ export async function registerRoutes(
       }));
       res.json(safeKeys);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1164,7 +1200,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1194,7 +1230,7 @@ export async function registerRoutes(
 
       res.json({ message: "Key deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1248,7 +1284,7 @@ export async function registerRoutes(
 
       res.json(all);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1259,7 +1295,7 @@ export async function registerRoutes(
       const logs = await bind9Service.readBind9Logs(limit);
       res.json(logs);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1268,7 +1304,7 @@ export async function registerRoutes(
       await storage.clearLogs();
       res.json({ message: "Logs cleared" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1291,14 +1327,14 @@ export async function registerRoutes(
         sshState: sshManager.getState(),
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   // ══════════════════════════════════════════════════════════════
   //  RNDC COMMANDS
   // ══════════════════════════════════════════════════════════════
-  app.post("/api/rndc/:command", async (req: Request, res: Response) => {
+  app.post("/api/rndc/:command", requireOperator, async (req: Request, res: Response) => {
     try {
       const command = req.params.command as string;
       const allowed = ["reload", "flush", "status", "stats", "reconfig", "dumpdb", "querylog"];
@@ -1320,14 +1356,14 @@ export async function registerRoutes(
 
       res.json({ command, output });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
   // ══════════════════════════════════════════════════════════════
   //  SSH CONNECTIONS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/connections", async (_req: Request, res: Response) => {
+  app.get("/api/connections", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const conns = await storage.getConnections();
       // Mask passwords in response
@@ -1337,7 +1373,7 @@ export async function registerRoutes(
         privateKey: c.privateKey ? "***" : "",
       })));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1361,7 +1397,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1375,13 +1411,34 @@ export async function registerRoutes(
       const allowed: Record<string, any> = {};
       const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, rndcBin } = req.body;
       if (name !== undefined) allowed.name = String(name);
-      if (host !== undefined) allowed.host = String(host);
-      if (port !== undefined) allowed.port = parseInt(port, 10) || 22;
+      if (host !== undefined) {
+        const safeHost = String(host).trim();
+        if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
+        allowed.host = safeHost;
+      }
+      if (port !== undefined) {
+        const safePort = parseInt(port, 10) || 22;
+        if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port number" });
+        allowed.port = safePort;
+      }
       if (username !== undefined) allowed.username = String(username);
-      if (authType !== undefined) allowed.authType = String(authType);
-      if (bind9ConfDir !== undefined) allowed.bind9ConfDir = String(bind9ConfDir);
-      if (bind9ZoneDir !== undefined) allowed.bind9ZoneDir = String(bind9ZoneDir);
-      if (rndcBin !== undefined) allowed.rndcBin = String(rndcBin);
+      if (authType !== undefined) {
+        const safeAuthType = String(authType);
+        if (safeAuthType !== "password" && safeAuthType !== "key") return res.status(400).json({ message: "Invalid authType. Allowed: password, key" });
+        allowed.authType = safeAuthType;
+      }
+      if (bind9ConfDir !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(bind9ConfDir))) return res.status(400).json({ message: "Invalid confDir path" });
+        allowed.bind9ConfDir = String(bind9ConfDir);
+      }
+      if (bind9ZoneDir !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(bind9ZoneDir))) return res.status(400).json({ message: "Invalid zoneDir path" });
+        allowed.bind9ZoneDir = String(bind9ZoneDir);
+      }
+      if (rndcBin !== undefined) {
+        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(rndcBin))) return res.status(400).json({ message: "Invalid rndcBin path" });
+        allowed.rndcBin = String(rndcBin);
+      }
       // Don't overwrite password/key if they come as "***"
       if (password !== undefined && password !== "***") allowed.password = String(password);
       if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
@@ -1393,7 +1450,7 @@ export async function registerRoutes(
         privateKey: updated.privateKey ? "***" : "",
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1419,7 +1476,7 @@ export async function registerRoutes(
 
       res.json({ message: "Connection deleted" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1457,7 +1514,7 @@ export async function registerRoutes(
 
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1490,7 +1547,7 @@ export async function registerRoutes(
 
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1515,7 +1572,7 @@ export async function registerRoutes(
         await sshManager.connect();
       } catch (e: any) {
         await storage.updateConnection(id, { lastStatus: "failed" });
-        return res.status(502).json({ message: `SSH connection failed: ${e.message}` });
+        return res.status(502).json({ message: safeError(502, `SSH connection failed: ${e.message}`) });
       }
 
       // Switch bind9-service to SSH mode
@@ -1543,7 +1600,7 @@ export async function registerRoutes(
         message: `Connected to ${conn.host}`,
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
@@ -1563,7 +1620,7 @@ export async function registerRoutes(
 
       res.json({ message: "Switched to local mode" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 

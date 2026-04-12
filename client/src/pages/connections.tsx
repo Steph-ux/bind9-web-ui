@@ -229,12 +229,12 @@ export default function ConnectionsPage() {
 
             {/* Create Connection Dialog */}
             <Dialog open={showModal} onOpenChange={setShowModal}>
-                <DialogContent>
+                <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
                     <DialogHeader>
                         <DialogTitle>New SSH Connection</DialogTitle>
                     </DialogHeader>
                     <p className="text-muted-foreground text-sm">Enter the details of the remote BIND9 server.</p>
-                    <div className="grid gap-4 py-4">
+                    <div className="grid gap-4 py-4 overflow-y-auto flex-1 min-h-0">
                         {[
                             { label: "Name", value: name, setter: setName, placeholder: "e.g. Production DNS", mono: false },
                             { label: "Host", value: host, setter: setHost, placeholder: "IP or Hostname", mono: true },

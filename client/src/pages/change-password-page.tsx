@@ -10,12 +10,17 @@ import { useToast } from "@/hooks/use-toast";
 export default function ChangePasswordPage() {
   const { changeOwnPassword, mustChangePassword } = useAuth();
   const { toast } = useToast();
+  const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!mustChangePassword && !currentPassword) {
+      toast({ variant: "destructive", title: "Current password required", description: "Enter your current password" });
+      return;
+    }
     if (password.length < 4) {
       toast({ variant: "destructive", title: "Password too short", description: "Minimum 4 characters" });
       return;
@@ -26,7 +31,7 @@ export default function ChangePasswordPage() {
     }
     setLoading(true);
     try {
-      await changeOwnPassword(password);
+      await changeOwnPassword(password, mustChangePassword ? undefined : currentPassword);
     } catch (err: any) {
       toast({ variant: "destructive", title: "Failed", description: err.message });
     } finally {
@@ -50,6 +55,19 @@ export default function ChangePasswordPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="grid gap-4">
+            {!mustChangePassword && (
+              <div className="grid gap-2">
+                <Label htmlFor="current-password">Current Password</Label>
+                <Input
+                  id="current-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
             <div className="grid gap-2">
               <Label htmlFor="password">New Password</Label>
               <Input

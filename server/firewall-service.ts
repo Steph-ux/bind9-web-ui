@@ -1,4 +1,4 @@
-
+// Copyright © 2025 Stephane ASSOGBA
 import { exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
