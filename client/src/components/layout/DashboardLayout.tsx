@@ -26,6 +26,7 @@ import {
   Terminal,
   Plug,
   Users,
+  UserRound,
   LogOut,
   ShieldCheck,
   ShieldAlert,
@@ -266,6 +267,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem className="gap-2" onClick={() => setLocation("/profile")}>
+                <UserRound className="h-4 w-4" /> Profile
+              </DropdownMenuItem>
               <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => logout()}>
                 <LogOut className="h-4 w-4" /> Logout
               </DropdownMenuItem>

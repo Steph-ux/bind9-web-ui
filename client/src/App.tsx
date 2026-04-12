@@ -20,6 +20,7 @@ import UsersPage from "@/pages/users-page";
 import FirewallPage from "@/pages/firewall";
 import FirewallDNS from "@/pages/firewall-dns";
 import BlacklistPage from "@/pages/blacklist";
+import ProfilePage from "@/pages/profile";
 
 function Router() {
   return (
@@ -38,6 +39,7 @@ function Router() {
       <ProtectedRoute path="/firewall" component={FirewallPage} adminOnly />
       <ProtectedRoute path="/firewall-rpz" component={FirewallDNS} adminOnly />
       <ProtectedRoute path="/blacklist" component={BlacklistPage} adminOnly />
+      <ProtectedRoute path="/profile" component={ProfilePage} />
       <Route component={NotFound} />
     </Switch>
   );
