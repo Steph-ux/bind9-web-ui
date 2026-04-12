@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Trash2, Pencil, ArrowLeft, Loader2, Copy, ShieldCheck } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getZone, getRecords, createRecord, updateRecord, deleteRecord, type ZoneDetail, type RecordData } from "@/lib/api";
+import { getZone, getRecords, createRecord, updateRecord, deleteRecord, getDnssecKeys, generateDnssecKey, signZone, getDnssecStatus, retireDnssecKey, deleteDnssecKey, type ZoneDetail, type RecordData, type DnssecKeyEntry, type DnssecStatus } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -27,6 +27,9 @@ export default function ZoneEditor() {
     const [zone, setZone] = useState<ZoneDetail | null>(null);
     const [records, setRecords] = useState<RecordData[]>([]);
     const [dnssec, setDnssec] = useState<{ enabled: boolean; keys: any[]; ds_record?: string } | null>(null);
+    const [managedKeys, setManagedKeys] = useState<DnssecKeyEntry[]>([]);
+    const [dnssecStatus, setDnssecStatus] = useState<DnssecStatus | null>(null);
+    const [dnssecLoading, setDnssecLoading] = useState(false);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -71,6 +74,16 @@ export default function ZoneEditor() {
                     } catch {}
                 }
             } catch (e) { console.error("Failed to fetch DNSSEC info", e); }
+
+            // Fetch managed DNSSEC keys and status
+            try {
+                const [keys, status] = await Promise.all([
+                    getDnssecKeys(zoneId),
+                    getDnssecStatus(zoneId),
+                ]);
+                setManagedKeys(keys);
+                setDnssecStatus(status);
+            } catch (e) { console.error("Failed to fetch DNSSEC keys", e); }
 
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -320,20 +333,116 @@ export default function ZoneEditor() {
                         <div className="space-y-6">
                             <div className="flex flex-col gap-4">
                                 <div className="flex items-center gap-4 p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
-                                    <div className={`p-3 rounded-full ${dnssec?.enabled ? 'bg-green-100 dark:bg-green-900/20' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                                        <ShieldCheck className={`w-8 h-8 ${dnssec?.enabled ? 'text-green-600 dark:text-green-500' : 'text-gray-400'}`} />
+                                    <div className={`p-3 rounded-full ${dnssec?.enabled || dnssecStatus?.signed ? 'bg-green-100 dark:bg-green-900/20' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                                        <ShieldCheck className={`w-8 h-8 ${dnssec?.enabled || dnssecStatus?.signed ? 'text-green-600 dark:text-green-500' : 'text-gray-400'}`} />
                                     </div>
                                     <div>
                                         <h3 className="text-lg font-semibold">DNSSEC Status</h3>
                                         <p className="text-sm text-muted-foreground">
-                                            {dnssec?.enabled
+                                            {dnssec?.enabled || dnssecStatus?.signed
                                                 ? "This zone is signed and protected by DNSSEC."
-                                                : "DNSSEC is not currently enabled or keys were not found for this zone."}
+                                                : "DNSSEC is not currently enabled. Generate keys and sign the zone to enable."}
                                         </p>
                                     </div>
-                                    {dnssec?.enabled && <Badge className="ml-auto bg-green-500">Signed</Badge>}
+                                    {(dnssec?.enabled || dnssecStatus?.signed) && <Badge className="ml-auto bg-green-500">Signed</Badge>}
                                 </div>
 
+                                {/* Key Management Actions */}
+                                <div className="flex flex-wrap gap-2">
+                                    <Button variant="outline" size="sm" className="gap-2" disabled={dnssecLoading || !zone} onClick={async () => {
+                                        setDnssecLoading(true);
+                                        try {
+                                            const res = await generateDnssecKey(zoneId!, "KSK");
+                                            toast({ title: res.success ? "KSK Generated" : "Failed", description: res.message, variant: res.success ? "default" : "destructive" });
+                                            if (res.success) { const keys = await getDnssecKeys(zoneId!); setManagedKeys(keys); }
+                                        } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
+                                        setDnssecLoading(false);
+                                    }}>
+                                        {dnssecLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                                        Generate KSK
+                                    </Button>
+                                    <Button variant="outline" size="sm" className="gap-2" disabled={dnssecLoading || !zone} onClick={async () => {
+                                        setDnssecLoading(true);
+                                        try {
+                                            const res = await generateDnssecKey(zoneId!, "ZSK");
+                                            toast({ title: res.success ? "ZSK Generated" : "Failed", description: res.message, variant: res.success ? "default" : "destructive" });
+                                            if (res.success) { const keys = await getDnssecKeys(zoneId!); setManagedKeys(keys); }
+                                        } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
+                                        setDnssecLoading(false);
+                                    }}>
+                                        {dnssecLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                                        Generate ZSK
+                                    </Button>
+                                    <Button variant="default" size="sm" className="gap-2" disabled={dnssecLoading || !zone || managedKeys.filter(k => k.status === "active").length === 0} onClick={async () => {
+                                        setDnssecLoading(true);
+                                        try {
+                                            const res = await signZone(zoneId!);
+                                            toast({ title: res.success ? "Zone Signed" : "Failed", description: res.message, variant: res.success ? "default" : "destructive" });
+                                            if (res.success) fetchData();
+                                        } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
+                                        setDnssecLoading(false);
+                                    }}>
+                                        <ShieldCheck className="h-4 w-4" />
+                                        Sign Zone
+                                    </Button>
+                                </div>
+
+                                {/* Managed DNSSEC Keys */}
+                                {managedKeys.length > 0 && (
+                                    <Card>
+                                        <div className="p-6 border-b">
+                                            <h3 className="text-lg font-semibold">Managed DNS Keys</h3>
+                                        </div>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Key Tag</TableHead>
+                                                    <TableHead>Type</TableHead>
+                                                    <TableHead>Algorithm</TableHead>
+                                                    <TableHead>Size</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Created</TableHead>
+                                                    <TableHead className="text-right">Actions</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {managedKeys.map(key => (
+                                                    <TableRow key={key.id}>
+                                                        <TableCell className="font-mono">{key.keyTag}</TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={key.keyType === "KSK" ? "default" : "secondary"}>
+                                                                {key.keyType}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs">{key.algorithm}</TableCell>
+                                                        <TableCell>{key.keySize}</TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={key.status === "active" ? "default" : key.status === "retired" ? "secondary" : "outline"}>
+                                                                {key.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs text-muted-foreground">{new Date(key.createdAt).toLocaleDateString()}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            {key.status === "active" && (
+                                                                <Button variant="ghost" size="sm" className="h-7" onClick={async () => {
+                                                                    try {
+                                                                        const res = await retireDnssecKey(key.id);
+                                                                        toast({ title: res.success ? "Key Retired" : "Failed", description: res.message });
+                                                                        if (res.success) { const keys = await getDnssecKeys(zoneId!); setManagedKeys(keys); }
+                                                                    } catch (e: any) { toast({ variant: "destructive", title: "Error", description: e.message }); }
+                                                                }}>
+                                                                    Retire
+                                                                </Button>
+                                                            )}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </Card>
+                                )}
+
+                                {/* Existing DNSSEC info from BIND9 */}
                                 {dnssec?.enabled && (
                                     <>
                                         <Card className="p-6">
@@ -363,7 +472,7 @@ export default function ZoneEditor() {
 
                                         <Card>
                                             <div className="p-6 border-b">
-                                                <h3 className="text-lg font-semibold">DNS Keys</h3>
+                                                <h3 className="text-lg font-semibold">Detected DNS Keys (from BIND9)</h3>
                                             </div>
                                             <Table>
                                                 <TableHeader>
