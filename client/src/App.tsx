@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, ProtectedRoute } from "@/lib/auth-provider";
 import NotFound from "@/pages/not-found";
 import AuthPage from "@/pages/auth-page";
+import ChangePasswordPage from "@/pages/change-password-page";
 import Dashboard from "@/pages/dashboard";
 import Zones from "@/pages/zones";
 import Config from "@/pages/config";
@@ -22,6 +23,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/auth" component={AuthPage} />
+      <Route path="/change-password" component={ChangePasswordPage} />
       <ProtectedRoute path="/" component={Dashboard} />
       <ProtectedRoute path="/zones" component={Zones} />
       <ProtectedRoute path="/zones/:id" component={ZoneEditor} />

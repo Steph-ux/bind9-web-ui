@@ -22,6 +22,7 @@ sqlite.exec(`
     username TEXT NOT NULL UNIQUE,
     password TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'viewer',
+    must_change_password INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
 
@@ -78,6 +79,14 @@ sqlite.exec(`
     message TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS rpz_entries (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'CNAME',
+    target TEXT DEFAULT '.',
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS connections (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -95,5 +104,9 @@ sqlite.exec(`
     created_at TEXT NOT NULL
   );
 `);
+
+// Migrate: add columns that may be missing on existing databases
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch {}
+try { sqlite.exec(`ALTER TABLE connections ADD COLUMN name TEXT NOT NULL DEFAULT 'default'`); } catch {}
 
 console.log(`[db] SQLite database ready at ${dbPath}`);

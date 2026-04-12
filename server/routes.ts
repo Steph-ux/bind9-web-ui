@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import os from "os";
 import { storage } from "./storage";
@@ -69,7 +70,9 @@ export async function registerRoutes(
   app.post("/api/firewall/backend", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { backend } = req.body;
+      const ALLOWED_BACKENDS = ["ufw", "firewalld", "iptables", "nftables", "none"];
       if (!backend) return res.status(400).json({ message: "Backend is required" });
+      if (!ALLOWED_BACKENDS.includes(backend)) return res.status(400).json({ message: `Invalid backend. Allowed: ${ALLOWED_BACKENDS.join(", ")}` });
       firewallService.setBackend(backend);
       const status = await firewallService.getStatus();
       res.json({ message: `Switched to ${backend}`, status });
@@ -91,11 +94,15 @@ export async function registerRoutes(
     try {
       const { toPort, proto, action, fromIp } = req.body;
       if (!toPort) return res.status(400).json({ message: "Port is required" });
+      const ALLOWED_PROTOS = ["tcp", "udp", "any"];
+      const ALLOWED_ACTIONS = ["allow", "deny", "reject"];
+      if (proto && !ALLOWED_PROTOS.includes(proto)) return res.status(400).json({ message: `Invalid protocol. Allowed: ${ALLOWED_PROTOS.join(", ")}` });
+      if (action && !ALLOWED_ACTIONS.includes(action)) return res.status(400).json({ message: `Invalid action. Allowed: ${ALLOWED_ACTIONS.join(", ")}` });
 
       await firewallService.addRule(toPort, proto || "tcp", action || "allow", fromIp || "any");
       res.json({ message: "Rule added" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(400).json({ message: error.message });
     }
   });
 
@@ -216,10 +223,16 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const { password, role, ...rest } = req.body;
 
+      const ALLOWED_ROLES = ["admin", "operator", "viewer"];
       const updateData: any = {};
-      if (role) updateData.role = role;
+      if (role) {
+        if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ message: `Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}` });
+        updateData.role = role;
+      }
       if (password) {
+        if (password.length < 4) return res.status(400).json({ message: "Password must be at least 4 characters" });
         updateData.password = await hashPassword(password);
+        updateData.mustChangePassword = false;
       }
 
       const updated = await storage.updateUser(id, updateData);
@@ -1154,81 +1167,6 @@ export async function registerRoutes(
   });
 
   // ══════════════════════════════════════════════════════════════
-  //  ACLs
-  // ══════════════════════════════════════════════════════════════
-  app.get("/api/acls", async (_req: Request, res: Response) => {
-    try {
-      const acls = await storage.getAcls();
-      res.json(acls);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
-    try {
-      const data = insertAclSchema.parse(req.body);
-      const acl = await storage.createAcl(data);
-
-      await storage.insertLog({
-        level: "INFO",
-        source: "security",
-        message: `ACL '${acl.name}' created`,
-      });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
-      }
-
-      res.status(201).json(acl);
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid data", errors: error.errors });
-      }
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.delete("/api/acls/:id", requireOperator, async (req: Request, res: Response) => {
-    try {
-      const id = req.params.id as string;
-      const acl = await storage.getAcl(id);
-      if (!acl) return res.status(404).json({ message: "ACL not found" });
-
-      await storage.deleteAcl(id);
-
-      await storage.insertLog({
-        level: "WARN",
-        source: "security",
-        message: `ACL '${acl.name}' deleted`,
-      });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
-      }
-
-      res.json({ message: "ACL deleted" });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-
-  // ══════════════════════════════════════════════════════════════
   //  LOGS
   // ══════════════════════════════════════════════════════════════
   app.get("/api/logs", async (req: Request, res: Response) => {
@@ -1579,12 +1517,45 @@ export async function registerRoutes(
 
 
   // ══════════════════════════════════════════════════════════════
-  //  WEBSOCKET — Live Logs
+  //  WEBSOCKET — Live Logs (requires auth via cookie)
   // ══════════════════════════════════════════════════════════════
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws/logs" });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws/logs",
+    verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
+      // WS upgrade requests bypass Express middleware, so we verify
+      // the session cookie by making an internal HTTP request
+      const cookie = info.req.headers?.cookie || "";
+      if (!cookie.includes("connect.sid")) {
+        return callback(false, 4001, "Authentication required");
+      }
+      // Verify session by making an internal request to /api/auth/me
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: httpServer.address() ? (httpServer.address() as any).port : 3001,
+        path: "/api/auth/me",
+        method: "GET",
+        headers: { Cookie: cookie },
+      }, (res: any) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => { body += chunk; });
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            callback(!!data.id);
+          } catch {
+            callback(false, 4001, "Authentication required");
+          }
+        });
+      });
+      req.on("error", () => callback(false, 4001, "Authentication required"));
+      req.setTimeout(3000, () => { req.destroy(); callback(false, 4001, "Auth check timeout"); });
+      req.end();
+    },
+  });
 
   wss.on("connection", (ws: WebSocket) => {
-    console.log("[ws] Log client connected");
+    console.log("[ws] Authenticated log client connected");
 
     storage.getLogs({ limit: 50 }).then((logs) => {
       ws.send(JSON.stringify({ type: "history", data: logs }));

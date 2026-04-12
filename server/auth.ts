@@ -24,9 +24,47 @@ async function comparePasswords(supplied: string, stored: string) {
     return match;
 }
 
+// Simple in-memory rate limiter for login attempts
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_RATE_LIMIT = 5;       // max attempts per window
+const LOGIN_RATE_WINDOW = 60000;  // 60 seconds
+
+function checkLoginRate(ip: string): boolean {
+    const now = Date.now();
+    const entry = loginAttempts.get(ip);
+    if (!entry || now > entry.resetAt) {
+        loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_RATE_WINDOW });
+        return true;
+    }
+    entry.count++;
+    return entry.count <= LOGIN_RATE_LIMIT;
+}
+
+// Clean up old entries every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    const expired: string[] = [];
+    loginAttempts.forEach((entry, ip) => {
+        if (now > entry.resetAt) expired.push(ip);
+    });
+    expired.forEach(ip => loginAttempts.delete(ip));
+}, 5 * 60 * 1000);
+
 export function setupAuth(app: Express) {
+    // Enforce a strong session secret — in production, MUST be set via env
+    let sessionSecret = process.env.SESSION_SECRET;
+    if (!sessionSecret) {
+        if (app.get("env") === "production") {
+            console.error("[auth] FATAL: SESSION_SECRET environment variable must be set in production!");
+            process.exit(1);
+        }
+        // In dev, generate a random one so sessions still work
+        sessionSecret = randomBytes(32).toString("hex");
+        console.warn("[auth] WARNING: Using auto-generated SESSION_SECRET. Set SESSION_SECRET env var for production.");
+    }
+
     const sessionSettings: session.SessionOptions = {
-        secret: process.env.SESSION_SECRET || "bind9_secret_key_change_me",
+        secret: sessionSecret,
         resave: false,
         saveUninitialized: false,
         store: undefined,
@@ -86,6 +124,12 @@ export function setupAuth(app: Express) {
 
     // Auth Routes
     app.post("/api/auth/login", (req, res, next) => {
+        // Rate limit login attempts by IP
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        if (!checkLoginRate(ip)) {
+            return res.status(429).json({ message: "Too many login attempts. Try again in 60 seconds." });
+        }
+
         passport.authenticate("local", (err: any, user: any, info: any) => {
             if (err) return next(err);
             if (!user) {
@@ -126,8 +170,9 @@ export function setupAuth(app: Express) {
                 username: "admin",
                 password: hashedPassword,
                 role: "admin",
-            });
-            console.log("[auth] Default admin user created (admin/admin)");
+                mustChangePassword: true,
+            } as any);
+            console.log("[auth] Default admin user created (admin/admin) — CHANGE PASSWORD IMMEDIATELY");
         }
     })();
 }

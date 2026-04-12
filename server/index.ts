@@ -68,6 +68,11 @@ app.use((req, res, next) => {
       return next(err);
     }
 
+    // In production, don't leak internal error details
+    if (process.env.NODE_ENV === "production" && status === 500) {
+      return res.status(status).json({ message: "Internal Server Error" });
+    }
+
     return res.status(status).json({ message });
   });
 

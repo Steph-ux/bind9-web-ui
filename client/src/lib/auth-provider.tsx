@@ -12,6 +12,8 @@ type AuthContextType = {
     isAdmin: boolean;
     canManageDNS: boolean;
     isReadOnly: boolean;
+    mustChangePassword: boolean;
+    changeOwnPassword: (newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -71,8 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 throw new Error("Server returned an invalid response. Please ensure the backend is running.");
             }
             setUser(user);
-            toast({ title: "Welcome back!", description: `Logged in as ${user.username}` });
-            setLocation("/");
+            if (user.mustChangePassword) {
+                toast({ title: "Password change required", description: "You must change your default password before continuing.", variant: "destructive" });
+                setLocation("/change-password");
+            } else {
+                toast({ title: "Welcome back!", description: `Logged in as ${user.username}` });
+                setLocation("/");
+            }
         } catch (e: any) {
             toast({
                 variant: "destructive",
@@ -98,6 +105,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const changeOwnPassword = async (newPassword: string) => {
+        if (!user) return;
+        const res = await fetch(`/api/users/${user.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ password: newPassword }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ message: "Failed to change password" }));
+            throw new Error(err.message);
+        }
+        const updated = await res.json();
+        setUser({ ...user, mustChangePassword: false });
+        setLocation("/");
+        toast({ title: "Password changed", description: "Your password has been updated successfully." });
+    };
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -107,7 +132,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             logout,
             isAdmin: user?.role === "admin",
             canManageDNS: user?.role === "admin" || user?.role === "operator",
-            isReadOnly: user?.role === "viewer"
+            isReadOnly: user?.role === "viewer",
+            mustChangePassword: !!user?.mustChangePassword,
+            changeOwnPassword,
         }}>
             {children}
         </AuthContext.Provider>
@@ -149,6 +176,10 @@ export function ProtectedRoute({
 
     if (adminOnly && user.role !== "admin") {
         return <Redirect to="/" />;
+    }
+
+    if (user.mustChangePassword) {
+        return <Redirect to="/change-password" />;
     }
 
     return <Route path={path} component={Component} />;

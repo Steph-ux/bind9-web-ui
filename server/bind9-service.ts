@@ -106,8 +106,12 @@ class Bind9Service {
         return this.available;
     }
 
-    /** Execute an rndc command */
+    /** Execute an rndc command — input is validated to prevent injection */
     async rndc(command: string): Promise<string> {
+        // Only allow safe characters in rndc commands (alphanumeric, dots, dashes, spaces, underscores, slashes)
+        if (!/^[a-zA-Z0-9.\/_\s-]+$/.test(command)) {
+            throw new Error(`Invalid rndc command: contains disallowed characters`);
+        }
         try {
             const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`, true);
             return stdout || stderr;
