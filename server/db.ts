@@ -87,8 +87,9 @@ if (DB_TYPE === "sqlite") {
     CREATE TABLE IF NOT EXISTS rpz_entries (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
-      type TEXT NOT NULL DEFAULT 'CNAME',
-      target TEXT DEFAULT '.',
+      type TEXT NOT NULL DEFAULT 'nxdomain',
+      target TEXT DEFAULT '',
+      comment TEXT DEFAULT '',
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS connections (
@@ -112,6 +113,12 @@ if (DB_TYPE === "sqlite") {
   // Migrate: add columns that may be missing on existing databases
   try { sqlite.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch {}
   try { sqlite.exec(`ALTER TABLE connections ADD COLUMN name TEXT NOT NULL DEFAULT 'default'`); } catch {}
+  // Migrate: rpz_entries may be missing comment column on existing DBs
+  try { sqlite.exec(`ALTER TABLE rpz_entries ADD COLUMN comment TEXT DEFAULT ''`); } catch {}
+  // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
+  try { sqlite.exec(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
+  // Index on type for faster filtering
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
 
   console.log(`[db] SQLite database ready at ${dbPath}`);
 
@@ -128,6 +135,13 @@ if (DB_TYPE === "sqlite") {
   db = drizzle(pool, { schema: pgSchema });
   schema = pgSchema;
 
+  // Migrate: rpz_entries may be missing comment column on existing DBs
+  try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT ''`); } catch {}
+  // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
+  try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
+  // Index on type for faster filtering
+  try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
+
   console.log(`[db] PostgreSQL database ready (${DATABASE_URL.replace(/:[^:@]+@/, ":****@")})`);
 
 } else if (DB_TYPE === "mysql") {
@@ -142,6 +156,13 @@ if (DB_TYPE === "sqlite") {
   const pool = mysql.createPool(DATABASE_URL);
   db = drizzle(pool, { schema: mysqlSchema, mode: "default" });
   schema = mysqlSchema;
+
+  // Migrate: rpz_entries may be missing comment column on existing DBs
+  try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT ''`); } catch {}
+  // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
+  try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
+  // Index on type for faster filtering
+  try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
 
   console.log(`[db] MySQL database ready (${DATABASE_URL.replace(/:[^:@]+@/, ":****@")})`);
 

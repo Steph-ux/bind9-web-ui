@@ -5,9 +5,10 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import {
     getFirewallStatus, toggleFirewall, addFirewallRule, deleteFirewallRule,
     switchFirewallBackend,
-    type FirewallStatus, type FirewallBackend
+    type FirewallStatus, type FirewallBackend, type RuleType, type RuleDirection,
+    type AddFirewallRuleData
 } from "@/lib/api";
-import { Shield, ShieldAlert, ShieldCheck, Plus, Trash2, Loader2, AlertTriangle, ArrowRight, Activity, Ban, CheckCircle2 } from "lucide-react";
+import { Shield, ShieldAlert, ShieldCheck, Plus, Trash2, Loader2, AlertTriangle, ArrowRight, ArrowLeft, Activity, Ban, CheckCircle2, Network, Zap, FileCode, Radio, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,70 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+
+const KNOWN_SERVICES = [
+    { value: "ssh", label: "SSH", port: "22", proto: "tcp" },
+    { value: "http", label: "HTTP", port: "80", proto: "tcp" },
+    { value: "https", label: "HTTPS", port: "443", proto: "tcp" },
+    { value: "dns", label: "DNS", port: "53", proto: "any" },
+    { value: "ftp", label: "FTP", port: "21", proto: "tcp" },
+    { value: "smtp", label: "SMTP", port: "25", proto: "tcp" },
+    { value: "smtps", label: "SMTPS", port: "465", proto: "tcp" },
+    { value: "imap", label: "IMAP", port: "143", proto: "tcp" },
+    { value: "imaps", label: "IMAPS", port: "993", proto: "tcp" },
+    { value: "pop3", label: "POP3", port: "110", proto: "tcp" },
+    { value: "pop3s", label: "POP3S", port: "995", proto: "tcp" },
+    { value: "mysql", label: "MySQL", port: "3306", proto: "tcp" },
+    { value: "postgresql", label: "PostgreSQL", port: "5432", proto: "tcp" },
+    { value: "redis", label: "Redis", port: "6379", proto: "tcp" },
+    { value: "mongodb", label: "MongoDB", port: "27017", proto: "tcp" },
+    { value: "nfs", label: "NFS", port: "2049", proto: "tcp" },
+    { value: "samba", label: "Samba", port: "139", proto: "tcp" },
+    { value: "ntp", label: "NTP", port: "123", proto: "udp" },
+    { value: "syslog", label: "Syslog", port: "514", proto: "udp" },
+    { value: "snmp", label: "SNMP", port: "161", proto: "udp" },
+    { value: "rsync", label: "Rsync", port: "873", proto: "tcp" },
+    { value: "vnc", label: "VNC", port: "5900", proto: "tcp" },
+    { value: "rdp", label: "RDP", port: "3389", proto: "tcp" },
+    { value: "openvpn", label: "OpenVPN", port: "1194", proto: "udp" },
+    { value: "wireguard", label: "WireGuard", port: "51820", proto: "udp" },
+];
+
+const ICMP_TYPES = [
+    { value: "echo-request", label: "Echo Request (Ping)" },
+    { value: "echo-reply", label: "Echo Reply" },
+    { value: "destination-unreachable", label: "Destination Unreachable" },
+    { value: "time-exceeded", label: "Time Exceeded" },
+    { value: "redirect", label: "Redirect" },
+    { value: "router-advertisement", label: "Router Advertisement" },
+    { value: "router-solicitation", label: "Router Solicitation" },
+    { value: "parameter-problem", label: "Parameter Problem" },
+    { value: "timestamp-request", label: "Timestamp Request" },
+    { value: "timestamp-reply", label: "Timestamp Reply" },
+];
+
+const RATE_LIMIT_PRESETS = [
+    { value: "3/min", label: "3/min (Strict)" },
+    { value: "6/min", label: "6/min (Moderate)" },
+    { value: "10/min", label: "10/min (Lenient)" },
+    { value: "30/min", label: "30/min (Permissive)" },
+    { value: "100/hour", label: "100/hour" },
+];
+
+const RULE_TYPE_CONFIG: { value: RuleType; label: string; icon: any; desc: string }[] = [
+    { value: "port", label: "Port", icon: Network, desc: "Single port rule" },
+    { value: "service", label: "Service", icon: Zap, desc: "Predefined service" },
+    { value: "portRange", label: "Port Range", icon: Activity, desc: "Range of ports" },
+    { value: "multiPort", label: "Multi-Port", icon: Radio, desc: "Multiple ports" },
+    { value: "icmp", label: "ICMP", icon: MessageSquare, desc: "ICMP protocol" },
+    { value: "raw", label: "Raw Rule", icon: FileCode, desc: "Custom command" },
+];
+
+function ruleTypeLabel(rt: string): string {
+    return RULE_TYPE_CONFIG.find(c => c.value === rt)?.label || rt;
+}
 
 export default function FirewallPage() {
     const [status, setStatus] = useState<FirewallStatus>({ active: false, rules: [], installed: true, backend: "none", availableBackends: [] });
@@ -25,15 +90,33 @@ export default function FirewallPage() {
     const [toggling, setToggling] = useState(false);
     const [showModal, setShowModal] = useState(false);
 
+    // Form state
+    const [ruleType, setRuleType] = useState<RuleType>("port");
     const [toPort, setToPort] = useState("");
+    const [toPortEnd, setToPortEnd] = useState("");
     const [proto, setProto] = useState("tcp");
     const [action, setAction] = useState("allow");
     const [fromIp, setFromIp] = useState("any");
+    const [direction, setDirection] = useState<RuleDirection>("in");
+    const [service, setService] = useState("");
+    const [iface, setIface] = useState("");
+    const [rateLimit, setRateLimit] = useState("");
+    const [icmpType, setIcmpType] = useState("echo-request");
+    const [logEnabled, setLogEnabled] = useState(false);
+    const [comment, setComment] = useState("");
+    const [rawRule, setRawRule] = useState("");
     const [saving, setSaving] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
     const { toast } = useToast();
     const { isAdmin } = useAuth();
+
+    const resetForm = () => {
+        setRuleType("port"); setToPort(""); setToPortEnd(""); setProto("tcp");
+        setAction("allow"); setFromIp("any"); setDirection("in"); setService("");
+        setIface(""); setRateLimit(""); setIcmpType("echo-request"); setLogEnabled(false);
+        setComment(""); setRawRule("");
+    };
 
     const fetchData = async () => {
         try {
@@ -55,7 +138,7 @@ export default function FirewallPage() {
             setStatus(prev => ({ ...prev, active: checked }));
             toast({
                 title: checked ? "Firewall Enabled" : "Firewall Disabled",
-                description: checked ? "System is now protected." : "System is rightfully exposed."
+                description: checked ? "System is now protected." : "System is exposed."
             });
             fetchData();
         } catch (e: any) {
@@ -67,17 +150,43 @@ export default function FirewallPage() {
     };
 
     const handleAddRule = async () => {
-        if (!toPort) {
-            toast({ title: "Error", description: "Port/Service is required", variant: "destructive" });
-            return;
+        // Validate based on rule type
+        if (ruleType === "port" && !toPort) {
+            toast({ title: "Error", description: "Port number is required", variant: "destructive" }); return;
         }
+        if (ruleType === "service" && !service) {
+            toast({ title: "Error", description: "Service is required", variant: "destructive" }); return;
+        }
+        if (ruleType === "portRange" && (!toPort || !toPortEnd)) {
+            toast({ title: "Error", description: "Start and end port are required", variant: "destructive" }); return;
+        }
+        if (ruleType === "multiPort" && !toPort) {
+            toast({ title: "Error", description: "Comma-separated ports are required", variant: "destructive" }); return;
+        }
+        if (ruleType === "raw" && !rawRule) {
+            toast({ title: "Error", description: "Raw rule command is required", variant: "destructive" }); return;
+        }
+
         setSaving(true);
         try {
-            await addFirewallRule({ toPort, proto, action, fromIp });
+            const data: AddFirewallRuleData = {
+                toPort: ruleType === "service" ? (KNOWN_SERVICES.find(s => s.value === service)?.port || toPort) : toPort,
+                proto: ruleType === "service" ? (KNOWN_SERVICES.find(s => s.value === service)?.proto || proto) : proto,
+                action, fromIp, direction, ruleType,
+                toPortEnd: ruleType === "portRange" ? toPortEnd : undefined,
+                service: ruleType === "service" ? service : undefined,
+                interface: iface || undefined,
+                rateLimit: rateLimit && rateLimit !== "_none" ? rateLimit : undefined,
+                icmpType: ruleType === "icmp" ? icmpType : undefined,
+                log: logEnabled || undefined,
+                comment: comment || undefined,
+                rawRule: ruleType === "raw" ? rawRule : undefined,
+            };
+            await addFirewallRule(data);
             toast({ title: "Rule added" });
             setShowModal(false);
+            resetForm();
             fetchData();
-            setToPort(""); setProto("tcp"); setAction("allow"); setFromIp("any");
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
@@ -232,9 +341,10 @@ export default function FirewallPage() {
             <div className="flex items-center justify-between mb-4">
                 <h5 className="flex items-center gap-2 font-semibold">
                     <Activity className="h-4 w-4 text-primary" /> {status.active ? "Active Rules" : "Configured Rules"}
+                    <Badge variant="secondary" className="font-mono text-xs">{status.rules.length}</Badge>
                 </h5>
-                <Button className="gap-2" onClick={() => setShowModal(true)}>
-                    <Plus className="h-4 w-4" /> Add New Rule
+                <Button className="gap-2" onClick={() => { resetForm(); setShowModal(true); }}>
+                    <Plus className="h-4 w-4" /> Add Rule
                 </Button>
             </div>
 
@@ -244,28 +354,39 @@ export default function FirewallPage() {
                         <Shield className="h-10 w-10 text-muted-foreground/25 mb-3 mx-auto" />
                         <h5 className="font-semibold">No Rules Defined</h5>
                         <p className="text-muted-foreground mb-4">Your firewall policy is empty. Add rules to explicitly allow traffic to your services.</p>
-                        <Button variant="outline" onClick={() => setShowModal(true)}>Create First Rule</Button>
+                        <Button variant="outline" onClick={() => { resetForm(); setShowModal(true); }}>Create First Rule</Button>
                     </CardContent>
                 </Card>
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {status.rules.map((rule) => {
-                        const isAllow = rule.action === "ALLOW";
+                        const isAllow = rule.action === "ALLOW" || rule.action === "LIMIT";
                         const isDeny = rule.action === "DENY";
+                        const isLimit = rule.action === "LIMIT";
 
                         return (
-                            <Card key={rule.id}>
+                            <Card key={rule.id} className="overflow-hidden">
                                 <CardContent className="p-4">
                                     <div className="flex items-start justify-between mb-3">
                                         <div className="flex items-center gap-2">
-                                            <div className={`flex h-9 w-9 items-center justify-center rounded-md ${isAllow ? "bg-green-500/10 text-green-600" : isDeny ? "bg-red-500/10 text-red-600" : "bg-yellow-500/10 text-yellow-600"}`}>
-                                                {isAllow ? <CheckCircle2 className="h-4 w-4" /> : <Ban className="h-4 w-4" />}
+                                            <div className={`flex h-9 w-9 items-center justify-center rounded-md ${isAllow ? (isLimit ? "bg-yellow-500/10 text-yellow-600" : "bg-green-500/10 text-green-600") : "bg-red-500/10 text-red-600"}`}>
+                                                {isAllow ? (isLimit ? <Zap className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />) : <Ban className="h-4 w-4" />}
                                             </div>
                                             <div>
-                                                <code className="font-bold text-base block">{rule.to}</code>
-                                                <small className="uppercase text-muted-foreground font-semibold text-[10px] tracking-widest">
-                                                    {rule.action} IN
-                                                </small>
+                                                <code className="font-bold text-base block">
+                                                    {rule.ruleType === "service" && rule.service ? rule.service : rule.to}
+                                                </code>
+                                                <div className="flex items-center gap-1.5">
+                                                    <small className="uppercase text-muted-foreground font-semibold text-[10px] tracking-widest">
+                                                        {rule.action}
+                                                    </small>
+                                                    <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
+                                                        {rule.direction === "out" ? "OUT" : "IN"}
+                                                    </Badge>
+                                                    <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
+                                                        {ruleTypeLabel(rule.ruleType)}
+                                                    </Badge>
+                                                </div>
                                             </div>
                                         </div>
                                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteTarget(rule.id)} title="Delete Rule">
@@ -275,18 +396,62 @@ export default function FirewallPage() {
 
                                     <div className="border-t my-2" />
 
-                                    <div className="flex items-center justify-between text-sm">
-                                        <div className="flex items-center gap-1 text-muted-foreground">
-                                            <ArrowRight className="h-3.5 w-3.5" /> From:
+                                    <div className="space-y-1.5 text-sm">
+                                        <div className="flex items-center justify-between">
+                                            <span className="flex items-center gap-1 text-muted-foreground">
+                                                {rule.direction === "out" ? <ArrowLeft className="h-3 w-3" /> : <ArrowRight className="h-3 w-3" />}
+                                                From:
+                                            </span>
+                                            <Badge variant="secondary" className="font-mono text-xs">
+                                                {rule.from}
+                                                {rule.ipv6 && <span className="ml-1 opacity-60">(v6)</span>}
+                                            </Badge>
                                         </div>
-                                        <Badge variant="secondary" className="font-mono">
-                                            {rule.from}
-                                            {rule.ipv6 && <span className="ml-1 opacity-60">(v6)</span>}
-                                        </Badge>
+
+                                        {rule.proto && rule.proto !== "any" && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-muted-foreground">Protocol:</span>
+                                                <span className="font-mono text-xs">{rule.proto.toUpperCase()}</span>
+                                            </div>
+                                        )}
+
+                                        {rule.interface && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-muted-foreground">Interface:</span>
+                                                <span className="font-mono text-xs">{rule.interface}</span>
+                                            </div>
+                                        )}
+
+                                        {rule.rateLimit && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-muted-foreground flex items-center gap-1"><Zap className="h-3 w-3" />Limit:</span>
+                                                <span className="font-mono text-xs">{rule.rateLimit}</span>
+                                            </div>
+                                        )}
+
+                                        {rule.icmpType && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-muted-foreground">ICMP:</span>
+                                                <span className="font-mono text-xs">{rule.icmpType}</span>
+                                            </div>
+                                        )}
+
+                                        {rule.log && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-muted-foreground">Logging:</span>
+                                                <Badge variant="outline" className="text-[9px] px-1 py-0">ON</Badge>
+                                            </div>
+                                        )}
+
+                                        {rule.comment && (
+                                            <div className="mt-1 text-xs text-muted-foreground italic border-t pt-1.5">
+                                                "{rule.comment}"
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="flex justify-between mt-2 text-muted-foreground text-[10px]">
-                                        <span>Rule ID: {rule.id}</span>
+                                        <span>Rule #{rule.id}</span>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -297,27 +462,61 @@ export default function FirewallPage() {
 
             {/* Add Rule Dialog */}
             <Dialog open={showModal} onOpenChange={setShowModal}>
-                <DialogContent>
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Add Firewall Rule</DialogTitle>
                     </DialogHeader>
-                    <p className="text-muted-foreground text-sm">Create a new rule for incoming traffic.</p>
-                    <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                            <Label>Port / App</Label>
-                            <Input className="font-mono" value={toPort} onChange={e => setToPort(e.target.value)} placeholder="80, 443, ssh" />
+
+                    {/* Rule Type Selector */}
+                    <div className="mb-2">
+                        <Label className="mb-2 block">Rule Type</Label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {RULE_TYPE_CONFIG.map(cfg => (
+                                <button
+                                    key={cfg.value}
+                                    type="button"
+                                    onClick={() => {
+                                        setRuleType(cfg.value);
+                                        if (cfg.value === "icmp") setProto("icmp");
+                                        else if (cfg.value === "service") setProto("tcp");
+                                        else if (!proto || proto === "icmp") setProto("tcp");
+                                    }}
+                                    className={`flex flex-col items-center gap-1 rounded-lg border p-2.5 text-xs transition-colors ${ruleType === cfg.value ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/50"}`}
+                                >
+                                    <cfg.icon className="h-4 w-4" />
+                                    <span className="font-medium">{cfg.label}</span>
+                                </button>
+                            ))}
                         </div>
+                    </div>
+
+                    <div className="grid gap-4 py-2">
+                        {/* Direction */}
                         <div className="grid gap-2">
-                            <Label>Protocol</Label>
-                            <Select value={proto} onValueChange={setProto}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="tcp">TCP</SelectItem>
-                                    <SelectItem value="udp">UDP</SelectItem>
-                                    <SelectItem value="any">Any</SelectItem>
-                                </SelectContent>
-                            </Select>
+                            <Label>Direction</Label>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant={direction === "in" ? "default" : "outline"}
+                                    size="sm"
+                                    className="flex-1 gap-1.5"
+                                    onClick={() => setDirection("in")}
+                                >
+                                    <ArrowRight className="h-3.5 w-3.5" /> Inbound
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant={direction === "out" ? "default" : "outline"}
+                                    size="sm"
+                                    className="flex-1 gap-1.5"
+                                    onClick={() => setDirection("out")}
+                                >
+                                    <ArrowLeft className="h-3.5 w-3.5" /> Outbound
+                                </Button>
+                            </div>
                         </div>
+
+                        {/* Action */}
                         <div className="grid gap-2">
                             <Label>Action</Label>
                             <Select value={action} onValueChange={setAction}>
@@ -329,12 +528,163 @@ export default function FirewallPage() {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="grid gap-2">
-                            <Label>From IP</Label>
-                            <Input className="font-mono" value={fromIp} onChange={e => setFromIp(e.target.value)} placeholder="any, 192.168.1.5" />
-                        </div>
 
-                        {(toPort === "22" || toPort === "ssh") && action === "deny" && (
+                        {/* Port rule fields */}
+                        {ruleType === "port" && (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label>Port</Label>
+                                    <Input className="font-mono" value={toPort} onChange={e => setToPort(e.target.value)} placeholder="80, 443, 22" />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>Protocol</Label>
+                                    <Select value={proto} onValueChange={setProto}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="tcp">TCP</SelectItem>
+                                            <SelectItem value="udp">UDP</SelectItem>
+                                            <SelectItem value="any">Any</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Service rule fields */}
+                        {ruleType === "service" && (
+                            <div className="grid gap-2">
+                                <Label>Service</Label>
+                                <Select value={service} onValueChange={(v) => {
+                                    setService(v);
+                                    const svc = KNOWN_SERVICES.find(s => s.value === v);
+                                    if (svc) { setToPort(svc.port); setProto(svc.proto); }
+                                }}>
+                                    <SelectTrigger><SelectValue placeholder="Select a service..." /></SelectTrigger>
+                                    <SelectContent>
+                                        {KNOWN_SERVICES.map(s => (
+                                            <SelectItem key={s.value} value={s.value}>
+                                                {s.label} ({s.port}/{s.proto})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        {/* Port range fields */}
+                        {ruleType === "portRange" && (
+                            <>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid gap-2">
+                                        <Label>Start Port</Label>
+                                        <Input className="font-mono" value={toPort} onChange={e => setToPort(e.target.value)} placeholder="1000" />
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>End Port</Label>
+                                        <Input className="font-mono" value={toPortEnd} onChange={e => setToPortEnd(e.target.value)} placeholder="2000" />
+                                    </div>
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>Protocol</Label>
+                                    <Select value={proto} onValueChange={setProto}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="tcp">TCP</SelectItem>
+                                            <SelectItem value="udp">UDP</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Multi-port fields */}
+                        {ruleType === "multiPort" && (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label>Ports (comma-separated)</Label>
+                                    <Input className="font-mono" value={toPort} onChange={e => setToPort(e.target.value)} placeholder="80, 443, 8080" />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>Protocol</Label>
+                                    <Select value={proto} onValueChange={setProto}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="tcp">TCP</SelectItem>
+                                            <SelectItem value="udp">UDP</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </>
+                        )}
+
+                        {/* ICMP fields */}
+                        {ruleType === "icmp" && (
+                            <div className="grid gap-2">
+                                <Label>ICMP Type</Label>
+                                <Select value={icmpType} onValueChange={setIcmpType}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {ICMP_TYPES.map(t => (
+                                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        {/* Raw rule fields */}
+                        {ruleType === "raw" && (
+                            <div className="grid gap-2">
+                                <Label>Raw Command</Label>
+                                <Textarea className="font-mono text-sm" rows={3} value={rawRule} onChange={e => setRawRule(e.target.value)} placeholder="e.g. allow from 192.168.1.0/24 to any port 22 proto tcp" />
+                                <p className="text-xs text-muted-foreground">Enter the rule arguments after the firewall command prefix. Use with caution.</p>
+                            </div>
+                        )}
+
+                        {/* Common fields for all non-raw types */}
+                        {ruleType !== "raw" && (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label>From IP / Network</Label>
+                                    <Input className="font-mono" value={fromIp} onChange={e => setFromIp(e.target.value)} placeholder="any, 192.168.1.0/24, 10.0.0.5" />
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label>Interface (optional)</Label>
+                                    <Input className="font-mono" value={iface} onChange={e => setIface(e.target.value)} placeholder="eth0, wlan0, lo" />
+                                </div>
+
+                                {action === "allow" && (
+                                    <div className="grid gap-2">
+                                        <Label>Rate Limit (optional)</Label>
+                                        <Select value={rateLimit} onValueChange={setRateLimit}>
+                                            <SelectTrigger><SelectValue placeholder="No limit" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="_none">No limit</SelectItem>
+                                                {RATE_LIMIT_PRESETS.map(r => (
+                                                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <Checkbox id="log-rule" checked={logEnabled} onCheckedChange={(c) => setLogEnabled(!!c)} />
+                                        <Label htmlFor="log-rule" className="text-sm cursor-pointer">Log matches</Label>
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label>Comment (optional)</Label>
+                                    <Input value={comment} onChange={e => setComment(e.target.value)} placeholder="Describe this rule..." />
+                                </div>
+                            </>
+                        )}
+
+                        {/* SSH warning */}
+                        {((toPort === "22" || service === "ssh") && (action === "deny" || action === "reject")) && (
                             <Alert variant="destructive">
                                 <AlertTriangle className="h-4 w-4" />
                                 <AlertTitle>Warning</AlertTitle>
@@ -342,6 +692,7 @@ export default function FirewallPage() {
                             </Alert>
                         )}
                     </div>
+
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
                         <Button className="gap-2" onClick={handleAddRule} disabled={saving}>

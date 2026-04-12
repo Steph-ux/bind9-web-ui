@@ -222,13 +222,26 @@ export const syncZones = () =>
     request<{ message: string; total: number; synced: number; skipped: number }>("/zones/sync", { method: "POST" });
 
 // ── Firewall ──────────────────────────────────────────────
+export type RuleDirection = "in" | "out";
+export type RuleType = "port" | "service" | "portRange" | "multiPort" | "icmp" | "raw";
+
 export interface FirewallRule {
     id: number;
     to: string;
     action: "ALLOW" | "DENY" | "REJECT" | "LIMIT";
     from: string;
     ipv6: boolean;
+    direction: RuleDirection;
+    ruleType: RuleType;
+    proto: string;
+    toPortEnd?: string;
+    service?: string;
+    interface?: string;
+    rateLimit?: string;
+    icmpType?: string;
+    log?: boolean;
     comment?: string;
+    rawRule?: string;
 }
 
 export type FirewallBackend = "ufw" | "firewalld" | "iptables" | "nftables" | "none";
@@ -241,11 +254,28 @@ export interface FirewallStatus {
     availableBackends: FirewallBackend[];
 }
 
+export interface AddFirewallRuleData {
+    toPort: string;
+    proto: string;
+    action: string;
+    fromIp: string;
+    direction?: RuleDirection;
+    ruleType?: RuleType;
+    toPortEnd?: string;
+    service?: string;
+    interface?: string;
+    rateLimit?: string;
+    icmpType?: string;
+    log?: boolean;
+    comment?: string;
+    rawRule?: string;
+}
+
 export const getFirewallStatus = () => request<FirewallStatus>("/firewall/status");
 export const toggleFirewall = (enable: boolean) => request<{ message: string }>("/firewall/toggle", { method: "POST", body: JSON.stringify({ enable }) });
 export const switchFirewallBackend = (backend: FirewallBackend) => request<{ message: string; status: FirewallStatus }>("/firewall/backend", { method: "POST", body: JSON.stringify({ backend }) });
 export const getFirewallRules = () => request<FirewallRule[]>("/firewall/rules");
-export const addFirewallRule = (data: { toPort: string; proto: string; action: string; fromIp: string }) =>
+export const addFirewallRule = (data: AddFirewallRuleData) =>
     request<{ message: string }>("/firewall/rules", { method: "POST", body: JSON.stringify(data) });
 export const deleteFirewallRule = (id: number) =>
     request<{ message: string }>(`/firewall/rules/${id}`, { method: "DELETE" });
