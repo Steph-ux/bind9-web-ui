@@ -1,10 +1,12 @@
 # BIND9 Web UI / Admin Panel
 
+**The missing Web UI for BIND9.**
+
+Manage DNS zones, records, ACLs, TSIG keys, firewall and remote servers — all from a modern dashboard.
+
+⚡ Built for sysadmins, DevOps and homelab users.
+
 Copyright © 2025 Stephane ASSOGBA
-
-A modern web interface for managing BIND9 DNS servers (zones, records, ACLs, TSIG, firewall, SSH remote control).
-
-> Replace manual config editing with a full-featured dashboard.
 
 <!-- keywords: bind9 web ui, dns manager, dns control panel, self hosted dns -->
 
@@ -17,6 +19,18 @@ A modern web interface for managing BIND9 DNS servers (zones, records, ACLs, TSI
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supported-4169E1?logo=postgresql&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-Supported-4479A1?logo=mysql&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+---
+
+## Why?
+
+BIND9 is one of the most powerful DNS servers, but:
+
+- No official web interface
+- Complex configuration files
+- Error-prone manual edits
+
+This project solves that by providing a modern, secure and user-friendly control panel.
 
 ---
 
