@@ -2596,6 +2596,25 @@ export async function registerRoutes(
       if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
 
       const updated = await storage.updateConnection(id, allowed);
+
+      // Update pool config if connection credentials changed
+      if (sshManager.isConnected(id) && (allowed.host || allowed.port || allowed.username || allowed.password || allowed.privateKey || allowed.authType)) {
+        sshManager.unregister(id);
+        sshManager.register(id, {
+          host: updated.host,
+          port: updated.port,
+          username: updated.username,
+          authType: updated.authType as "password" | "key",
+          password: updated.password || undefined,
+          privateKey: updated.privateKey || undefined,
+        });
+        try {
+          await sshManager.connectById(id);
+        } catch (e: any) {
+          console.log(`[connections] Reconnect failed for ${updated.name}: ${e.message}`);
+        }
+      }
+
       res.json({
         ...updated,
         password: updated.password ? "***" : "",

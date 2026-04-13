@@ -5,8 +5,7 @@
  * Supports command execution and SFTP file operations over SSH.
  * One connection is designated as "active" for bind9-service operations.
  */
-import { Client, type ConnectConfig, type SFTPWrapper } from "ssh2";
-import type { Connection } from "@shared/schema";
+import { Client, type ConnectConfig } from "ssh2";
 
 export interface SSHConnectionConfig {
     host: string;
@@ -40,10 +39,12 @@ class SSHManager {
 
     /** Register a connection config in the pool (does NOT connect yet) */
     register(connectionId: string, config: SSHConnectionConfig) {
-        // If already in pool and connected, keep it
         const existing = this.pool.get(connectionId);
         if (existing && existing.connected) return;
-        // Otherwise store config for later connect
+        // End any previous orphaned client
+        if (existing && !existing.connected) {
+            try { existing.client.end(); } catch {}
+        }
         this.pool.set(connectionId, {
             client: new Client(),
             config,
@@ -97,8 +98,11 @@ class SSHManager {
 
     /** Set the active SSH connection config (legacy — registers + sets active) */
     setConfig(config: SSHConnectionConfig | null) {
-        if (config && this.activeId) {
-            this.register(this.activeId, config);
+        if (config) {
+            if (this.activeId) {
+                this.register(this.activeId, config);
+            }
+            // If no activeId yet, setConfig alone is insufficient — caller must also setActive
         } else if (!config && this.activeId) {
             this.unregister(this.activeId);
         }

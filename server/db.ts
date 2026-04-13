@@ -265,6 +265,8 @@ if (DB_TYPE === "sqlite") {
   try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT ''`); } catch {}
   // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
+  // Migrate: add replication_enabled column to zones
+  try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS replication_enabled BOOLEAN NOT NULL DEFAULT true`); } catch {}
   // Index on type for faster filtering
   try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks
@@ -289,6 +291,8 @@ if (DB_TYPE === "sqlite") {
   try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT ''`); } catch {}
   // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
+  // Migrate: add replication_enabled column to zones
+  try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS replication_enabled BOOLEAN NOT NULL DEFAULT 1`); } catch {}
   // Index on type for faster filtering
   try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks

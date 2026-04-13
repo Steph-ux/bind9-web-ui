@@ -140,15 +140,17 @@ export default function ConnectionsPage() {
                     </div>
                     <div className="flex-1">
                         <h5 className="mb-1 font-semibold">
-                            {activeConn ? `Connected to ${activeConn.name}` : "Local Mode Active"}
+                            {activeConn ? `Active: ${activeConn.name}` : "Local Mode Active"}
                         </h5>
                         <p className="text-muted-foreground mb-0 text-sm">
-                            {activeConn ? `Managing remote BIND9 server at ${activeConn.host}` : "You are managing the local BIND9 instance on this machine."}
+                            {activeConn
+                              ? `Managing ${activeConn.host} — ${connections.filter(c => poolStatus[c.id]?.isConnected && c.id !== activeConn.id).length} other connection(s) in pool`
+                              : "You are managing the local BIND9 instance on this machine."}
                         </p>
                     </div>
                     {activeConn && isAdmin && (
-                        <Button variant="outline" size="sm" className="text-destructive gap-2" onClick={handleDeactivate}>
-                            <ZapOff className="h-3.5 w-3.5" /> Disconnect
+                        <Button variant="outline" size="sm" className="gap-2" onClick={handleDeactivate}>
+                            <ZapOff className="h-3.5 w-3.5" /> Switch to Local
                         </Button>
                     )}
                 </CardContent>
