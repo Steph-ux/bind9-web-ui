@@ -1,4 +1,5 @@
 // Copyright © 2025 Stephane ASSOGBA
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
