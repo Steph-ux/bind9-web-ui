@@ -181,8 +181,18 @@ class SSHManager {
         });
     }
 
-    /** Read a file on the remote server via SFTP */
+    /** Read a file on the remote server via SFTP (with retry on channel failure) */
     async readFile(remotePath: string): Promise<string> {
+        try {
+            return await this._readFile(remotePath);
+        } catch {
+            // Channel open failure — reconnect and retry once
+            this.connected = false;
+            return this._readFile(remotePath);
+        }
+    }
+
+    private async _readFile(remotePath: string): Promise<string> {
         const client = await this.ensureConnected();
 
         return new Promise((resolve, reject) => {
@@ -197,8 +207,18 @@ class SSHManager {
         });
     }
 
-    /** Write a file on the remote server via SFTP */
+    /** Write a file on the remote server via SFTP (with retry on channel failure) */
     async writeFile(remotePath: string, content: string): Promise<void> {
+        try {
+            await this._writeFile(remotePath, content);
+        } catch {
+            // Channel open failure — reconnect and retry once
+            this.connected = false;
+            await this._writeFile(remotePath, content);
+        }
+    }
+
+    private async _writeFile(remotePath: string, content: string): Promise<void> {
         const client = await this.ensureConnected();
 
         return new Promise((resolve, reject) => {
