@@ -19,6 +19,9 @@ export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
   role: true,
+}).extend({
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  username: z.string().min(2, "Username must be at least 2 characters").regex(/^[a-zA-Z0-9._-]+$/, "Username contains invalid characters"),
 });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -178,3 +181,161 @@ export const insertRpzEntrySchema = createInsertSchema(rpzEntries).pick({
 });
 export type InsertRpzEntry = z.infer<typeof insertRpzEntrySchema>;
 export type RpzEntry = typeof rpzEntries.$inferSelect;
+
+// ── IP Blacklist ─────────────────────────────────────────────────
+export const ipBlacklist = mysqlTable("ip_blacklist", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  ip: varchar("ip", { length: 45 }).notNull().unique(),
+  attemptCount: int("attempt_count").notNull().default(1),
+  reason: mysqlEnum("reason", ["login_failed", "api_abuse", "brute_force", "manual"]).notNull().default("login_failed"),
+  bannedAt: varchar("banned_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+  expiresAt: varchar("expires_at", { length: 64 }),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type IpBlacklist = typeof ipBlacklist.$inferSelect;
+
+// ── API Tokens ──────────────────────────────────────────────────
+export const apiTokens = mysqlTable("api_tokens", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: varchar("name", { length: 255 }).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  tokenPrefix: varchar("token_prefix", { length: 16 }).notNull(),
+  permissions: text("permissions").notNull().default("*"),
+  createdBy: varchar("created_by", { length: 36 }).notNull(),
+  lastUsedAt: varchar("last_used_at", { length: 64 }),
+  expiresAt: varchar("expires_at", { length: 64 }),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ApiToken = typeof apiTokens.$inferSelect;
+
+// ── User-Domain assignments (Domain Jailing) ────────────────────
+export const userDomains = mysqlTable("user_domains", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  zoneId: varchar("zone_id", { length: 36 }).notNull(),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type UserDomain = typeof userDomains.$inferSelect;
+
+// ── Replication Servers ─────────────────────────────────────────
+export const replicationServers = mysqlTable("replication_servers", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: varchar("name", { length: 255 }).notNull(),
+  host: varchar("host", { length: 255 }).notNull(),
+  port: int("port").notNull().default(22),
+  username: varchar("username", { length: 255 }).notNull().default("root"),
+  authType: mysqlEnum("auth_type", ["password", "key"]).notNull().default("password"),
+  password: text("password").default(""),
+  privateKey: text("private_key").default(""),
+  bind9ConfDir: varchar("bind9_conf_dir", { length: 512 }).default("/etc/bind"),
+  bind9ZoneDir: varchar("bind9_zone_dir", { length: 512 }).default("/var/lib/bind"),
+  role: mysqlEnum("role", ["slave", "secondary"]).notNull().default("slave"),
+  lastSyncAt: varchar("last_sync_at", { length: 64 }),
+  lastSyncStatus: mysqlEnum("last_sync_status", ["success", "failed", "pending", "never"]).notNull().default("never"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ReplicationServer = typeof replicationServers.$inferSelect;
+
+// ── Replication Conflicts ───────────────────────────────────────
+export const replicationConflicts = mysqlTable("replication_conflicts", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: varchar("server_id", { length: 36 }).notNull(),
+  zoneDomain: varchar("zone_domain", { length: 255 }).notNull(),
+  masterSerial: varchar("master_serial", { length: 64 }),
+  slaveSerial: varchar("slave_serial", { length: 64 }),
+  conflictType: mysqlEnum("conflict_type", ["serial_mismatch", "zone_missing", "soa_mismatch", "config_mismatch"]).notNull(),
+  details: text("details").default(""),
+  resolved: boolean("resolved").notNull().default(false),
+  detectedAt: varchar("detected_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+  resolvedAt: varchar("resolved_at", { length: 64 }),
+});
+
+export type ReplicationConflict = typeof replicationConflicts.$inferSelect;
+
+// ── Replication Zone Bindings (per-zone replication control) ────
+export const replicationZoneBindings = mysqlTable("replication_zone_bindings", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: varchar("server_id", { length: 36 }).notNull(),
+  zoneId: varchar("zone_id", { length: 36 }).notNull(),
+  mode: mysqlEnum("mode", ["push", "pull", "both"]).notNull().default("push"),
+  enabled: boolean("enabled").notNull().default(true),
+  lastSyncAt: varchar("last_sync_at", { length: 64 }),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ReplicationZoneBinding = typeof replicationZoneBindings.$inferSelect;
+
+// ── Health Checks ──────────────────────────────────────────────
+export const healthChecks = mysqlTable("health_checks", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: varchar("server_id", { length: 36 }).notNull(),
+  status: mysqlEnum("status", ["healthy", "degraded", "down"]).notNull(),
+  latencyMs: int("latency_ms"),
+  details: text("details").default(""),
+  checkedAt: varchar("checked_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type HealthCheck = typeof healthChecks.$inferSelect;
+
+// ── Notification Channels ──────────────────────────────────────
+export const notificationChannels = mysqlTable("notification_channels", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: varchar("name", { length: 255 }).notNull(),
+  type: mysqlEnum("type", ["email", "webhook", "slack"]).notNull(),
+  config: text("config").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  events: text("events").notNull().default("server_down,conflict_detected,health_degraded"),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type NotificationChannel = typeof notificationChannels.$inferSelect;
+
+// ── Sync History ──────────────────────────────────────────────
+export const syncHistory = mysqlTable("sync_history", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: varchar("server_id", { length: 36 }).notNull(),
+  zoneDomain: varchar("zone_domain", { length: 255 }).notNull(),
+  action: mysqlEnum("action", ["push", "pull", "notify"]).notNull(),
+  success: boolean("success").notNull(),
+  durationMs: int("duration_ms"),
+  details: text("details").default(""),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type SyncHistoryEntry = typeof syncHistory.$inferSelect;
+
+// ── DNSSEC Keys ───────────────────────────────────────────────
+export const dnssecKeys = mysqlTable("dnssec_keys", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  zoneId: varchar("zone_id", { length: 36 }).notNull(),
+  keyTag: varchar("key_tag", { length: 64 }).notNull(),
+  keyType: mysqlEnum("key_type", ["KSK", "ZSK"]).notNull(),
+  algorithm: varchar("algorithm", { length: 64 }).notNull().default("ECDSAP256SHA256"),
+  keySize: int("key_size").notNull().default(256),
+  status: mysqlEnum("status", ["active", "published", "retired", "revoked"]).notNull().default("active"),
+  filePath: varchar("file_path", { length: 512 }),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+  activatedAt: varchar("activated_at", { length: 64 }),
+  retiredAt: varchar("retired_at", { length: 64 }),
+});
+
+export type DnssecKey = typeof dnssecKeys.$inferSelect;
+
+// ── Backups ───────────────────────────────────────────────────
+export const backups = mysqlTable("backups", {
+  id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  type: mysqlEnum("type", ["auto", "manual", "snapshot"]).notNull(),
+  scope: mysqlEnum("scope", ["full", "zones", "configs", "single_zone"]).notNull(),
+  zoneId: varchar("zone_id", { length: 36 }),
+  filePath: varchar("file_path", { length: 512 }).notNull(),
+  sizeBytes: int("size_bytes"),
+  description: text("description").default(""),
+  createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type Backup = typeof backups.$inferSelect;

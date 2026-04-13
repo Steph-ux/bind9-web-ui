@@ -19,6 +19,9 @@ export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
   role: true,
+}).extend({
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  username: z.string().min(2, "Username must be at least 2 characters").regex(/^[a-zA-Z0-9._-]+$/, "Username contains invalid characters"),
 });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -178,3 +181,161 @@ export const insertRpzEntrySchema = createInsertSchema(rpzEntries).pick({
 });
 export type InsertRpzEntry = z.infer<typeof insertRpzEntrySchema>;
 export type RpzEntry = typeof rpzEntries.$inferSelect;
+
+// ── IP Blacklist ─────────────────────────────────────────────────
+export const ipBlacklist = pgTable("ip_blacklist", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  ip: text("ip").notNull().unique(),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  reason: text("reason", { enum: ["login_failed", "api_abuse", "brute_force", "manual"] }).notNull().default("login_failed"),
+  bannedAt: text("banned_at").notNull().$defaultFn(() => new Date().toISOString()),
+  expiresAt: text("expires_at"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type IpBlacklist = typeof ipBlacklist.$inferSelect;
+
+// ── API Tokens ──────────────────────────────────────────────────
+export const apiTokens = pgTable("api_tokens", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  tokenPrefix: text("token_prefix").notNull(),
+  permissions: text("permissions").notNull().default("*"),
+  createdBy: text("created_by").notNull(),
+  lastUsedAt: text("last_used_at"),
+  expiresAt: text("expires_at"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ApiToken = typeof apiTokens.$inferSelect;
+
+// ── User-Domain assignments (Domain Jailing) ────────────────────
+export const userDomains = pgTable("user_domains", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull(),
+  zoneId: text("zone_id").notNull(),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type UserDomain = typeof userDomains.$inferSelect;
+
+// ── Replication Servers ─────────────────────────────────────────
+export const replicationServers = pgTable("replication_servers", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  host: text("host").notNull(),
+  port: integer("port").notNull().default(22),
+  username: text("username").notNull().default("root"),
+  authType: text("auth_type", { enum: ["password", "key"] }).notNull().default("password"),
+  password: text("password").default(""),
+  privateKey: text("private_key").default(""),
+  bind9ConfDir: text("bind9_conf_dir").default("/etc/bind"),
+  bind9ZoneDir: text("bind9_zone_dir").default("/var/lib/bind"),
+  role: text("role", { enum: ["slave", "secondary"] }).notNull().default("slave"),
+  lastSyncAt: text("last_sync_at"),
+  lastSyncStatus: text("last_sync_status", { enum: ["success", "failed", "pending", "never"] }).notNull().default("never"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ReplicationServer = typeof replicationServers.$inferSelect;
+
+// ── Replication Conflicts ───────────────────────────────────────
+export const replicationConflicts = pgTable("replication_conflicts", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  zoneDomain: text("zone_domain").notNull(),
+  masterSerial: text("master_serial"),
+  slaveSerial: text("slave_serial"),
+  conflictType: text("conflict_type", { enum: ["serial_mismatch", "zone_missing", "soa_mismatch", "config_mismatch"] }).notNull(),
+  details: text("details").default(""),
+  resolved: boolean("resolved").notNull().default(false),
+  detectedAt: text("detected_at").notNull().$defaultFn(() => new Date().toISOString()),
+  resolvedAt: text("resolved_at"),
+});
+
+export type ReplicationConflict = typeof replicationConflicts.$inferSelect;
+
+// ── Replication Zone Bindings (per-zone replication control) ────
+export const replicationZoneBindings = pgTable("replication_zone_bindings", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  zoneId: text("zone_id").notNull(),
+  mode: text("mode", { enum: ["push", "pull", "both"] }).notNull().default("push"),
+  enabled: boolean("enabled").notNull().default(true),
+  lastSyncAt: text("last_sync_at"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type ReplicationZoneBinding = typeof replicationZoneBindings.$inferSelect;
+
+// ── Health Checks ──────────────────────────────────────────────
+export const healthChecks = pgTable("health_checks", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  status: text("status", { enum: ["healthy", "degraded", "down"] }).notNull(),
+  latencyMs: integer("latency_ms"),
+  details: text("details").default(""),
+  checkedAt: text("checked_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type HealthCheck = typeof healthChecks.$inferSelect;
+
+// ── Notification Channels ──────────────────────────────────────
+export const notificationChannels = pgTable("notification_channels", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["email", "webhook", "slack"] }).notNull(),
+  config: text("config").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  events: text("events").notNull().default("server_down,conflict_detected,health_degraded"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type NotificationChannel = typeof notificationChannels.$inferSelect;
+
+// ── Sync History ──────────────────────────────────────────────
+export const syncHistory = pgTable("sync_history", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  serverId: text("server_id").notNull(),
+  zoneDomain: text("zone_domain").notNull(),
+  action: text("action", { enum: ["push", "pull", "notify"] }).notNull(),
+  success: boolean("success").notNull(),
+  durationMs: integer("duration_ms"),
+  details: text("details").default(""),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type SyncHistoryEntry = typeof syncHistory.$inferSelect;
+
+// ── DNSSEC Keys ───────────────────────────────────────────────
+export const dnssecKeys = pgTable("dnssec_keys", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  zoneId: text("zone_id").notNull(),
+  keyTag: text("key_tag").notNull(),
+  keyType: text("key_type", { enum: ["KSK", "ZSK"] }).notNull(),
+  algorithm: text("algorithm").notNull().default("ECDSAP256SHA256"),
+  keySize: integer("key_size").notNull().default(256),
+  status: text("status", { enum: ["active", "published", "retired", "revoked"] }).notNull().default("active"),
+  filePath: text("file_path"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  activatedAt: text("activated_at"),
+  retiredAt: text("retired_at"),
+});
+
+export type DnssecKey = typeof dnssecKeys.$inferSelect;
+
+// ── Backups ───────────────────────────────────────────────────
+export const backups = pgTable("backups", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  type: text("type", { enum: ["auto", "manual", "snapshot"] }).notNull(),
+  scope: text("scope", { enum: ["full", "zones", "configs", "single_zone"] }).notNull(),
+  zoneId: text("zone_id"),
+  filePath: text("file_path").notNull(),
+  sizeBytes: integer("size_bytes"),
+  description: text("description").default(""),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type Backup = typeof backups.$inferSelect;
