@@ -94,6 +94,22 @@ class Bind9Service {
         return execAsync(command);
     }
 
+    /** Execute a command on a specific SSH connection by ID */
+    async execOnConnection(connectionId: string, command: string, useSudo = false): Promise<{ stdout: string; stderr: string }> {
+        let resolvedCommand = command
+            .replace(/\brndc\b/g, "/usr/sbin/rndc")
+            .replace(/\bnamed-checkconf\b/g, "/usr/sbin/named-checkconf")
+            .replace(/\bnamed\b/g, "/usr/sbin/named");
+        if (useSudo) resolvedCommand = `sudo -n ${resolvedCommand}`;
+        const result = await sshManager.execById(connectionId, resolvedCommand);
+        return { stdout: result.stdout, stderr: result.stderr };
+    }
+
+    /** Read a file on a specific SSH connection by ID */
+    async readFileOnConnection(connectionId: string, filePath: string): Promise<string> {
+        return sshManager.readFileById(connectionId, filePath);
+    }
+
     /** Read a raw file (locally or via SSH/SFTP) — public for replication */
     async readRawFile(filePath: string): Promise<string> {
         return this.readRemoteFile(filePath);

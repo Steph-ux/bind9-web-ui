@@ -18,6 +18,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 
 export default function ConnectionsPage() {
     const [connections, setConnections] = useState<ConnectionData[]>([]);
+    const [poolStatus, setPoolStatus] = useState<Record<string, { isConnected: boolean }>>({});
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [testing, setTesting] = useState<string | null>(null);
@@ -40,6 +41,15 @@ export default function ConnectionsPage() {
         try {
             const data = await getConnections();
             setConnections(data);
+            // Also fetch pool status for connected indicators
+            try {
+                const pool = await fetch("/api/connections/pool/status").then(r => r.json());
+                const statusMap: Record<string, { isConnected: boolean }> = {};
+                for (const c of pool.connections || []) {
+                    statusMap[c.id] = { isConnected: c.isConnected };
+                }
+                setPoolStatus(statusMap);
+            } catch {}
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
@@ -146,6 +156,7 @@ export default function ConnectionsPage() {
 
             <h5 className="flex items-center gap-2 mb-4 font-semibold">
                 <Server className="h-4 w-4 text-primary" /> Available Connections
+                <span className="text-muted-foreground font-normal text-sm">({connections.filter(c => poolStatus[c.id]?.isConnected).length} connected)</span>
             </h5>
 
             {connections.length === 0 ? (
@@ -160,20 +171,20 @@ export default function ConnectionsPage() {
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {connections.map((conn) => (
-                        <Card key={conn.id} className={conn.isActive ? "border-green-500" : ""}>
+                        <Card key={conn.id} className={conn.isActive ? "border-green-500" : poolStatus[conn.id]?.isConnected ? "border-blue-400" : ""}>
                             <CardContent className="p-4">
                                 <div className="flex items-start justify-between mb-3">
                                     <div className="flex items-center gap-2">
-                                        <div className={`flex h-10 w-10 items-center justify-center rounded-md ${conn.isActive ? "bg-green-500/10 text-green-600" : "bg-primary/10 text-primary"}`}>
+                                        <div className={`flex h-10 w-10 items-center justify-center rounded-md ${conn.isActive ? "bg-green-500/10 text-green-600" : poolStatus[conn.id]?.isConnected ? "bg-blue-500/10 text-blue-600" : "bg-primary/10 text-primary"}`}>
                                             <Terminal className="h-4 w-4" />
                                         </div>
                                         <div>
                                             <div className="font-bold">{conn.name}</div>
                                             <div>
-                                                <Badge variant={conn.isActive ? "default" : "secondary"}>
-                                                    {conn.isActive ? "Active" : "Idle"}
+                                                <Badge variant={conn.isActive ? "default" : poolStatus[conn.id]?.isConnected ? "outline" : "secondary"}>
+                                                    {conn.isActive ? "Active" : poolStatus[conn.id]?.isConnected ? "Connected" : "Idle"}
                                                 </Badge>
-                                                {conn.lastStatus === "failed" && (
+                                                {conn.lastStatus === "failed" && !poolStatus[conn.id]?.isConnected && (
                                                     <Badge variant="destructive" className="ml-1">Error</Badge>
                                                 )}
                                             </div>

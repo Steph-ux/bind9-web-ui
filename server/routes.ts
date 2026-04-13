@@ -1309,32 +1309,41 @@ export async function registerRoutes(
   });
 
 
-  // ── Restore active SSH connection on startup ──────────────────
+  // ── Restore SSH connections on startup ────────────────────────
   try {
-    const activeConn = await storage.getActiveConnection();
-    if (activeConn) {
-      sshManager.setConfig({
-        host: activeConn.host,
-        port: activeConn.port,
-        username: activeConn.username,
-        authType: activeConn.authType as "password" | "key",
-        password: activeConn.password || undefined,
-        privateKey: activeConn.privateKey || undefined,
+    const allConns = await storage.getConnections();
+    // Register all connections in the pool
+    for (const conn of allConns) {
+      sshManager.register(conn.id, {
+        host: conn.host,
+        port: conn.port,
+        username: conn.username,
+        authType: conn.authType as "password" | "key",
+        password: conn.password || undefined,
+        privateKey: conn.privateKey || undefined,
       });
+    }
+    // Connect all registered connections
+    for (const conn of allConns) {
+      try {
+        await sshManager.connectById(conn.id);
+        await storage.updateConnection(conn.id, { lastStatus: "connected" });
+        console.log(`[startup] SSH connection restored: ${conn.name} (${conn.host})`);
+      } catch (e: any) {
+        await storage.updateConnection(conn.id, { lastStatus: "failed" });
+        console.log(`[startup] SSH connection failed for ${conn.name}: ${e.message}`);
+      }
+    }
+    // Set the active connection for bind9-service
+    const activeConn = allConns.find(c => c.isActive);
+    if (activeConn) {
+      sshManager.setActive(activeConn.id);
       bind9Service.configure({
         mode: "ssh",
         confDir: activeConn.bind9ConfDir || undefined,
         zoneDir: activeConn.bind9ZoneDir || undefined,
         rndcBin: activeConn.rndcBin || undefined,
       });
-      try {
-        await sshManager.connect();
-        await storage.updateConnection(activeConn.id, { lastStatus: "connected" });
-        console.log(`[startup] SSH connection restored: ${activeConn.name} (${activeConn.host})`);
-      } catch (e: any) {
-        await storage.updateConnection(activeConn.id, { lastStatus: "failed" });
-        console.log(`[startup] SSH connection failed: ${e.message}`);
-      }
     }
   } catch (e: any) {
     console.log(`[startup] No active connection: ${e.message}`);
@@ -2604,10 +2613,9 @@ export async function registerRoutes(
       if (!conn) return res.status(404).json({ message: "Connection not found" });
 
       if (conn.isActive) {
-        sshManager.disconnect();
-        sshManager.setConfig(null);
         bind9Service.configure({ mode: "local" });
       }
+      sshManager.unregister(id);
 
       await storage.deleteConnection(id);
 
@@ -2701,8 +2709,8 @@ export async function registerRoutes(
       const conn = await storage.getConnection(id);
       if (!conn) return res.status(404).json({ message: "Connection not found" });
 
-      // Setup SSH
-      sshManager.setConfig({
+      // Register in pool and connect
+      sshManager.register(id, {
         host: conn.host,
         port: conn.port,
         username: conn.username,
@@ -2712,11 +2720,15 @@ export async function registerRoutes(
       });
 
       try {
-        await sshManager.connect();
+        await sshManager.connectById(id);
       } catch (e: any) {
+        sshManager.unregister(id);
         await storage.updateConnection(id, { lastStatus: "failed" });
         return res.status(502).json({ message: safeError(502, `SSH connection failed: ${e.message}`) });
       }
+
+      // Set as the active connection for bind9-service
+      sshManager.setActive(id);
 
       // Switch bind9-service to SSH mode
       bind9Service.configure({
@@ -2729,6 +2741,37 @@ export async function registerRoutes(
       // Mark as active in DB
       const activated = await storage.activateConnection(id);
       await storage.updateConnection(id, { lastStatus: "connected" });
+
+      // Sync ACLs and Keys from the newly activated connection
+      try {
+        console.log(`[connections] Syncing ACLs and Keys from ${conn.name}...`);
+        const existingAcls = await bind9Service.syncAclsFromConfig();
+        const currentDbAcls = await storage.getAcls();
+        for (const fileAcl of existingAcls) {
+          if (!currentDbAcls.find(a => a.name === fileAcl.name)) {
+            console.log(`[connections] Importing ACL '${fileAcl.name}' from ${conn.name}`);
+            await storage.createAcl({
+              name: fileAcl.name,
+              networks: fileAcl.networks,
+              comment: `Imported from ${conn.host}`
+            });
+          }
+        }
+        const existingKeys = await bind9Service.syncKeysFromConfig();
+        const currentDbKeys = await storage.getKeys();
+        for (const fileKey of existingKeys) {
+          if (!currentDbKeys.find(k => k.name === fileKey.name)) {
+            console.log(`[connections] Importing Key '${fileKey.name}' from ${conn.name}`);
+            await storage.createKey({
+              name: fileKey.name,
+              algorithm: fileKey.algorithm as any,
+              secret: fileKey.secret
+            });
+          }
+        }
+      } catch (e: any) {
+        console.log(`[connections] Failed to sync ACLs/Keys from ${conn.name}: ${e.message}`);
+      }
 
       await storage.insertLog({
         level: "INFO",
@@ -2747,11 +2790,10 @@ export async function registerRoutes(
     }
   });
 
-  /** Deactivate — switch back to local mode */
+  /** Deactivate — switch back to local mode (keeps other connections alive) */
   app.put("/api/connections/deactivate", requireAdmin, async (_req: Request, res: Response) => {
     try {
-      sshManager.disconnect();
-      sshManager.setConfig(null);
+      sshManager.setActive(null);
       bind9Service.configure({ mode: "local" });
       await storage.deactivateAllConnections();
 
@@ -2762,6 +2804,26 @@ export async function registerRoutes(
       });
 
       res.json({ message: "Switched to local mode" });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
+  /** Get SSH connection pool status */
+  app.get("/api/connections/pool/status", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const connectedIds = sshManager.getConnectedIds();
+      const activeId = sshManager.getActiveId();
+      const allConns = await storage.getConnections();
+      const poolStatus = allConns.map(c => ({
+        id: c.id,
+        name: c.name,
+        host: c.host,
+        isActive: c.id === activeId,
+        isConnected: connectedIds.includes(c.id),
+        lastStatus: c.lastStatus,
+      }));
+      res.json({ activeId, connections: poolStatus });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
