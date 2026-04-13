@@ -35,6 +35,7 @@ export const zones = mysqlTable("zones", {
   serial: varchar("serial", { length: 64 }).notNull().default(""),
   filePath: varchar("file_path", { length: 512 }).notNull().default(""),
   adminEmail: varchar("admin_email", { length: 255 }).default(""),
+  replicationEnabled: boolean("replication_enabled").notNull().default(true),
   createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: varchar("updated_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
 });

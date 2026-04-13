@@ -35,6 +35,7 @@ export const zones = pgTable("zones", {
   serial: text("serial").notNull().default(""),
   filePath: text("file_path").notNull().default(""),
   adminEmail: text("admin_email").default(""),
+  replicationEnabled: boolean("replication_enabled").notNull().default(true),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
