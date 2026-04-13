@@ -763,6 +763,220 @@ zone "${safeDomain}" {
         return validZones;
     }
 
+    // ── Advanced BIND9 Server Info ────────────────────────────────
+
+    /** Get configured forwarders from named-checkconf */
+    async getForwarders(): Promise<string[]> {
+        try {
+            const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
+            const forwarders: string[] = [];
+            let inForwarders = false;
+            for (const line of result.stdout.split("\n")) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith("forwarders")) {
+                    inForwarders = true;
+                    // May be on same line: forwarders { 8.8.8.8; 8.8.4.4; };
+                    const inlineMatch = trimmed.match(/\{([^}]+)\}/);
+                    if (inlineMatch) {
+                        for (const ip of inlineMatch[1].split(";").map(s => s.trim()).filter(Boolean)) {
+                            if (/^[\d.]+$/.test(ip) || /^\[[\da-fA-F:]+\]$/.test(ip)) forwarders.push(ip);
+                        }
+                        inForwarders = false;
+                    }
+                    continue;
+                }
+                if (inForwarders) {
+                    if (trimmed.includes("}")) {
+                        inForwarders = false;
+                        continue;
+                    }
+                    const ips = trimmed.split(";").map(s => s.trim()).filter(Boolean);
+                    for (const ip of ips) {
+                        if (/^[\d.]+$/.test(ip) || /^\[[\da-fA-F:]+\]$/.test(ip)) forwarders.push(ip);
+                    }
+                }
+            }
+            return forwarders;
+        } catch {
+            return [];
+        }
+    }
+
+    /** Get allow-recursion and allow-query ACLs from named-checkconf */
+    async getAllowRecursionQuery(): Promise<{ allowRecursion: string[]; allowQuery: string[]; allowTransfer: string[] }> {
+        try {
+            const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
+            const extractAcl = (keyword: string): string[] => {
+                const entries: string[] = [];
+                const regex = new RegExp(`${keyword}\\s+\\{([^}]+)\\}`, "g");
+                let match;
+                while ((match = regex.exec(result.stdout)) !== null) {
+                    for (const entry of match[1].split(";").map(s => s.trim()).filter(Boolean)) {
+                        entries.push(entry);
+                    }
+                }
+                // Also match: allow-recursion { any; }; or allow-recursion { none; };
+                const singleRegex = new RegExp(`${keyword}\\s+(\\S+);`, "g");
+                while ((match = singleRegex.exec(result.stdout)) !== null) {
+                    if (!entries.includes(match[1])) entries.push(match[1]);
+                }
+                return entries;
+            };
+            return {
+                allowRecursion: extractAcl("allow-recursion"),
+                allowQuery: extractAcl("allow-query"),
+                allowTransfer: extractAcl("allow-transfer"),
+            };
+        } catch {
+            return { allowRecursion: [], allowQuery: [], allowTransfer: [] };
+        }
+    }
+
+    /** Get DNSSEC signing status for zones */
+    async getDnssecStatus(): Promise<Array<{ zone: string; signed: boolean; keys: Array<{ name: string; algorithm: string; status: string }> }>> {
+        try {
+            const result = await this.execCommand(`${RNDC_BIN} signing -list 2>/dev/null`, true);
+            const zones: Array<{ zone: string; signed: boolean; keys: Array<{ name: string; algorithm: string; status: string }> }> = [];
+            const lines = result.stdout.split("\n").filter(l => l.trim());
+
+            let currentZone = "";
+            let currentSigned = false;
+            let currentKeys: Array<{ name: string; algorithm: string; status: string }> = [];
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+
+                // New zone line: "zone example.com:" or just "example.com"
+                const zoneMatch = trimmed.match(/^(?:zone\s+)?(\S+):?\s*$/);
+                // Signed/unsigned line
+                const statusMatch = trimmed.match(/^(signed|unsigned)\s*$/i);
+                // Key line: "Signed with key 12345, algorithm RSASHA256 (active)" or "key: Kexample.com.+013+12345"
+                const keyMatch = trimmed.match(/(?:Signed with |key:\s*)K?(\S+?)[,\s]+(?:algorithm\s+)?(\S+)?\s*(?:\((\w+)\))?/i);
+
+                if (zoneMatch) {
+                    // Save previous zone if any
+                    if (currentZone) {
+                        zones.push({ zone: currentZone, signed: currentSigned, keys: currentKeys });
+                    }
+                    currentZone = zoneMatch[1].replace(/:$/, "");
+                    currentSigned = false;
+                    currentKeys = [];
+                } else if (statusMatch) {
+                    currentSigned = statusMatch[1].toLowerCase() === "signed";
+                } else if (keyMatch) {
+                    currentSigned = true;
+                    currentKeys.push({
+                        name: keyMatch[1],
+                        algorithm: keyMatch[2] || "unknown",
+                        status: keyMatch[3] || "active",
+                    });
+                } else if (/key/i.test(trimmed)) {
+                    // Fallback: any line mentioning "key" implies signed
+                    currentSigned = true;
+                    const algMatch = trimmed.match(/algorithm\s+(\S+)/i);
+                    currentKeys.push({
+                        name: "key",
+                        algorithm: algMatch ? algMatch[1] : "unknown",
+                        status: "active",
+                    });
+                }
+            }
+            // Save last zone
+            if (currentZone) {
+                zones.push({ zone: currentZone, signed: currentSigned, keys: currentKeys });
+            }
+
+            // If no output from signing -list, try checking for .signed files
+            if (zones.length === 0) {
+                try {
+                    const lsResult = await this.execCommand(`ls ${BIND9_ZONE_DIR}/*.signed 2>/dev/null || echo "none"`, true);
+                    const signedFiles = lsResult.stdout.trim().split("\n").filter(f => f.endsWith(".signed") && f !== "none");
+                    for (const f of signedFiles) {
+                        const zoneName = path.basename(f, ".signed");
+                        zones.push({ zone: zoneName, signed: true, keys: [] });
+                    }
+                } catch {}
+            }
+
+            return zones;
+        } catch {
+            return [];
+        }
+    }
+
+    /** Get zone transfer status from rndc status */
+    async getZoneTransfers(): Promise<{ incoming: number; outgoing: number; details: string[] }> {
+        try {
+            const result = await this.execCommand(`${RNDC_BIN} status 2>/dev/null`, true);
+            const details: string[] = [];
+            let incoming = 0;
+            let outgoing = 0;
+
+            for (const line of result.stdout.split("\n")) {
+                const trimmed = line.trim();
+                // Parse transfer-related lines from rndc status
+                const xferInMatch = trimmed.match(/transfer\(s\) in.*?(\d+)/i);
+                if (xferInMatch) incoming = parseInt(xferInMatch[1]);
+                const xferOutMatch = trimmed.match(/transfer\(s\) out.*?(\d+)/i);
+                if (xferOutMatch) outgoing = parseInt(xferOutMatch[1]);
+
+                // Capture all transfer/xfers related lines (but not generic "xfer" in paths)
+                if (/(transfer|xfer|slave)s?\b/i.test(trimmed) && !/\/usr\/sbin/i.test(trimmed) && trimmed) {
+                    details.push(trimmed);
+                }
+            }
+
+            return { incoming, outgoing, details };
+        } catch {
+            return { incoming: 0, outgoing: 0, details: [] };
+        }
+    }
+
+    /** Get slave zones synchronization status */
+    async getSlaveZonesStatus(): Promise<Array<{ zone: string; file: string; lastModified: string | null; size: number }>> {
+        try {
+            // Find slave zones from named-checkconf -z
+            // Output may span multiple lines, so join and parse the whole output
+            const confResult = await this.execCommand(`${NAMED_CHECKCONF} -z 2>/dev/null`, true);
+            const slaveZones: Array<{ zone: string; file: string }> = [];
+
+            // Flatten output: remove newlines inside zone blocks
+            const flat = confResult.stdout.replace(/\n\s+/g, " ");
+            // Match: zone "example.com" IN { type slave; file "db.slave"; ... };
+            // or: zone example.com: type slave; file "db.slave"
+            const zoneRegex = /zone\s+"?([^"\s;]+)"?\s*(?:IN\s*)?[{:]\s*[^}]*?type\s+slave\s*;\s*file\s+"([^"]+)"\s*;/gi;
+            let match;
+            while ((match = zoneRegex.exec(flat)) !== null) {
+                slaveZones.push({ zone: match[1], file: match[2] });
+            }
+
+            // Get file status for each slave zone
+            const results: Array<{ zone: string; file: string; lastModified: string | null; size: number }> = [];
+            for (const sz of slaveZones) {
+                try {
+                    // Resolve relative path to zone dir
+                    const filePath = sz.file.startsWith("/") ? sz.file : path.posix.join(BIND9_ZONE_DIR, sz.file);
+                    const statResult = await this.execCommand(`stat -c "%Y %s" "${filePath}" 2>/dev/null || echo "0 0"`, true);
+                    const parts = statResult.stdout.trim().split(" ");
+                    const timestamp = parseInt(parts[0]) || 0;
+                    const size = parseInt(parts[1]) || 0;
+                    results.push({
+                        zone: sz.zone,
+                        file: sz.file,
+                        lastModified: timestamp > 0 ? new Date(timestamp * 1000).toISOString() : null,
+                        size,
+                    });
+                } catch {
+                    results.push({ zone: sz.zone, file: sz.file, lastModified: null, size: 0 });
+                }
+            }
+
+            return results;
+        } catch {
+            return [];
+        }
+    }
+
     /**
      * Parse named.conf.acls to extract existing ACLs.
      * Returns array of { name, networks }

@@ -2483,6 +2483,31 @@ export async function registerRoutes(
     }
   });
 
+  /** Advanced BIND9 server info — forwarders, ACLs, DNSSEC, transfers, slaves */
+  app.get("/api/server/bind-info", requireOperator, async (_req: Request, res: Response) => {
+    try {
+      const [forwarders, allowAcls, dnssec, transfers, slaveZones] = await Promise.all([
+        bind9Service.getForwarders(),
+        bind9Service.getAllowRecursionQuery(),
+        bind9Service.getDnssecStatus(),
+        bind9Service.getZoneTransfers(),
+        bind9Service.getSlaveZonesStatus(),
+      ]);
+
+      res.json({
+        forwarders,
+        allowRecursion: allowAcls.allowRecursion,
+        allowQuery: allowAcls.allowQuery,
+        allowTransfer: allowAcls.allowTransfer,
+        dnssec,
+        transfers,
+        slaveZones,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: safeError(500, error.message) });
+    }
+  });
+
   // ══════════════════════════════════════════════════════════════
   //  RNDC COMMANDS
   // ══════════════════════════════════════════════════════════════

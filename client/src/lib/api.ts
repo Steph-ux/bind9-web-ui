@@ -156,6 +156,19 @@ export interface StatusData {
 
 export const getStatus = () => request<StatusData>("/status");
 
+// ── BIND9 Advanced Info ────────────────────────────────────
+export interface BindInfoData {
+    forwarders: string[];
+    allowRecursion: string[];
+    allowQuery: string[];
+    allowTransfer: string[];
+    dnssec: Array<{ zone: string; signed: boolean; keys: Array<{ name: string; algorithm: string; status: string }> }>;
+    transfers: { incoming: number; outgoing: number; details: string[] };
+    slaveZones: Array<{ zone: string; file: string; lastModified: string | null; size: number }>;
+}
+
+export const getBindInfo = () => request<BindInfoData>("/server/bind-info");
+
 // ── rndc ───────────────────────────────────────────────────
 export const executeRndc = (command: string) =>
     request<{ command: string; output: string }>(`/rndc/${command}`, { method: "POST" });
