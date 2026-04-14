@@ -1319,6 +1319,53 @@ zone "${safeDomain}" {
         return records;
     }
 
+    /**
+     * Discover the RPZ zone name and file path from BIND9 config.
+     * Looks for "response-policy" in named-checkconf -p output, then finds
+     * the corresponding zone declaration to get the file path.
+     * Returns { zoneName, filePath } or null if no RPZ is configured.
+     */
+    async discoverRpzZone(): Promise<{ zoneName: string; filePath: string } | null> {
+        try {
+            const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
+            const output = result.stdout;
+
+            // Find response-policy zone name(s): response-policy { zone "rpz.intra"; };
+            const rpzZones: string[] = [];
+            const rpzRegex = /response-policy\s*\{([^}]+)\}/g;
+            let match;
+            while ((match = rpzRegex.exec(output)) !== null) {
+                const body = match[1];
+                const zoneRegex = /zone\s+"([^"]+)"/g;
+                let zMatch;
+                while ((zMatch = zoneRegex.exec(body)) !== null) {
+                    rpzZones.push(zMatch[1]);
+                }
+            }
+
+            if (rpzZones.length === 0) return null;
+
+            // Use the first RPZ zone found
+            const zoneName = rpzZones[0];
+
+            // Now find the zone declaration to get the file path
+            // Flatten multi-line zone blocks
+            const flat = output.replace(/\n\s+/g, " ");
+            // Match: zone "rpz.intra" IN { type master; file "db.rpz.intra"; ... };
+            const zoneDeclRegex = new RegExp(
+                `zone\\s+"${zoneName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s*(?:IN\\s*)?\\{[^}]*?file\\s+"([^"]+)"`, "i"
+            );
+            const declMatch = flat.match(zoneDeclRegex);
+            const filePath = declMatch
+                ? (declMatch[1].startsWith("/") ? declMatch[1] : path.posix.join(BIND9_ZONE_DIR, declMatch[1]))
+                : path.posix.join(BIND9_ZONE_DIR, `db.${zoneName}`);
+
+            return { zoneName, filePath };
+        } catch {
+            return null;
+        }
+    }
+
     /** Ensure named.conf.options includes response-policy */
     async ensureRpzConfigured(zoneName: string = "rpz.intra"): Promise<void> {
         try {
@@ -1361,9 +1408,9 @@ zone "${safeDomain}" {
     }
 
     /** Write RPZ zone file */
-    async writeRpzZone(zoneName: string, entries: Array<{ name: string; type: string; target?: string }>): Promise<void> {
+    async writeRpzZone(zoneName: string, entries: Array<{ name: string; type: string; target?: string }>, filePath?: string): Promise<void> {
         const safeZoneName = this.sanitizeZoneField(zoneName);
-        const filePath = path.posix.join(BIND9_ZONE_DIR, `db.${safeZoneName}`);
+        const resolvedPath = filePath || path.posix.join(BIND9_ZONE_DIR, `db.${safeZoneName}`);
         const serial = this.generateSerial();
 
         const lines: string[] = [
@@ -1404,9 +1451,8 @@ zone "${safeDomain}" {
             }
         }
 
-        await this.writeWithBackup(filePath, lines.join("\n") + "\n");
+        await this.writeWithBackup(resolvedPath, lines.join("\n") + "\n");
     }
-
 
 
     private generateZoneFile(
@@ -1542,10 +1588,10 @@ zone "${safeDomain}" {
     }
 
     /** Read and parse an existing RPZ zone file, returning structured entries */
-    async readRpzZoneFile(zoneName: string = "rpz.intra"): Promise<Array<{ name: string; type: string; target: string; comment?: string }>> {
+    async readRpzZoneFile(zoneName: string = "rpz.intra", filePath?: string): Promise<Array<{ name: string; type: string; target: string; comment?: string }>> {
         const safeZoneName = this.sanitizeZoneField(zoneName);
-        const filePath = path.posix.join(BIND9_ZONE_DIR, `db.${safeZoneName}`);
-        const content = await this.readRemoteFile(filePath);
+        const resolvedPath = filePath || path.posix.join(BIND9_ZONE_DIR, `db.${safeZoneName}`);
+        const content = await this.readRemoteFile(resolvedPath);
         const entries: Array<{ name: string; type: string; target: string; comment?: string }> = [];
 
         for (const rawLine of content.split("\n")) {

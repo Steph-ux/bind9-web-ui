@@ -29,8 +29,12 @@ function syncRpzZone(): void {
   prev.then(async () => {
     try {
       const zoneData = await storage.getRpzZoneData();
-      await bind9Service.ensureRpzConfigured();
-      await bind9Service.writeRpzZone("rpz.intra", zoneData);
+      // Discover RPZ zone name from BIND9 config (or fallback to "rpz.intra")
+      const discovered = await bind9Service.discoverRpzZone();
+      const zoneName = discovered?.zoneName || "rpz.intra";
+      const filePath = discovered?.filePath;
+      await bind9Service.ensureRpzConfigured(zoneName);
+      await bind9Service.writeRpzZone(zoneName, zoneData, filePath);
       await bind9Service.reload();
     } catch (syncErr: any) {
       console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
@@ -422,7 +426,9 @@ export async function registerRoutes(
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
       }
-      const entries = await bind9Service.readRpzZoneFile("rpz.intra");
+      const discovered = await bind9Service.discoverRpzZone();
+      const zoneName = discovered?.zoneName || "rpz.intra";
+      const entries = await bind9Service.readRpzZoneFile(zoneName, discovered?.filePath);
       res.json(entries);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
@@ -435,7 +441,9 @@ export async function registerRoutes(
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
       }
-      const zoneEntries = await bind9Service.readRpzZoneFile("rpz.intra");
+      const discovered = await bind9Service.discoverRpzZone();
+      const zoneName = discovered?.zoneName || "rpz.intra";
+      const zoneEntries = await bind9Service.readRpzZoneFile(zoneName, discovered?.filePath);
       const dbNames = await storage.getRpzExistingNames(zoneEntries.map(e => e.name));
 
       // Filter to only new, supported entries
@@ -626,8 +634,10 @@ export async function registerRoutes(
       rpzSyncLock = new Promise<void>(r => { release = r; });
       prev.then(async () => {
         try {
-          await bind9Service.ensureRpzConfigured();
-          await bind9Service.writeRpzZone("rpz.intra", []);
+          const discovered = await bind9Service.discoverRpzZone();
+          const zoneName = discovered?.zoneName || "rpz.intra";
+          await bind9Service.ensureRpzConfigured(zoneName);
+          await bind9Service.writeRpzZone(zoneName, [], discovered?.filePath);
           await bind9Service.reload();
         } catch (syncErr: any) {
           console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
