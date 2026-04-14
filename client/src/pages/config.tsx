@@ -198,7 +198,7 @@ export default function Config() {
             </Card>
           </div>
           <div className="text-end">
-            <Button variant="outline" size="sm" onClick={buildConfigFromForm}>Generate & Preview Config</Button>
+            <Button variant="outline" size="sm" onClick={() => { buildConfigFromForm(); setActiveTab("advanced"); }}>Generate & Preview Config</Button>
           </div>
         </TabsContent>
 
@@ -257,7 +257,7 @@ export default function Config() {
             </Card>
           </div>
           <div className="text-end">
-            <Button variant="outline" size="sm" onClick={buildConfigFromForm}>Generate & Preview Config</Button>
+            <Button variant="outline" size="sm" onClick={() => { buildConfigFromForm(); setActiveTab("advanced"); }}>Generate & Preview Config</Button>
           </div>
         </TabsContent>
 
