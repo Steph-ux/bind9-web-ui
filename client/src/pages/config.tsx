@@ -67,7 +67,9 @@ export default function Config() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      await saveConfig("options", optionsContent);
+      // Always rebuild config from form fields before saving
+      const content = buildConfigFromForm();
+      await saveConfig("options", content);
       setSaved(true);
       toast({ title: "Saved", description: "Configuration saved successfully" });
       setTimeout(() => setSaved(false), 3000);
