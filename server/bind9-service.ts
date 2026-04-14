@@ -123,12 +123,36 @@ class Bind9Service {
         return fsPromises.readFile(filePath, "utf-8");
     }
 
-    /** Write a file (locally or via SSH/SFTP) */
+    /** Write a file (locally or via SSH/SFTP) — tries SFTP first, falls back to sudo tee */
     private async writeRemoteFile(filePath: string, content: string): Promise<void> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
-            return sshManager.writeFile(filePath, content);
+            try {
+                await sshManager.writeFile(filePath, content);
+            } catch {
+                // SFTP failed (likely permission denied) — try via sudo tee
+                await this.writeRemoteFilePrivileged(filePath, content);
+            }
+            return;
         }
         await fsPromises.writeFile(filePath, content, "utf-8");
+    }
+
+    /** Write a file via sudo (for protected directories like /etc/bind) */
+    private async writeRemoteFilePrivileged(filePath: string, content: string): Promise<void> {
+        // Write to a temp file via SFTP (which works in user's home), then sudo cp to target
+        const tmpFile = `/tmp/bind9admin_${Date.now()}.tmp`;
+        try {
+            await sshManager.writeFile(tmpFile, content);
+            // Copy with sudo, preserving permissions of the target if it exists
+            await this.execCommand(
+                `sudo -n cp '${tmpFile}' '${filePath}' && sudo -n chown --reference='${filePath}' '${filePath}' 2>/dev/null; rm -f '${tmpFile}'`,
+                false
+            );
+        } catch (e: any) {
+            // Clean up temp file on failure
+            try { await this.execCommand(`rm -f '${tmpFile}'`, false); } catch { }
+            throw new Error(`Cannot write ${filePath}: ${e.message}`);
+        }
     }
 
     /** Write a file with non-destructive backup — preserves the original as .bak before overwriting */
