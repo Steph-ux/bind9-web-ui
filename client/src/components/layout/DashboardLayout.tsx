@@ -114,8 +114,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { label: "ACLs & Keys", icon: Shield, href: "/acls" },
     { label: "Logs", icon: Terminal, href: "/logs" },
     { label: "Server Status", icon: Server, href: "/status" },
-    { label: "Connections", icon: Plug, href: "/connections" },
   ];
+
+  if (user?.role === "admin") {
+    navItems.push({ label: "Connections", icon: Plug, href: "/connections" });
+  }
 
   if (user?.role === "admin") {
     navItems.push({ label: "Firewall", icon: ShieldCheck, href: "/firewall" });

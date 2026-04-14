@@ -1,0 +1,218 @@
+[
+  {
+    "zone": {
+      "id": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+      "domain": "5.168.192.in-addr.arpa",
+      "type": "master",
+      "status": "active",
+      "serial": "2026041214",
+      "filePath": "/var/cache/bind/zones/reverse/smam.intra",
+      "adminEmail": "",
+      "masterServers": "",
+      "forwarders": "",
+      "replicationEnabled": true,
+      "createdAt": "2026-04-11T18:15:47.392Z",
+      "updatedAt": "2026-04-14T16:42:49.660Z"
+    },
+    "records": [
+      {
+        "id": "e8753fc8-d4ed-447c-8906-c70bf0a7c185",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "11",
+        "type": "PTR",
+        "value": "debian.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "87992901-0237-4544-9de3-980b8b0c455c",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "11",
+        "type": "PTR",
+        "value": "moni.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "9c6c400a-a590-404b-a1aa-468cdab684b2",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "12",
+        "type": "PTR",
+        "value": "ns1.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "9b3837c7-74b4-4d01-8261-d8799e06a2d6",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "12",
+        "type": "PTR",
+        "value": "snowfall.smam.intra.",
+        "ttl": 3600,
+        "priority": null
+      },
+      {
+        "id": "1211bd5d-9ad0-444c-a2f7-39dbdb41860b",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "128",
+        "type": "PTR",
+        "value": "fortigate.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "8eb0759a-6fc5-4772-8ec1-52f3994d4c76",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "13",
+        "type": "PTR",
+        "value": "ns2.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "8e3b4d52-c035-4260-bb7d-48c2c33c8432",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "14",
+        "type": "PTR",
+        "value": "ntp.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "6e5dc5a8-859a-4b1f-b1ad-1d719ed4d204",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "15",
+        "type": "PTR",
+        "value": "wazuh.smam.intra.",
+        "ttl": 3600,
+        "priority": null
+      },
+      {
+        "id": "4772b700-0a15-4eb1-858e-62c702475707",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "@",
+        "type": "NS",
+        "value": "ns1.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "4171d1ec-d949-48dc-9d56-cc4277d407b6",
+        "zoneId": "b3bd7e29-13c8-4f4d-af03-21d232c0c4a1",
+        "name": "@",
+        "type": "NS",
+        "value": "ns2.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      }
+    ]
+  },
+  {
+    "zone": {
+      "id": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+      "domain": "smam.intra",
+      "type": "master",
+      "status": "active",
+      "serial": "2026041224",
+      "filePath": "/var/cache/bind/zones/forward/smam.intra",
+      "adminEmail": "",
+      "masterServers": "",
+      "forwarders": "",
+      "replicationEnabled": true,
+      "createdAt": "2026-04-11T18:15:47.033Z",
+      "updatedAt": "2026-04-14T16:42:49.304Z"
+    },
+    "records": [
+      {
+        "id": "317c3519-7c83-4cf7-b3b0-77fe25a0d844",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "@",
+        "type": "NS",
+        "value": "ns1.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "7c02f2c9-0315-4580-8e66-a310a24ee01b",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "@",
+        "type": "NS",
+        "value": "ns2.smam.intra.",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "ced4350b-519d-41e4-be5c-e2a6e7f37c5e",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "debian",
+        "type": "A",
+        "value": "192.168.5.11",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "7608d8eb-5b1d-4cf5-8b05-385c84c929cd",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "fortigate",
+        "type": "A",
+        "value": "192.168.5.128",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "3a50a10c-8d07-4410-b824-df3477d01a97",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "moni",
+        "type": "A",
+        "value": "192.168.5.11",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "b0973a3a-3b1d-46ea-8788-a61065659eca",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "ns1",
+        "type": "A",
+        "value": "192.168.5.12",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "894140e5-436f-4a89-91c3-272c2b4a5dc0",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "ns2",
+        "type": "A",
+        "value": "192.168.5.13",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "4c27094c-6015-4b8c-a9e0-70bc520a9fd9",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "ntp",
+        "type": "A",
+        "value": "192.168.5.14",
+        "ttl": 604800,
+        "priority": null
+      },
+      {
+        "id": "688d6d9c-b995-4c1c-bc9e-8c23d349ef3a",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "snowfall",
+        "type": "A",
+        "value": "192.168.5.12",
+        "ttl": 3600,
+        "priority": null
+      },
+      {
+        "id": "40b179c3-33da-4f2a-bcca-ab8e91f4e13b",
+        "zoneId": "198ad3d7-8ef0-47ac-85b8-8ab169354be7",
+        "name": "wazuh",
+        "type": "A",
+        "value": "192.168.5.15",
+        "ttl": 3600,
+        "priority": null
+      }
+    ]
+  }
+]

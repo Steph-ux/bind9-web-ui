@@ -36,7 +36,7 @@ function Router() {
       <ProtectedRoute path="/logs" component={Logs} />
       <ProtectedRoute path="/acls" component={ACLs} />
       <ProtectedRoute path="/status" component={Status} />
-      <ProtectedRoute path="/connections" component={Connections} />
+      <ProtectedRoute path="/connections" component={Connections} adminOnly />
       <ProtectedRoute path="/users" component={UsersPage} adminOnly />
       <ProtectedRoute path="/firewall" component={FirewallPage} adminOnly />
       <ProtectedRoute path="/firewall-rpz" component={FirewallDNS} adminOnly />

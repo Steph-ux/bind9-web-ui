@@ -162,6 +162,12 @@ export async function registerRoutes(
     return res.status(401).json({ message: "Unauthorized" });
   };
 
+  const requireViewer = (req: Request, res: Response, next: Function) => {
+    if (req.isAuthenticated()) return next();
+    if ((req as any).apiToken) return next();
+    return res.status(401).json({ message: "Unauthorized" });
+  };
+
   const verifySessionCookie = (cookie: string, callback: (res: boolean, code?: number, message?: string) => void) => {
     if (!cookie.includes("connect.sid")) {
       return callback(false, 4001, "Authentication required");
@@ -1560,7 +1566,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  DASHBOARD
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/dashboard", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/dashboard", requireViewer, async (_req: Request, res: Response) => {
     try {
       const allZones = await storage.getZones();
       const bind9Status = await bind9Service.getStatus();
@@ -1609,7 +1615,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  ZONES
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/zones", requireOperator, async (req: Request, res: Response) => {
+  app.get("/api/zones", requireViewer, async (req: Request, res: Response) => {
     try {
       let allZones = await storage.getZones();
       // Domain jailing: viewers only see their assigned zones
@@ -1730,7 +1736,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/zones/:id", requireOperator, async (req: Request, res: Response) => {
+  app.get("/api/zones/:id", requireViewer, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -2126,7 +2132,7 @@ export async function registerRoutes(
     }
   };
 
-  app.get("/api/zones/:id/records", requireOperator, async (req: Request, res: Response) => {
+  app.get("/api/zones/:id/records", requireViewer, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
@@ -2229,7 +2235,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  CONFIG
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/config/:section", requireOperator, async (req: Request, res: Response) => {
+  app.get("/api/config/:section", requireViewer, async (req: Request, res: Response) => {
     try {
       const section = String(req.params.section);
       // Validate section name to prevent path traversal
@@ -2352,7 +2358,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  ACLs
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/acls", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/acls", requireViewer, async (_req: Request, res: Response) => {
     try {
       res.json(await storage.getAcls());
     } catch (error: any) {
@@ -2455,7 +2461,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  TSIG KEYS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/keys", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/keys", requireViewer, async (_req: Request, res: Response) => {
     try {
       const keys = await storage.getKeys();
       // Hide secrets
@@ -2536,7 +2542,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  LOGS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/logs", requireOperator, async (req: Request, res: Response) => {
+  app.get("/api/logs", requireViewer, async (req: Request, res: Response) => {
     try {
       const filter = {
         level: req.query.level as string | undefined,
@@ -2588,7 +2594,7 @@ export async function registerRoutes(
   });
 
   /** Get only real BIND9 daemon logs */
-  app.get("/api/logs/bind9", requireOperator, async (req: Request, res: Response) => {
+  app.get("/api/logs/bind9", requireViewer, async (req: Request, res: Response) => {
     try {
       const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string) || 200, 1000) : 200;
       const logs = await bind9Service.readBind9Logs(limit);
@@ -2610,7 +2616,7 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  SERVER STATUS
   // ══════════════════════════════════════════════════════════════
-  app.get("/api/status", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/status", requireViewer, async (_req: Request, res: Response) => {
     try {
       const bind9Status = await bind9Service.getStatus();
       const metrics = await bind9Service.getSystemMetrics();
@@ -2631,7 +2637,7 @@ export async function registerRoutes(
   });
 
   /** Advanced BIND9 server info — forwarders, ACLs, DNSSEC, transfers, slaves */
-  app.get("/api/server/bind-info", requireOperator, async (_req: Request, res: Response) => {
+  app.get("/api/server/bind-info", requireViewer, async (_req: Request, res: Response) => {
     try {
       const [forwarders, allowAcls, dnssec, transfers, slaveZones] = await Promise.all([
         bind9Service.getForwarders(),
