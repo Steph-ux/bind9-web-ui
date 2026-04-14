@@ -20,6 +20,7 @@ let BIND9_CONF_DIR = process.env.BIND9_CONF_DIR || "/etc/bind";
 let BIND9_ZONE_DIR = process.env.BIND9_ZONE_DIR || "/var/cache/bind";
 let RNDC_BIN = process.env.RNDC_BIN || "rndc";
 const NAMED_CHECKCONF = process.env.NAMED_CHECKCONF || "named-checkconf";
+const NAMED_CHECKZONE = process.env.NAMED_CHECKZONE || "named-checkzone";
 
 export type ExecutionMode = "local" | "ssh";
 
@@ -77,6 +78,15 @@ class Bind9Service {
     /** Get current execution mode */
     getMode(): ExecutionMode {
         return this.mode;
+    }
+
+    getZoneDir(): string {
+        return BIND9_ZONE_DIR;
+    }
+
+    getDefaultZoneFilePath(domain: string, type: "master" | "slave" | "forward"): string {
+        if (type === "forward") return "";
+        return path.posix.join(BIND9_ZONE_DIR, `db.${domain}`);
     }
 
     /** Execute a shell command (locally or via SSH) */
@@ -277,6 +287,19 @@ class Bind9Service {
         return newSerial;
     }
 
+    async validateZoneFile(domain: string, filePath: string): Promise<void> {
+        const safeDomain = this.sanitizeZoneField(domain);
+        const safePath = filePath.replace(/["'\n\r]/g, "");
+        if (!safePath) {
+            throw new Error("Zone file path is required");
+        }
+        try {
+            await this.execCommand(`${NAMED_CHECKZONE} ${safeDomain} ${safePath}`, true);
+        } catch (error: any) {
+            throw new Error(`Zone validation failed: ${error.message}`);
+        }
+    }
+
     /** Read named.conf */
     async readNamedConf(): Promise<string> {
         try {
@@ -380,7 +403,12 @@ class Bind9Service {
     }
 
     /** Add a zone to named.conf.local */
-    async addZoneToConfig(domain: string, type: "master" | "slave" | "forward", file: string): Promise<void> {
+    async addZoneToConfig(
+        domain: string,
+        type: "master" | "slave" | "forward",
+        file: string,
+        options: { masterServers?: string[]; forwarders?: string[] } = {}
+    ): Promise<void> {
         try {
             const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
             if (!ALLOWED_ZONE_TYPES.includes(type)) throw new Error(`Invalid zone type: ${type}`);
@@ -400,12 +428,31 @@ class Bind9Service {
                 return;
             }
 
-            const newBlock = `
+            let newBlock = `
 zone "${safeDomain}" {
     type ${type};
-    file "${safeFile}";
-};
 `;
+            if (type === "master") {
+                if (!safeFile) throw new Error("Master zones require a zone file path");
+                newBlock += `    file "${safeFile}";\n`;
+            } else if (type === "slave") {
+                const masterServers = (options.masterServers || []).map((server) => server.trim()).filter(Boolean);
+                if (masterServers.length === 0) {
+                    throw new Error("Slave zones require at least one master server");
+                }
+                if (safeFile) {
+                    newBlock += `    file "${safeFile}";\n`;
+                }
+                newBlock += `    masters { ${masterServers.join("; ")}; };\n`;
+            } else if (type === "forward") {
+                const forwarders = (options.forwarders || []).map((server) => server.trim()).filter(Boolean);
+                if (forwarders.length === 0) {
+                    throw new Error("Forward zones require at least one forwarder");
+                }
+                newBlock += `    forward only;\n`;
+                newBlock += `    forwarders { ${forwarders.join("; ")}; };\n`;
+            }
+            newBlock += `};\n`;
             await this.writeWithBackup(confPath, content + newBlock);
             console.log(`[bind9] Added zone ${safeDomain} to named.conf.local`);
         } catch (error: any) {

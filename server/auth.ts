@@ -179,14 +179,15 @@ export function setupAuth(app: Express) {
     (async () => {
         const existingAdmin = await storage.getUserByUsername("admin");
         if (!existingAdmin) {
-            const hashedPassword = await hashPassword("admin");
+            const bootstrapPassword = process.env.DEFAULT_ADMIN_PASSWORD || randomBytes(9).toString("base64url");
+            const hashedPassword = await hashPassword(bootstrapPassword);
             await storage.createUser({
                 username: "admin",
                 password: hashedPassword,
                 role: "admin",
                 mustChangePassword: true,
             } as any);
-            console.log("[auth] Default admin user created (admin/admin) — CHANGE PASSWORD IMMEDIATELY");
+            console.log(`[auth] Bootstrap admin user created (admin/${bootstrapPassword}) - CHANGE PASSWORD IMMEDIATELY`);
         }
     })();
 }

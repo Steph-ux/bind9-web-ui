@@ -222,11 +222,13 @@ export class DatabaseStorage implements IStorage {
     await this.ensureDb();
     const now = new Date().toISOString();
     const serial = now.slice(0, 10).replace(/-/g, "") + "01";
+    const zoneDir = process.env.BIND9_ZONE_DIR || "/var/cache/bind";
+    const defaultFilePath = insertZone.type === "forward" ? "" : `${zoneDir}/db.${insertZone.domain}`;
     const [zone] = await db.insert(zones).values({
       ...insertZone,
       serial,
       status: "active",
-      filePath: `/var/cache/bind/db.${insertZone.domain}`,
+      filePath: defaultFilePath,
       createdAt: now,
       updatedAt: now,
     }).returning();

@@ -45,6 +45,8 @@ if (DB_TYPE === "sqlite") {
       serial TEXT NOT NULL DEFAULT '',
       file_path TEXT NOT NULL DEFAULT '',
       admin_email TEXT DEFAULT '',
+      master_servers TEXT NOT NULL DEFAULT '',
+      forwarders TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -233,6 +235,8 @@ if (DB_TYPE === "sqlite") {
   try { sqlite.exec(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Migrate: add replication_enabled column to zones
   try { sqlite.exec(`ALTER TABLE zones ADD COLUMN replication_enabled INTEGER NOT NULL DEFAULT 1`); } catch {}
+  try { sqlite.exec(`ALTER TABLE zones ADD COLUMN master_servers TEXT NOT NULL DEFAULT ''`); } catch {}
+  try { sqlite.exec(`ALTER TABLE zones ADD COLUMN forwarders TEXT NOT NULL DEFAULT ''`); } catch {}
   // Index on type for faster filtering
   try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks
@@ -267,6 +271,8 @@ if (DB_TYPE === "sqlite") {
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Migrate: add replication_enabled column to zones
   try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS replication_enabled BOOLEAN NOT NULL DEFAULT true`); } catch {}
+  try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS master_servers TEXT NOT NULL DEFAULT ''`); } catch {}
+  try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS forwarders TEXT NOT NULL DEFAULT ''`); } catch {}
   // Index on type for faster filtering
   try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks
@@ -293,6 +299,8 @@ if (DB_TYPE === "sqlite") {
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Migrate: add replication_enabled column to zones
   try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS replication_enabled BOOLEAN NOT NULL DEFAULT 1`); } catch {}
+  try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS master_servers TEXT NOT NULL DEFAULT ''`); } catch {}
+  try { await pool.query(`ALTER TABLE zones ADD COLUMN IF NOT EXISTS forwarders TEXT NOT NULL DEFAULT ''`); } catch {}
   // Index on type for faster filtering
   try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpz_entries_type ON rpz_entries(type)`); } catch {}
   // Index on name for LIKE prefix search and dedup checks

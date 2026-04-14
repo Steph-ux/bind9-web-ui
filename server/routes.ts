@@ -44,6 +44,41 @@ function syncRpzZone(): void {
   });
 }
 
+function parseServerList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isValidRemoteServer(value: string): boolean {
+  const ipv4 = value.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+  if (ipv4) {
+    return value.split(".").every((part) => Number(part) >= 0 && Number(part) <= 255);
+  }
+  return /^[a-fA-F0-9:]+$/.test(value);
+}
+
+function parseReverseZoneFromCidr(cidr: string): string {
+  const match = cidr.trim().match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+  if (!match) {
+    throw new Error("Network must be a valid IPv4 CIDR, for example 192.168.1.0/24");
+  }
+
+  const octets = match[1].split(".").map((part) => Number(part));
+  const prefix = Number(match[2]);
+  if (octets.some((part) => part < 0 || part > 255)) {
+    throw new Error("Network contains an invalid IPv4 address");
+  }
+  if (![8, 16, 24].includes(prefix)) {
+    throw new Error("Auto-reverse currently supports only /8, /16 and /24 IPv4 networks");
+  }
+
+  const octetCount = prefix / 8;
+  return octets.slice(0, octetCount).reverse().join(".") + ".in-addr.arpa";
+}
+
 /** Sanitize error messages — in production, hide internal details for 500 errors */
 function safeError(status: number, message: string): string {
   if (process.env.NODE_ENV === "production" && status >= 500) {
@@ -125,6 +160,33 @@ export async function registerRoutes(
     }
     if ((req as any).apiToken) return next(); // Token already passed requireAuth scope check
     return res.status(401).json({ message: "Unauthorized" });
+  };
+
+  const verifySessionCookie = (cookie: string, callback: (res: boolean, code?: number, message?: string) => void) => {
+    if (!cookie.includes("connect.sid")) {
+      return callback(false, 4001, "Authentication required");
+    }
+    const req = http.request({
+      hostname: "127.0.0.1",
+      port: httpServer.address() ? (httpServer.address() as any).port : 3001,
+      path: "/api/auth/me",
+      method: "GET",
+      headers: { Cookie: cookie },
+    }, (res: any) => {
+      let body = "";
+      res.on("data", (chunk: Buffer) => { body += chunk; });
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          callback(!!data.id);
+        } catch {
+          callback(false, 4001, "Authentication required");
+        }
+      });
+    });
+    req.on("error", () => callback(false, 4001, "Authentication required"));
+    req.setTimeout(3000, () => { req.destroy(); callback(false, 4001, "Auth check timeout"); });
+    req.end();
   };
 
   // Protect all API routes defined below
@@ -1693,17 +1755,48 @@ export async function registerRoutes(
 
       // Extract extra fields
       const { autoReverse, network } = req.body;
+      const masterServers = parseServerList(req.body.masterServers);
+      const forwarders = parseServerList(req.body.forwarders);
+
+      if (data.type === "slave") {
+        if (masterServers.length === 0) {
+          return res.status(400).json({ message: "Slave zones require at least one master server" });
+        }
+        if (masterServers.some((server) => !isValidRemoteServer(server))) {
+          return res.status(400).json({ message: "masterServers must contain only IPv4 or IPv6 addresses" });
+        }
+      }
+      if (data.type === "forward") {
+        if (forwarders.length === 0) {
+          return res.status(400).json({ message: "Forward zones require at least one forwarder" });
+        }
+        if (forwarders.some((server) => !isValidRemoteServer(server))) {
+          return res.status(400).json({ message: "forwarders must contain only IPv4 or IPv6 addresses" });
+        }
+      }
 
       // 1. Create the requested zone
-      const zone = await storage.createZone(data);
+      let zone = await storage.createZone({
+        ...data,
+        masterServers: masterServers.join(", "),
+        forwarders: forwarders.join(", "),
+      });
+      const expectedFilePath = bind9Service.getDefaultZoneFilePath(zone.domain, zone.type);
+      if (zone.filePath !== expectedFilePath) {
+        zone = await storage.updateZone(zone.id, { filePath: expectedFilePath });
+      }
 
       try {
         if (await bind9Service.isAvailable()) {
-          // Write empty zone file
-          await bind9Service.writeZoneFile(zone.filePath, zone.domain, [], zone.serial);
+          if (zone.type === "master" && zone.filePath) {
+            await bind9Service.writeZoneFile(zone.filePath, zone.domain, [], zone.serial);
+            await bind9Service.validateZoneFile(zone.domain, zone.filePath);
+          }
 
-          // Add to named.conf.local
-          await bind9Service.addZoneToConfig(zone.domain, zone.type, zone.filePath);
+          await bind9Service.addZoneToConfig(zone.domain, zone.type, zone.filePath, {
+            masterServers,
+            forwarders,
+          });
         }
       } catch (e: any) {
         await storage.insertLog({
@@ -1722,23 +1815,26 @@ export async function registerRoutes(
       // 2. Handle Auto-Reverse Zone
       if (autoReverse && network && zone.type === "master") {
         try {
-          // Calculate reverse domain: 192.168.1 -> 1.168.192.in-addr.arpa
-          const parts = network.split(".").filter(Boolean);
-          const reverseDomain = parts.reverse().join(".") + ".in-addr.arpa";
+          const reverseDomain = parseReverseZoneFromCidr(String(network));
 
           // Check if already exists
           const existing = await storage.getZones();
           if (!existing.find(z => z.domain === reverseDomain)) {
 
-            const reverseZone = await storage.createZone({
+            let reverseZone = await storage.createZone({
               domain: reverseDomain,
               type: "master",
               adminEmail: zone.adminEmail,
             });
+            const reverseFilePath = bind9Service.getDefaultZoneFilePath(reverseZone.domain, reverseZone.type);
+            if (reverseZone.filePath !== reverseFilePath) {
+              reverseZone = await storage.updateZone(reverseZone.id, { filePath: reverseFilePath });
+            }
 
             if (await bind9Service.isAvailable()) {
               // Write empty zone file for reverse
               await bind9Service.writeZoneFile(reverseZone.filePath, reverseZone.domain, [], reverseZone.serial);
+              await bind9Service.validateZoneFile(reverseZone.domain, reverseZone.filePath);
               // Add to named.conf.local
               await bind9Service.addZoneToConfig(reverseZone.domain, "master", reverseZone.filePath);
             }
@@ -1779,9 +1875,9 @@ export async function registerRoutes(
       if (!zone) return res.status(404).json({ message: "Zone not found" });
       // Only allow specific fields to be updated
       const allowed: Record<string, any> = {};
-      const { domain, type, status, adminEmail, filePath, replicationEnabled } = req.body;
+      const { domain, type, status, adminEmail, filePath, replicationEnabled, masterServers, forwarders } = req.body;
       const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
-      const ALLOWED_ZONE_STATUSES = ["active", "inactive"];
+      const ALLOWED_ZONE_STATUSES = ["active", "disabled", "syncing"];
       if (domain !== undefined) {
         if (!/^[a-zA-Z0-9._-]+$/.test(String(domain))) return res.status(400).json({ message: "Invalid domain name" });
         allowed.domain = String(domain);
@@ -1795,11 +1891,38 @@ export async function registerRoutes(
         allowed.status = String(status);
       }
       if (adminEmail !== undefined) allowed.adminEmail = String(adminEmail);
+      if (masterServers !== undefined) {
+        const parsed = parseServerList(String(masterServers));
+        if (parsed.some((server) => !isValidRemoteServer(server))) {
+          return res.status(400).json({ message: "masterServers must contain only IPv4 or IPv6 addresses" });
+        }
+        allowed.masterServers = parsed.join(", ");
+      }
+      if (forwarders !== undefined) {
+        const parsed = parseServerList(String(forwarders));
+        if (parsed.some((server) => !isValidRemoteServer(server))) {
+          return res.status(400).json({ message: "forwarders must contain only IPv4 or IPv6 addresses" });
+        }
+        allowed.forwarders = parsed.join(", ");
+      }
       if (filePath !== undefined) {
         if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(filePath))) return res.status(400).json({ message: "Invalid file path" });
         allowed.filePath = String(filePath);
       }
       if (replicationEnabled !== undefined) allowed.replicationEnabled = Boolean(replicationEnabled);
+      const nextType = String(type ?? zone.type);
+      const nextDomain = String(domain ?? zone.domain);
+      if (type !== undefined && filePath === undefined) {
+        allowed.filePath = bind9Service.getDefaultZoneFilePath(nextDomain, nextType as "master" | "slave" | "forward");
+      }
+      const nextMasters = parseServerList(String(allowed.masterServers ?? zone.masterServers ?? ""));
+      const nextForwarders = parseServerList(String(allowed.forwarders ?? zone.forwarders ?? ""));
+      if (nextType === "slave" && nextMasters.length === 0) {
+        return res.status(400).json({ message: "Slave zones require at least one master server" });
+      }
+      if (nextType === "forward" && nextForwarders.length === 0) {
+        return res.status(400).json({ message: "Forward zones require at least one forwarder" });
+      }
       const updated = await storage.updateZone(id, allowed);
       res.json(updated);
     } catch (error: any) {
@@ -1844,6 +1967,7 @@ export async function registerRoutes(
     try {
       const zone = await storage.getZone(zoneId);
       if (!zone || !zone.filePath) return;
+      if (zone.type !== "master") return;
 
       const records = await storage.getRecords(zoneId);
       const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
@@ -1869,6 +1993,7 @@ export async function registerRoutes(
         serial,
         { adminEmail: zone.adminEmail || undefined }
       );
+      await bind9Service.validateZoneFile(zone.domain, zone.filePath);
 
       // Reload zone
       // Validate domain before passing to rndc to prevent command injection
@@ -2018,6 +2143,7 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
+      if (zone.type !== "master") return res.status(400).json({ message: "Records can only be edited on master zones" });
 
       const data = insertDnsRecordSchema.parse({ ...req.body, zoneId: id });
       const record = await storage.createRecord(data);
@@ -2048,6 +2174,9 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
+      const zone = await storage.getZone(record.zoneId);
+      if (!zone) return res.status(404).json({ message: "Zone not found" });
+      if (zone.type !== "master") return res.status(400).json({ message: "Records can only be edited on master zones" });
       // Only allow specific fields to be updated
       const allowed: Record<string, any> = {};
       const { name, type, value, ttl, priority } = req.body;
@@ -2079,6 +2208,9 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const record = await storage.getRecord(id);
       if (!record) return res.status(404).json({ message: "Record not found" });
+      const zone = await storage.getZone(record.zoneId);
+      if (!zone) return res.status(404).json({ message: "Zone not found" });
+      if (zone.type !== "master") return res.status(400).json({ message: "Records can only be edited on master zones" });
 
       await storage.deleteRecord(id);
 
@@ -2896,34 +3028,8 @@ export async function registerRoutes(
     server: httpServer,
     path: "/ws/logs",
     verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
-      // WS upgrade requests bypass Express middleware, so we verify
-      // the session cookie by making an internal HTTP request
       const cookie = info.req.headers?.cookie || "";
-      if (!cookie.includes("connect.sid")) {
-        return callback(false, 4001, "Authentication required");
-      }
-      // Verify session by making an internal request to /api/auth/me
-      const req = http.request({
-        hostname: "127.0.0.1",
-        port: httpServer.address() ? (httpServer.address() as any).port : 3001,
-        path: "/api/auth/me",
-        method: "GET",
-        headers: { Cookie: cookie },
-      }, (res: any) => {
-        let body = "";
-        res.on("data", (chunk: Buffer) => { body += chunk; });
-        res.on("end", () => {
-          try {
-            const data = JSON.parse(body);
-            callback(!!data.id);
-          } catch {
-            callback(false, 4001, "Authentication required");
-          }
-        });
-      });
-      req.on("error", () => callback(false, 4001, "Authentication required"));
-      req.setTimeout(3000, () => { req.destroy(); callback(false, 4001, "Auth check timeout"); });
-      req.end();
+      verifySessionCookie(cookie, callback);
     },
   });
 
@@ -2945,9 +3051,8 @@ export async function registerRoutes(
     path: "/ws/replication",
     verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
       // Same auth as log WS — cookie-based
-      const cookie = info.req.headers.cookie || "";
-      const sessionMatch = cookie.match(/connect\.sid=([^;]+)/);
-      callback(!!sessionMatch);
+      const cookie = info.req.headers?.cookie || "";
+      verifySessionCookie(cookie, callback);
     },
   });
 

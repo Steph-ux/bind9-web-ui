@@ -204,10 +204,10 @@ npm run db:push
 # 4 — Lancer
 npm run dev
 
-# 5 — Ouvrir http://localhost:3001  →  admin / admin
+# 5 — Ouvrir http://localhost:3001
 ```
 
-> **Première connexion** : identifiants `admin` / `admin` — vous serez invité à changer le mot de passe.
+> **Première connexion** : un compte bootstrap `admin` est créé au démarrage. Le mot de passe est affiché dans les logs serveur, ou peut être fixé via `DEFAULT_ADMIN_PASSWORD`. Vous serez invité à le changer immédiatement.
 
 ---
 
@@ -263,18 +263,15 @@ npm start
 
 ### 7. Première connexion
 
-Lors du premier lancement, un utilisateur administrateur est créé automatiquement :
+Lors du premier lancement, un utilisateur administrateur bootstrap est créé automatiquement :
 
 - **URL** : http://localhost:3001
 - **Utilisateur** : `admin`
-- **Mot de passe** : `admin`
+- **Mot de passe** : valeur de `DEFAULT_ADMIN_PASSWORD`, ou mot de passe aléatoire affiché dans les logs serveur
 
 > ⚠️ Vous serez automatiquement redirigé vers la page de changement de mot de passe.
 
-> **Note :** Si la connexion échoue, vous pouvez réinitialiser le mot de passe administrateur en exécutant le script de secours :
-> ```bash
-> npx tsx fix-admin.ts
-> ```
+> **Note :** Si vous voulez un mot de passe prévisible en environnement local, définissez `DEFAULT_ADMIN_PASSWORD` avant le démarrage.
 ---
 
 ## Configuration

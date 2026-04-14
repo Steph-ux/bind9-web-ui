@@ -35,6 +35,8 @@ export const zones = mysqlTable("zones", {
   serial: varchar("serial", { length: 64 }).notNull().default(""),
   filePath: varchar("file_path", { length: 512 }).notNull().default(""),
   adminEmail: varchar("admin_email", { length: 255 }).default(""),
+  masterServers: text("master_servers").notNull().default(""),
+  forwarders: text("forwarders").notNull().default(""),
   replicationEnabled: boolean("replication_enabled").notNull().default(true),
   createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: varchar("updated_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
@@ -44,6 +46,8 @@ export const insertZoneSchema = createInsertSchema(zones).pick({
   domain: true,
   type: true,
   adminEmail: true,
+  masterServers: true,
+  forwarders: true,
 });
 export type InsertZone = z.infer<typeof insertZoneSchema>;
 export type Zone = typeof zones.$inferSelect;
@@ -53,7 +57,7 @@ export const dnsRecords = mysqlTable("dns_records", {
   id: varchar("id", { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   zoneId: varchar("zone_id", { length: 36 }).notNull().references(() => zones.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 255 }).notNull(),
-  type: mysqlEnum("type", ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV"]).notNull(),
+  type: mysqlEnum("type", ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV", "CAA", "TLSA", "DS", "DNSKEY"]).notNull(),
   value: text("value").notNull(),
   ttl: int("ttl").notNull().default(3600),
   priority: int("priority"),

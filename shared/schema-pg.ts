@@ -35,6 +35,8 @@ export const zones = pgTable("zones", {
   serial: text("serial").notNull().default(""),
   filePath: text("file_path").notNull().default(""),
   adminEmail: text("admin_email").default(""),
+  masterServers: text("master_servers").notNull().default(""),
+  forwarders: text("forwarders").notNull().default(""),
   replicationEnabled: boolean("replication_enabled").notNull().default(true),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -44,6 +46,8 @@ export const insertZoneSchema = createInsertSchema(zones).pick({
   domain: true,
   type: true,
   adminEmail: true,
+  masterServers: true,
+  forwarders: true,
 });
 export type InsertZone = z.infer<typeof insertZoneSchema>;
 export type Zone = typeof zones.$inferSelect;
@@ -53,7 +57,7 @@ export const dnsRecords = pgTable("dns_records", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   zoneId: text("zone_id").notNull().references(() => zones.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  type: text("type", { enum: ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV"] }).notNull(),
+  type: text("type", { enum: ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV", "CAA", "TLSA", "DS", "DNSKEY"] }).notNull(),
   value: text("value").notNull(),
   ttl: integer("ttl").notNull().default(3600),
   priority: integer("priority"),

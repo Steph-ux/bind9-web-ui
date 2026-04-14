@@ -27,6 +27,8 @@ export default function Zones() {
   const [newDomain, setNewDomain] = useState("");
   const [newType, setNewType] = useState("master");
   const [newAdmin, setNewAdmin] = useState("");
+  const [newMasterServers, setNewMasterServers] = useState("");
+  const [newForwarders, setNewForwarders] = useState("");
   const [autoReverse, setAutoReverse] = useState(false);
   const [network, setNetwork] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -63,6 +65,8 @@ export default function Zones() {
         domain: newDomain.trim(),
         type: newType,
         adminEmail: newAdmin.trim() || undefined,
+        masterServers: newType === "slave" ? newMasterServers.trim() : undefined,
+        forwarders: newType === "forward" ? newForwarders.trim() : undefined,
         autoReverse: newType === "master" ? autoReverse : undefined,
         network: newType === "master" && autoReverse ? network.trim() : undefined
       });
@@ -71,6 +75,8 @@ export default function Zones() {
       setNewDomain("");
       setNewType("master");
       setNewAdmin("");
+      setNewMasterServers("");
+      setNewForwarders("");
       setAutoReverse(false);
       setNetwork("");
       fetchZones();
@@ -200,7 +206,7 @@ export default function Zones() {
                           <Badge variant="outline" className="mt-1 uppercase text-xs">{zone.type}</Badge>
                         </div>
                       </div>
-                      {canManageDNS && (
+                      {canManageDNS && zone.type === "master" && (
                         <div className="flex gap-1">
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setLocation(`/zones/${zone.id}`)} title="Edit Records">
                             <FileEdit className="h-3.5 w-3.5 text-primary" />
@@ -246,7 +252,7 @@ export default function Zones() {
                           </button>
                         )}
                       </div>
-                      {canManageDNS && (
+                      {canManageDNS && zone.type === "master" && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -306,9 +312,11 @@ export default function Zones() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
+                            {zone.type === "master" && (
+                              <DropdownMenuItem className="gap-2" onClick={() => setLocation(`/zones/${zone.id}`)}>
                               <FileEdit className="h-4 w-4" /> Edit Records
-                            </DropdownMenuItem>
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteTarget(zone)}>
                               <Trash2 className="h-4 w-4" /> Delete Zone
                             </DropdownMenuItem>
@@ -352,6 +360,30 @@ export default function Zones() {
               <Label htmlFor="admin">Admin Email</Label>
               <Input id="admin" placeholder="admin.example.com" value={newAdmin} onChange={(e) => setNewAdmin(e.target.value)} />
             </div>
+            {newType === "slave" && (
+              <div className="grid gap-2">
+                <Label htmlFor="masters">Master Servers</Label>
+                <Input
+                  id="masters"
+                  placeholder="192.168.1.10, 192.168.1.11"
+                  value={newMasterServers}
+                  onChange={(e) => setNewMasterServers(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Comma-separated IP addresses used in the BIND `masters` clause.</p>
+              </div>
+            )}
+            {newType === "forward" && (
+              <div className="grid gap-2">
+                <Label htmlFor="forwarders">Forwarders</Label>
+                <Input
+                  id="forwarders"
+                  placeholder="1.1.1.1, 8.8.8.8"
+                  value={newForwarders}
+                  onChange={(e) => setNewForwarders(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Comma-separated IP addresses used in the BIND `forwarders` clause.</p>
+              </div>
+            )}
             {newType === "master" && (
               <div className="flex items-center gap-2">
                 <Checkbox id="autoReverse" checked={autoReverse} onCheckedChange={(v) => setAutoReverse(!!v)} />
