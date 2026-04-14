@@ -2105,20 +2105,25 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid section name" });
       }
 
-      let content = "";
-      try {
-        if (await bind9Service.isAvailable()) {
-          if (section === "options") {
-            content = await bind9Service.readNamedConfOptions();
-          } else {
-            content = await bind9Service.readNamedConf();
-          }
-        }
-      } catch { }
+      // Prefer DB content (user's last save) — it's the source of truth
+      // Only fall back to BIND9 file if DB has no snapshot for this section
+      const snapshot = await storage.getConfig(section as string);
+      let content = snapshot?.content || "";
 
       if (!content) {
-        const snapshot = await storage.getConfig(section as string);
-        content = snapshot?.content || getDefaultConfig(section as string);
+        try {
+          if (await bind9Service.isAvailable()) {
+            if (section === "options") {
+              content = await bind9Service.readNamedConfOptions();
+            } else {
+              content = await bind9Service.readNamedConf();
+            }
+          }
+        } catch { }
+      }
+
+      if (!content) {
+        content = getDefaultConfig(section as string);
       }
 
       res.json({ section, content });
