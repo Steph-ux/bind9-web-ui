@@ -40,9 +40,48 @@ export interface SystemMetrics {
     interfaces: Array<{ name: string; ip: string; rx: string; tx: string }>;
 }
 
+export interface Bind9ConfigIncludes {
+    namedConfLocalIncluded: boolean;
+    namedConfAclsIncluded: boolean;
+    namedConfKeysIncluded: boolean;
+}
+
+export interface Bind9ZoneLayout {
+    strategy: "flat" | "split";
+    forwardDir: string | null;
+    reverseDir: string | null;
+}
+
+export interface Bind9ManagementSummary {
+    mode: ExecutionMode;
+    available: boolean;
+    includes: Bind9ConfigIncludes;
+    zoneLayout: Bind9ZoneLayout;
+    writablePaths: {
+        namedConfLocal: boolean;
+        namedConfOptions: boolean;
+        namedConfAcls: boolean;
+        namedConfKeys: boolean;
+    };
+    rpz: {
+        configured: boolean;
+        zoneName: string | null;
+        filePath: string | null;
+        writable: boolean;
+    };
+    features: {
+        zones: boolean;
+        acls: boolean;
+        keys: boolean;
+        rpz: boolean;
+    };
+}
+
 class Bind9Service {
     private available: boolean | null = null;
     private mode: ExecutionMode = "local";
+    private sudoAllowedCommands: Set<string> | null = null;
+    private managementSummaryCache: Bind9ManagementSummary | null = null;
 
     /** Set execution mode and paths */
     configure(config: {
@@ -72,6 +111,8 @@ class Bind9Service {
         }
         // Reset availability cache when config changes
         this.available = null;
+        this.sudoAllowedCommands = null;
+        this.managementSummaryCache = null;
         console.log(`[bind9] Mode: ${this.mode}, confDir: ${BIND9_CONF_DIR}, zoneDir: ${BIND9_ZONE_DIR}`);
     }
 
@@ -87,6 +128,191 @@ class Bind9Service {
     getDefaultZoneFilePath(domain: string, type: "master" | "slave" | "forward"): string {
         if (type === "forward") return "";
         return path.posix.join(BIND9_ZONE_DIR, `db.${domain}`);
+    }
+
+    private quoteShellArg(value: string): string {
+        return `'${value.replace(/'/g, `'\\''`)}'`;
+    }
+
+    private async getSudoAllowedCommands(): Promise<Set<string>> {
+        if (this.mode !== "ssh" || !sshManager.isConfigured()) {
+            return new Set();
+        }
+        if (this.sudoAllowedCommands) {
+            return this.sudoAllowedCommands;
+        }
+
+        const allowed = new Set<string>();
+        try {
+            const result = await sshManager.exec("sudo -n -l 2>/dev/null || true");
+            const output = `${result.stdout}\n${result.stderr}`;
+            const commandRegex = /\/[A-Za-z0-9._/-]+/g;
+            let match: RegExpExecArray | null;
+            while ((match = commandRegex.exec(output)) !== null) {
+                allowed.add(match[0]);
+            }
+        } catch {
+            // Ignore; lack of sudo listing simply means no privileged file write fallback.
+        }
+
+        this.sudoAllowedCommands = allowed;
+        return allowed;
+    }
+
+    private async getPrivilegedCopyCommand(): Promise<string | null> {
+        const allowed = await this.getSudoAllowedCommands();
+        const candidates = ["/bin/cp", "/usr/bin/cp"];
+        return candidates.find((cmd) => allowed.has(cmd)) || null;
+    }
+
+    async canWritePath(filePath: string): Promise<boolean> {
+        if (!filePath) return false;
+
+        if (this.mode === "ssh" && sshManager.isConfigured()) {
+            const quoted = this.quoteShellArg(filePath);
+            try {
+                const result = await sshManager.exec(
+                    `TARGET=${quoted}; if [ -e "$TARGET" ]; then [ -w "$TARGET" ] && echo yes || echo no; else PARENT=$(dirname "$TARGET"); [ -w "$PARENT" ] && echo yes || echo no; fi`
+                );
+                if (result.stdout.trim() === "yes") {
+                    return true;
+                }
+            } catch {
+                // Fall back to sudo capability check below.
+            }
+
+            return (await this.getPrivilegedCopyCommand()) !== null;
+        }
+
+        try {
+            await fsPromises.access(filePath, fs.constants.W_OK);
+            return true;
+        } catch {
+            try {
+                await fsPromises.access(path.posix.dirname(filePath), fs.constants.W_OK);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+    }
+
+    async assertWritablePath(filePath: string, purpose: string): Promise<void> {
+        if (await this.canWritePath(filePath)) {
+            return;
+        }
+
+        const location = this.mode === "ssh" ? "over SSH" : "locally";
+        throw new Error(`Cannot ${purpose}: ${filePath} is not writable ${location}`);
+    }
+
+    async getConfigIncludes(): Promise<Bind9ConfigIncludes> {
+        try {
+            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
+            const content = await this.readRemoteFile(confPath);
+            return {
+                namedConfLocalIncluded: content.includes("named.conf.local"),
+                namedConfAclsIncluded: content.includes("named.conf.acls"),
+                namedConfKeysIncluded: content.includes("named.conf.keys"),
+            };
+        } catch {
+            return {
+                namedConfLocalIncluded: false,
+                namedConfAclsIncluded: false,
+                namedConfKeysIncluded: false,
+            };
+        }
+    }
+
+    async detectZoneLayout(): Promise<Bind9ZoneLayout> {
+        try {
+            const zones = await this.syncZonesFromConfig();
+            const forwardZone = zones.find((zone) => zone.filePath && !zone.domain.endsWith(".arpa"));
+            const reverseZone = zones.find((zone) => zone.filePath && zone.domain.endsWith(".arpa"));
+            const forwardDir = forwardZone?.filePath ? path.posix.dirname(forwardZone.filePath) : null;
+            const reverseDir = reverseZone?.filePath ? path.posix.dirname(reverseZone.filePath) : null;
+
+            return {
+                strategy: forwardDir && reverseDir && forwardDir !== reverseDir ? "split" : "flat",
+                forwardDir,
+                reverseDir,
+            };
+        } catch {
+            return {
+                strategy: "flat",
+                forwardDir: null,
+                reverseDir: null,
+            };
+        }
+    }
+
+    async getPreferredZoneFilePath(
+        domain: string,
+        type: "master" | "slave" | "forward",
+        options: { hintBaseName?: string } = {}
+    ): Promise<string> {
+        if (type === "forward") return "";
+
+        const layout = await this.detectZoneLayout();
+        const isReverseZone = domain.endsWith(".arpa");
+        const fallbackDir = isReverseZone && layout.strategy === "split"
+            ? path.posix.join(BIND9_ZONE_DIR, "reverse")
+            : !isReverseZone && layout.strategy === "split"
+                ? path.posix.join(BIND9_ZONE_DIR, "forward")
+                : BIND9_ZONE_DIR;
+
+        const targetDir = isReverseZone
+            ? (layout.reverseDir || fallbackDir)
+            : (layout.forwardDir || fallbackDir);
+
+        const baseName = options.hintBaseName?.trim() || domain;
+        return path.posix.join(targetDir, baseName);
+    }
+
+    async getManagementSummary(): Promise<Bind9ManagementSummary> {
+        if (this.managementSummaryCache) {
+            return this.managementSummaryCache;
+        }
+
+        const includes = await this.getConfigIncludes();
+        const zoneLayout = await this.detectZoneLayout();
+        const rpz = await this.discoverRpzZone();
+        const namedConfLocal = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
+        const namedConfOptions = path.posix.join(BIND9_CONF_DIR, "named.conf.options");
+        const namedConfAcls = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
+        const namedConfKeys = path.posix.join(BIND9_CONF_DIR, "named.conf.keys");
+        const writablePaths = {
+            namedConfLocal: await this.canWritePath(namedConfLocal),
+            namedConfOptions: await this.canWritePath(namedConfOptions),
+            namedConfAcls: await this.canWritePath(namedConfAcls),
+            namedConfKeys: await this.canWritePath(namedConfKeys),
+        };
+        const rpzWritable = rpz
+            ? await this.canWritePath(rpz.filePath)
+            : writablePaths.namedConfOptions && includes.namedConfLocalIncluded && writablePaths.namedConfLocal;
+
+        const summary: Bind9ManagementSummary = {
+            mode: this.mode,
+            available: await this.isAvailable(),
+            includes,
+            zoneLayout,
+            writablePaths,
+            rpz: {
+                configured: Boolean(rpz),
+                zoneName: rpz?.zoneName || null,
+                filePath: rpz?.filePath || null,
+                writable: rpzWritable,
+            },
+            features: {
+                zones: includes.namedConfLocalIncluded && writablePaths.namedConfLocal,
+                acls: includes.namedConfAclsIncluded && writablePaths.namedConfAcls,
+                keys: includes.namedConfKeysIncluded && writablePaths.namedConfKeys,
+                rpz: rpzWritable,
+            },
+        };
+
+        this.managementSummaryCache = summary;
+        return summary;
     }
 
     /** Execute a shell command (locally or via SSH) */
@@ -142,25 +368,31 @@ class Bind9Service {
                 // SFTP failed (likely permission denied) — try via sudo tee
                 await this.writeRemoteFilePrivileged(filePath, content);
             }
+            this.managementSummaryCache = null;
             return;
         }
         await fsPromises.writeFile(filePath, content, "utf-8");
+        this.managementSummaryCache = null;
     }
 
     /** Write a file via sudo (for protected directories like /etc/bind) */
     private async writeRemoteFilePrivileged(filePath: string, content: string): Promise<void> {
         // Write to a temp file via SFTP (which works in user's home), then sudo cp to target
         const tmpFile = `/tmp/bind9admin_${Date.now()}.tmp`;
+        const privilegedCopy = await this.getPrivilegedCopyCommand();
+        if (!privilegedCopy) {
+            throw new Error(`Cannot write ${filePath}: sudo file copy is not permitted for the active SSH user`);
+        }
         try {
             await sshManager.writeFile(tmpFile, content);
             // Copy with sudo, preserving permissions of the target if it exists
             await this.execCommand(
-                `sudo -n cp '${tmpFile}' '${filePath}' && sudo -n chown --reference='${filePath}' '${filePath}' 2>/dev/null; rm -f '${tmpFile}'`,
+                `sudo -n ${privilegedCopy} ${this.quoteShellArg(tmpFile)} ${this.quoteShellArg(filePath)} && rm -f ${this.quoteShellArg(tmpFile)}`,
                 false
             );
         } catch (e: any) {
             // Clean up temp file on failure
-            try { await this.execCommand(`rm -f '${tmpFile}'`, false); } catch { }
+            try { await this.execCommand(`rm -f ${this.quoteShellArg(tmpFile)}`, false); } catch { }
             throw new Error(`Cannot write ${filePath}: ${e.message}`);
         }
     }

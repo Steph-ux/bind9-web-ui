@@ -38,13 +38,13 @@ export default function ReplicationPage() {
   const [formPassword, setFormPassword] = useState("");
   const [formKey, setFormKey] = useState("");
   const [formConfDir, setFormConfDir] = useState("/etc/bind");
-  const [formZoneDir, setFormZoneDir] = useState("/var/lib/bind");
+  const [formZoneDir, setFormZoneDir] = useState("");
   const [formRole, setFormRole] = useState<"slave" | "secondary">("slave");
 
   const resetForm = () => {
     setFormName(""); setFormHost(""); setFormPort("22"); setFormUsername("root");
     setFormAuthType("password"); setFormPassword(""); setFormKey("");
-    setFormConfDir("/etc/bind"); setFormZoneDir("/var/lib/bind"); setFormRole("slave");
+    setFormConfDir("/etc/bind"); setFormZoneDir(""); setFormRole("slave");
   };
 
   const { data: servers, isLoading } = useQuery<ReplicationServerEntry[]>({
@@ -219,7 +219,7 @@ export default function ReplicationPage() {
     setFormUsername(s.username); setFormAuthType(s.authType);
     setFormPassword(""); setFormKey("");
     setFormConfDir(s.bind9ConfDir || "/etc/bind");
-    setFormZoneDir(s.bind9ZoneDir || "/var/lib/bind");
+    setFormZoneDir(s.bind9ZoneDir || "");
     setFormRole(s.role);
     setEditTarget(s);
   };
@@ -522,7 +522,7 @@ export default function ReplicationPage() {
                 if (formPassword) data.password = formPassword;
                 if (formKey) data.privateKey = formKey;
                 if (formConfDir !== (editTarget.bind9ConfDir || "/etc/bind")) data.bind9ConfDir = formConfDir;
-                if (formZoneDir !== (editTarget.bind9ZoneDir || "/var/lib/bind")) data.bind9ZoneDir = formZoneDir;
+                if (formZoneDir !== (editTarget.bind9ZoneDir || "")) data.bind9ZoneDir = formZoneDir;
                 if (formRole !== editTarget.role) data.role = formRole;
                 updateMutation.mutate({ id: editTarget.id, data });
               }}

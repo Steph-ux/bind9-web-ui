@@ -22,26 +22,56 @@ import { insertUserSchema } from "@shared/schema";
 
 // Async mutex to prevent concurrent BIND9 zone writes (race condition)
 let rpzSyncLock = Promise.resolve();
-function syncRpzZone(): void {
+async function syncRpzZone(): Promise<void> {
   const prev = rpzSyncLock;
   let release: () => void;
   rpzSyncLock = new Promise<void>(r => { release = r; });
-  prev.then(async () => {
-    try {
-      const zoneData = await storage.getRpzZoneData();
-      // Discover RPZ zone name from BIND9 config (or fallback to "rpz.intra")
-      const discovered = await bind9Service.discoverRpzZone();
-      const zoneName = discovered?.zoneName || "rpz.intra";
-      const filePath = discovered?.filePath;
-      await bind9Service.ensureRpzConfigured(zoneName);
-      await bind9Service.writeRpzZone(zoneName, zoneData, filePath);
-      await bind9Service.reload();
-    } catch (syncErr: any) {
-      console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-    } finally {
-      release!();
+  await prev;
+  try {
+    const summary = await bind9Service.getManagementSummary();
+    if (!summary.available) {
+      throw new Error("BIND9 is not available");
     }
-  });
+
+    const zoneData = await storage.getRpzZoneData();
+    const discovered = await bind9Service.discoverRpzZone();
+    const zoneName = discovered?.zoneName || "rpz.intra";
+
+    if (!discovered) {
+      if (!summary.writablePaths.namedConfOptions || !summary.includes.namedConfLocalIncluded || !summary.writablePaths.namedConfLocal) {
+        throw new Error("RPZ is not configured and the active server connection cannot update named.conf.options and named.conf.local");
+      }
+    } else {
+      await bind9Service.assertWritablePath(discovered.filePath, "write the RPZ zone file");
+    }
+
+    await bind9Service.ensureRpzConfigured(zoneName);
+    const resolved = await bind9Service.discoverRpzZone();
+    const filePath = resolved?.filePath || discovered?.filePath;
+    if (!filePath) {
+      throw new Error("Unable to resolve the RPZ zone file path");
+    }
+
+    await bind9Service.assertWritablePath(filePath, "write the RPZ zone file");
+    await bind9Service.writeRpzZone(zoneName, zoneData, filePath);
+    await bind9Service.reload();
+  } finally {
+    release!();
+  }
+}
+
+async function restoreRpzSnapshot(snapshot: Array<{ name: string; type: string; target: string | null; comment: string | null }>): Promise<void> {
+  await storage.clearRpzEntries();
+  if (snapshot.length === 0) {
+    return;
+  }
+
+  await storage.createRpzEntriesBatch(snapshot.map((entry) => ({
+    name: entry.name,
+    type: entry.type as any,
+    target: entry.target || "",
+    comment: entry.comment || "",
+  })));
 }
 
 function parseServerList(value: string | undefined): string[] {
@@ -458,12 +488,17 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Comment contains invalid characters" });
       }
 
-      // Create in DB
+      const snapshot = await storage.getRpzEntries();
       const entry = await storage.createRpzEntry(data);
 
-      // Sync to BIND9 (background — respond first, mutex-serialized)
+      try {
+        await syncRpzZone();
+      } catch (syncErr: any) {
+        await restoreRpzSnapshot(snapshot);
+        return res.status(500).json({ message: `RPZ update failed, the application state was restored: ${syncErr.message}` });
+      }
+
       res.json(entry);
-      syncRpzZone();
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid data", errors: error.errors });
@@ -475,14 +510,20 @@ export async function registerRoutes(
   app.delete("/api/rpz/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
+      const snapshot = await storage.getRpzEntries();
       const deleted = await storage.deleteRpzEntry(id);
       if (!deleted) {
         return res.status(404).json({ message: "Entry not found" });
       }
 
-      // Sync to BIND9 (background — respond first, mutex-serialized)
+      try {
+        await syncRpzZone();
+      } catch (syncErr: any) {
+        await restoreRpzSnapshot(snapshot);
+        return res.status(500).json({ message: `RPZ update failed, the application state was restored: ${syncErr.message}` });
+      }
+
       res.json({ message: "Entry deleted" });
-      syncRpzZone();
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -509,6 +550,7 @@ export async function registerRoutes(
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
       }
+      const snapshot = await storage.getRpzEntries();
       const discovered = await bind9Service.discoverRpzZone();
       const zoneName = discovered?.zoneName || "rpz.intra";
       const zoneEntries = await bind9Service.readRpzZoneFile(zoneName, discovered?.filePath);
@@ -531,11 +573,14 @@ export async function registerRoutes(
         ? await storage.createRpzEntriesBatch(entriesToInsert)
         : 0;
 
-      // Respond first, then sync BIND9 in background
-      res.json({ message: `Synced ${imported} entries, ${skipped} skipped`, imported, skipped });
+      try {
+        await syncRpzZone();
+      } catch (syncErr: any) {
+        await restoreRpzSnapshot(snapshot);
+        return res.status(500).json({ message: `RPZ sync failed, the application state was restored: ${syncErr.message}` });
+      }
 
-      // Background: re-sync zone file from DB (mutex-serialized)
-      syncRpzZone();
+      res.json({ message: `Synced ${imported} entries, ${skipped} skipped`, imported, skipped });
 
       await storage.insertLog({
         level: "INFO",
@@ -567,6 +612,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: `Too many entries (${parsed.length}), maximum 1000000 per import` });
       }
 
+      const snapshot = await storage.getRpzEntries();
       // Filter out duplicates against existing DB entries (only fetch names, not full rows)
       const dbNames = await storage.getRpzExistingNames(parsed.map(e => e.name));
       const newEntries = parsed.filter(e => !dbNames.has(e.name));
@@ -583,16 +629,19 @@ export async function registerRoutes(
         ? await storage.createRpzEntriesBatch(entriesToInsert)
         : 0;
 
-      // Sync to BIND9 (non-blocking — respond first, sync in background)
+      try {
+        await syncRpzZone();
+      } catch (syncErr: any) {
+        await restoreRpzSnapshot(snapshot);
+        return res.status(500).json({ message: `RPZ import failed, the application state was restored: ${syncErr.message}` });
+      }
+
       res.json({
         message: `Imported ${imported} entries, ${duplicates} duplicates skipped`,
         total: parsed.length,
         imported,
         duplicates,
       });
-
-      // Background sync to BIND9 zone file (mutex-serialized)
-      syncRpzZone();
 
       await storage.insertLog({
         level: "INFO",
@@ -650,6 +699,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: `Too many entries (${parsed.length}), maximum 1000000 per import` });
       }
 
+      const snapshot = await storage.getRpzEntries();
       // Filter out duplicates against existing DB entries (only fetch names, not full rows)
       const dbNames = await storage.getRpzExistingNames(parsed.map(e => e.name));
       const newEntries = parsed.filter(e => !dbNames.has(e.name));
@@ -666,16 +716,19 @@ export async function registerRoutes(
         ? await storage.createRpzEntriesBatch(entriesToInsert)
         : 0;
 
-      // Respond first, then sync to BIND9 in background
+      try {
+        await syncRpzZone();
+      } catch (syncErr: any) {
+        await restoreRpzSnapshot(snapshot);
+        return res.status(500).json({ message: `RPZ import failed, the application state was restored: ${syncErr.message}` });
+      }
+
       res.json({
         message: `Imported ${imported} entries, ${duplicates} duplicates skipped`,
         total: parsed.length,
         imported,
         duplicates,
       });
-
-      // Background sync to BIND9 zone file (mutex-serialized)
-      syncRpzZone();
 
       await storage.insertLog({
         level: "INFO",
@@ -690,35 +743,25 @@ export async function registerRoutes(
   /** Clear all RPZ entries */
   app.delete("/api/rpz", requireAdmin, async (_req: Request, res: Response) => {
     try {
+      const snapshot = await storage.getRpzEntries();
       const stats = await storage.getRpzStats();
       const count = stats.total;
       await storage.clearRpzEntries();
 
-      // Respond first, then sync BIND9 empty zone in background (mutex-serialized)
-      res.json({ message: `All ${count} RPZ entries cleared` });
-
-      const prev = rpzSyncLock;
-      let release: () => void;
-      rpzSyncLock = new Promise<void>(r => { release = r; });
-      prev.then(async () => {
-        try {
-          const discovered = await bind9Service.discoverRpzZone();
-          const zoneName = discovered?.zoneName || "rpz.intra";
-          await bind9Service.ensureRpzConfigured(zoneName);
-          await bind9Service.writeRpzZone(zoneName, [], discovered?.filePath);
-          await bind9Service.reload();
-        } catch (syncErr: any) {
-          console.error(`[rpz] Background BIND9 sync failed: ${syncErr.message}`);
-        } finally {
-          release!();
-        }
-      });
+      try {
+        await syncRpzZone();
+      } catch (syncErr: any) {
+        await restoreRpzSnapshot(snapshot);
+        return res.status(500).json({ message: `RPZ clear failed, the application state was restored: ${syncErr.message}` });
+      }
 
       await storage.insertLog({
         level: "WARN",
         source: "rpz",
         message: `All RPZ entries cleared (${count} removed)`,
       });
+
+      res.json({ message: `All ${count} RPZ entries cleared` });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -907,7 +950,7 @@ export async function registerRoutes(
         password: password ? String(password) : "",
         privateKey: privateKey ? String(privateKey) : "",
         bind9ConfDir: bind9ConfDir || "/etc/bind",
-        bind9ZoneDir: bind9ZoneDir || "/var/lib/bind",
+        bind9ZoneDir: bind9ZoneDir || "",
         role: role === "secondary" ? "secondary" : "slave",
         enabled: enabled !== false,
       });
@@ -1447,11 +1490,7 @@ export async function registerRoutes(
         }
       }
 
-      // 2. Write back to ensuring loose consistency
-      const allAcls = await storage.getAcls();
-      await bind9Service.writeAclsConf(allAcls);
-
-      // 3. Import existing Keys from file (recursively) if DB is empty or missing them
+      // 2. Import existing Keys from file (recursively) if DB is empty or missing them
       const existingKeys = await bind9Service.syncKeysFromConfig();
       const currentDbKeys = await storage.getKeys();
 
@@ -1466,12 +1505,7 @@ export async function registerRoutes(
         }
       }
 
-      // 4. Write back keys
-      const allKeys = await storage.getKeys();
-      await bind9Service.writeKeysConf(allKeys);
-      await bind9Service.ensureConfigIncludes();
-      await bind9Service.rndc("reconfig");
-      console.log("[startup] ACLs and Keys synced");
+      console.log("[startup] ACLs and Keys imported from BIND9 without rewriting server config");
     }
   } catch (e: any) {
     console.log(`[startup] Failed to sync ACLs/Keys: ${e.message}`);
@@ -1781,42 +1815,43 @@ export async function registerRoutes(
         }
       }
 
-      // 1. Create the requested zone
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.zones) {
+        return res.status(409).json({ message: "This server connection cannot manage zones because named.conf.local is not included or not writable" });
+      }
+
+      const expectedFilePath = await bind9Service.getPreferredZoneFilePath(data.domain, data.type as "master" | "slave" | "forward");
+      if (data.type === "master" && expectedFilePath) {
+        await bind9Service.assertWritablePath(expectedFilePath, `create zone file for ${data.domain}`);
+        const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") + "01";
+        await bind9Service.writeZoneFile(expectedFilePath, data.domain, [], serial, { adminEmail: data.adminEmail || undefined });
+        await bind9Service.validateZoneFile(data.domain, expectedFilePath);
+      }
+
+      await bind9Service.addZoneToConfig(data.domain, data.type as "master" | "slave" | "forward", expectedFilePath, {
+        masterServers,
+        forwarders,
+      });
+
+      await storage.insertLog({
+        level: "INFO",
+        source: "zones",
+        message: `Zone ${data.domain} created (type: ${data.type})`,
+      });
+
+      // 1. Create the requested zone in the app only after BIND9 accepted it
       let zone = await storage.createZone({
         ...data,
         masterServers: masterServers.join(", "),
         forwarders: forwarders.join(", "),
       });
-      const expectedFilePath = bind9Service.getDefaultZoneFilePath(zone.domain, zone.type);
       if (zone.filePath !== expectedFilePath) {
         zone = await storage.updateZone(zone.id, { filePath: expectedFilePath });
       }
-
-      try {
-        if (await bind9Service.isAvailable()) {
-          if (zone.type === "master" && zone.filePath) {
-            await bind9Service.writeZoneFile(zone.filePath, zone.domain, [], zone.serial);
-            await bind9Service.validateZoneFile(zone.domain, zone.filePath);
-          }
-
-          await bind9Service.addZoneToConfig(zone.domain, zone.type, zone.filePath, {
-            masterServers,
-            forwarders,
-          });
-        }
-      } catch (e: any) {
-        await storage.insertLog({
-          level: "WARN",
-          source: "zones",
-          message: `Zone ${zone.domain} created in DB but BIND9 sync failed: ${e.message}`,
-        });
-      }
-
-      await storage.insertLog({
-        level: "INFO",
-        source: "zones",
-        message: `Zone ${zone.domain} created (type: ${zone.type})`,
-      });
 
       // 2. Handle Auto-Reverse Zone
       if (autoReverse && network && zone.type === "master") {
@@ -1827,22 +1862,22 @@ export async function registerRoutes(
           const existing = await storage.getZones();
           if (!existing.find(z => z.domain === reverseDomain)) {
 
+            const reverseFilePath = await bind9Service.getPreferredZoneFilePath(reverseDomain, "master", {
+              hintBaseName: path.posix.basename(zone.filePath || zone.domain),
+            });
+            await bind9Service.assertWritablePath(reverseFilePath, `create reverse zone file for ${reverseDomain}`);
+            const reverseSerial = new Date().toISOString().slice(0, 10).replace(/-/g, "") + "01";
+            await bind9Service.writeZoneFile(reverseFilePath, reverseDomain, [], reverseSerial, { adminEmail: zone.adminEmail || undefined });
+            await bind9Service.validateZoneFile(reverseDomain, reverseFilePath);
+            await bind9Service.addZoneToConfig(reverseDomain, "master", reverseFilePath);
+
             let reverseZone = await storage.createZone({
               domain: reverseDomain,
               type: "master",
               adminEmail: zone.adminEmail,
             });
-            const reverseFilePath = bind9Service.getDefaultZoneFilePath(reverseZone.domain, reverseZone.type);
             if (reverseZone.filePath !== reverseFilePath) {
               reverseZone = await storage.updateZone(reverseZone.id, { filePath: reverseFilePath });
-            }
-
-            if (await bind9Service.isAvailable()) {
-              // Write empty zone file for reverse
-              await bind9Service.writeZoneFile(reverseZone.filePath, reverseZone.domain, [], reverseZone.serial);
-              await bind9Service.validateZoneFile(reverseZone.domain, reverseZone.filePath);
-              // Add to named.conf.local
-              await bind9Service.addZoneToConfig(reverseZone.domain, "master", reverseZone.filePath);
             }
 
             await storage.insertLog({
@@ -1861,9 +1896,7 @@ export async function registerRoutes(
       }
 
       // Reload BIND9 once at the end
-      if (await bind9Service.isAvailable()) {
-        await bind9Service.reload();
-      }
+      await bind9Service.reload();
 
       res.status(201).json(zone);
     } catch (error: any) {
@@ -1884,6 +1917,11 @@ export async function registerRoutes(
       const { domain, type, status, adminEmail, filePath, replicationEnabled, masterServers, forwarders } = req.body;
       const ALLOWED_ZONE_TYPES = ["master", "slave", "forward"];
       const ALLOWED_ZONE_STATUSES = ["active", "disabled", "syncing"];
+      if ([domain, type, filePath, masterServers, forwarders].some((value) => value !== undefined)) {
+        return res.status(409).json({
+          message: "Structural zone edits are disabled here. Update BIND9 first, then resync from the server.",
+        });
+      }
       if (domain !== undefined) {
         if (!/^[a-zA-Z0-9._-]+$/.test(String(domain))) return res.status(400).json({ message: "Invalid domain name" });
         allowed.domain = String(domain);
@@ -1941,18 +1979,24 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const zone = await storage.getZone(id);
       if (!zone) return res.status(404).json({ message: "Zone not found" });
-      await storage.deleteZone(id);
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.zones) {
+        return res.status(409).json({ message: "This server connection cannot manage zones because named.conf.local is not included or not writable" });
+      }
 
-      // Remove from named.conf.local
+      // Keep the app DB unchanged if the BIND9 update fails.
       try {
-        if (await bind9Service.isAvailable()) {
-          await bind9Service.removeZoneFromConfig(zone.domain);
-          await bind9Service.reload();
-        }
+        await bind9Service.removeZoneFromConfig(zone.domain);
+        await bind9Service.reload();
       } catch (e: any) {
         console.error(`[api] Failed to remove zone from config: ${e.message}`);
-        return res.status(500).json({ message: `Zone removed from database but BIND9 config update failed: ${e.message}` });
+        return res.status(500).json({ message: `BIND9 config update failed, zone was not removed from the application database: ${e.message}` });
       }
+
+      await storage.deleteZone(id);
 
       await storage.insertLog({
         level: "WARN",
@@ -1969,63 +2013,89 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   //  DNS RECORDS
   // ══════════════════════════════════════════════════════════════
-  // Helper to write zone changes to disk and reload
-  const syncZoneFile = async (zoneId: string) => {
-    try {
-      const zone = await storage.getZone(zoneId);
-      if (!zone || !zone.filePath) return;
-      if (zone.type !== "master") return;
+  const toBindZoneRecords = (records: Array<{ name: string; type: string; value: string; ttl: number; priority: number | null }>) =>
+    records.map((record) => ({
+      name: record.name,
+      type: record.type,
+      value: record.value,
+      ttl: record.ttl,
+      priority: record.priority || undefined,
+    }));
 
-      const records = await storage.getRecords(zoneId);
-      const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
-        String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
-
-      // Update serial in DB
-      await storage.updateZone(zone.id, { serial });
-
-      // Build record list for bind9 service
-      const zoneRecords = records.map(r => ({
-        name: r.name,
-        type: r.type,
-        value: r.value,
-        ttl: r.ttl,
-        priority: r.priority || undefined,
-      }));
-
-      // Write file
-      await bind9Service.writeZoneFile(
-        zone.filePath,
-        zone.domain,
-        zoneRecords,
-        serial,
-        { adminEmail: zone.adminEmail || undefined }
-      );
-      await bind9Service.validateZoneFile(zone.domain, zone.filePath);
-
-      // Reload zone
-      // Validate domain before passing to rndc to prevent command injection
-      if (!/^[a-zA-Z0-9._-]+$/.test(zone.domain)) {
-        console.error(`[bind9] Invalid zone domain for rndc reload: ${zone.domain}`);
-        return;
-      }
-      await bind9Service.rndc(`reload ${zone.domain}`);
-      console.log(`[bind9] Zone ${zone.domain} updated and reloaded`);
-
-      // Auto-notify replication servers (skip if replication disabled for this zone)
-      if (zone.replicationEnabled !== false) {
-        try {
-          const replServers = await storage.getReplicationServers();
-          if (replServers.some(s => s.enabled)) {
-            await replicationService.notifyZone(zone.domain);
-          }
-        } catch (replErr: any) {
-          console.error(`[replication] Auto-notify failed for ${zone.domain}: ${replErr.message}`);
-        }
-      }
-    } catch (error: any) {
-      console.error(`[bind9] Failed to sync zone file: ${error.message}`);
-      // Don't throw, just log. The DB is updated.
+  const writeZoneState = async (
+    zone: { id: string; domain: string; type: string; filePath: string; adminEmail: string | null; replicationEnabled: boolean | null },
+    records: Array<{ name: string; type: string; value: string; ttl: number; priority: number | null }>
+  ) => {
+    if (!zone.filePath) {
+      throw new Error(`Zone ${zone.domain} does not have a file path`);
     }
+    if (zone.type !== "master") {
+      throw new Error(`Zone ${zone.domain} is not a master zone`);
+    }
+
+    await bind9Service.assertWritablePath(zone.filePath, `write zone file for ${zone.domain}`);
+    const serial = new Date().toISOString().slice(0, 10).replace(/-/g, "") +
+      String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
+
+    await bind9Service.writeZoneFile(
+      zone.filePath,
+      zone.domain,
+      toBindZoneRecords(records),
+      serial,
+      { adminEmail: zone.adminEmail || undefined }
+    );
+    await bind9Service.validateZoneFile(zone.domain, zone.filePath);
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(zone.domain)) {
+      throw new Error(`Invalid zone domain for rndc reload: ${zone.domain}`);
+    }
+
+    await bind9Service.rndc(`reload ${zone.domain}`);
+
+    if (zone.replicationEnabled !== false) {
+      try {
+        const replServers = await storage.getReplicationServers();
+        if (replServers.some(s => s.enabled)) {
+          await replicationService.notifyZone(zone.domain);
+        }
+      } catch (replErr: any) {
+        console.error(`[replication] Auto-notify failed for ${zone.domain}: ${replErr.message}`);
+      }
+    }
+
+    return serial;
+  };
+
+  const syncZoneDbFromFile = async (zoneId: string, filePath: string, serial: string) => {
+    const currentRecords = await storage.getRecords(zoneId);
+    for (const current of currentRecords) {
+      await storage.deleteRecord(current.id);
+    }
+
+    const parsedRecords = await bind9Service.readZoneFile(filePath);
+    for (const record of parsedRecords) {
+      if (record.type === "SOA") continue;
+      await storage.createRecord({
+        zoneId,
+        name: record.name,
+        type: record.type as any,
+        value: record.value,
+        ttl: record.ttl,
+        priority: record.priority,
+      });
+    }
+
+    await storage.updateZone(zoneId, { serial });
+  };
+
+  // Helper to write zone changes to disk and then re-import what BIND actually uses.
+  const syncZoneFile = async (zoneId: string) => {
+    const zone = await storage.getZone(zoneId);
+    if (!zone || !zone.filePath || zone.type !== "master") return;
+
+    const records = await storage.getRecords(zoneId);
+    const serial = await writeZoneState(zone, records);
+    await syncZoneDbFromFile(zone.id, zone.filePath, serial);
   };
 
   /**
@@ -2090,14 +2160,12 @@ export async function registerRoutes(
         // Check specific PTR
         const exists = existingRecords.find(r => r.name === ptrName && r.value === ptrValue && r.type === "PTR");
         if (!exists) {
-          await storage.createRecord({
-            zoneId: targetZone.id,
-            name: ptrName,
-            type: "PTR",
-            value: ptrValue,
-            ttl: 3600,
-          });
-          await syncZoneFile(targetZone.id);
+          const nextRecords = [
+            ...existingRecords,
+            { id: "__new__", zoneId: targetZone.id, name: ptrName, type: "PTR", value: ptrValue, ttl: 3600, priority: null },
+          ];
+          const serial = await writeZoneState(targetZone as any, nextRecords);
+          await syncZoneDbFromFile(targetZone.id, targetZone.filePath, serial);
         } else {
           console.log(`[auto-reverse] PTR ${ptrName} -> ${ptrValue} already exists. Skipping.`);
         }
@@ -2116,15 +2184,19 @@ export async function registerRoutes(
 
           const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR" && r.value === oldPtrValue);
           if (targetRecord) {
-            await storage.updateRecord(targetRecord.id, { value: ptrValue });
-            await syncZoneFile(targetZone.id);
+            const nextRecords = existingRecords.map((existing) =>
+              existing.id === targetRecord.id ? { ...existing, value: ptrValue } : existing
+            );
+            const serial = await writeZoneState(targetZone as any, nextRecords);
+            await syncZoneDbFromFile(targetZone.id, targetZone.filePath, serial);
           }
         }
       } else if (action === "delete") {
         const targetRecord = existingRecords.find(r => r.name === ptrName && r.type === "PTR" && r.value === ptrValue);
         if (targetRecord) {
-          await storage.deleteRecord(targetRecord.id);
-          await syncZoneFile(targetZone.id);
+          const nextRecords = existingRecords.filter((existing) => existing.id !== targetRecord.id);
+          const serial = await writeZoneState(targetZone as any, nextRecords);
+          await syncZoneDbFromFile(targetZone.id, targetZone.filePath, serial);
         }
       }
 
@@ -2153,17 +2225,39 @@ export async function registerRoutes(
       if (zone.type !== "master") return res.status(400).json({ message: "Records can only be edited on master zones" });
 
       const data = insertDnsRecordSchema.parse({ ...req.body, zoneId: id });
-      const record = await storage.createRecord(data);
+      const currentRecords = await storage.getRecords(id);
+      const nextRecords = [
+        ...currentRecords,
+        {
+          id: "__new__",
+          zoneId: id,
+          name: data.name,
+          type: data.type,
+          value: data.value,
+          ttl: data.ttl ?? 3600,
+          priority: data.priority ?? null,
+        },
+      ];
+
+      const serial = await writeZoneState(zone, nextRecords);
+      await syncZoneDbFromFile(id, zone.filePath, serial);
+      const syncedRecords = await storage.getRecords(id);
+      const record = syncedRecords.find((item) =>
+        item.name === data.name &&
+        item.type === data.type &&
+        item.value === data.value &&
+        item.ttl === (data.ttl ?? 3600) &&
+        (item.priority ?? null) === (data.priority ?? null)
+      );
+      if (!record) {
+        throw new Error(`Record ${data.name} ${data.type} could not be reloaded from BIND9`);
+      }
 
       await storage.insertLog({
         level: "INFO",
         source: "records",
         message: `Record ${record.name} ${record.type} ${record.value} added to ${zone.domain}`,
       });
-
-      // Sync changes to disk
-      await syncZoneFile(id);
-
       // Auto-update reverse DNS
       await updateReverseRecord("create", record);
 
@@ -2196,10 +2290,24 @@ export async function registerRoutes(
       if (value !== undefined) allowed.value = String(value);
       if (ttl !== undefined) allowed.ttl = parseInt(ttl, 10) || 3600;
       if (priority !== undefined) allowed.priority = parseInt(priority, 10) || null;
-      const updated = await storage.updateRecord(id, allowed);
-
-      // Sync changes to disk
-      await syncZoneFile(record.zoneId);
+      const proposed = { ...record, ...allowed };
+      const currentRecords = await storage.getRecords(record.zoneId);
+      const nextRecords = currentRecords.map((existing) =>
+        existing.id === record.id ? { ...existing, ...proposed } : existing
+      );
+      const serial = await writeZoneState(zone as any, nextRecords);
+      await syncZoneDbFromFile(record.zoneId, zone.filePath, serial);
+      const syncedRecords = await storage.getRecords(record.zoneId);
+      const updated = syncedRecords.find((item) =>
+        item.name === proposed.name &&
+        item.type === proposed.type &&
+        item.value === proposed.value &&
+        item.ttl === proposed.ttl &&
+        (item.priority ?? null) === (proposed.priority ?? null)
+      );
+      if (!updated) {
+        throw new Error(`Record ${proposed.name} ${proposed.type} could not be reloaded from BIND9`);
+      }
 
       // Auto-update reverse DNS
       await updateReverseRecord("update", updated, record);
@@ -2219,10 +2327,10 @@ export async function registerRoutes(
       if (!zone) return res.status(404).json({ message: "Zone not found" });
       if (zone.type !== "master") return res.status(400).json({ message: "Records can only be edited on master zones" });
 
-      await storage.deleteRecord(id);
-
-      // Sync changes to disk
-      await syncZoneFile(record.zoneId);
+      const currentRecords = await storage.getRecords(record.zoneId);
+      const nextRecords = currentRecords.filter((existing) => existing.id !== id);
+      const serial = await writeZoneState(zone, nextRecords);
+      await syncZoneDbFromFile(record.zoneId, zone.filePath, serial);
 
       // Auto-update reverse DNS
       await updateReverseRecord("delete", record);
@@ -2285,21 +2393,15 @@ export async function registerRoutes(
         return res.status(400).json({ message: "content is required" });
       }
 
-      const snapshot = await storage.saveConfig(section, content);
-
-      try {
-        if (await bind9Service.isAvailable()) {
-          await bind9Service.writeNamedConf(section, content);
-          await bind9Service.reload();
-        }
-      } catch (e: any) {
-        await storage.insertLog({
-          level: "WARN",
-          source: "config",
-          message: `Config saved to DB but BIND9 sync failed: ${e.message}`,
-        });
-        return res.status(500).json({ message: `Config saved to database but BIND9 sync failed: ${e.message}` });
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
       }
+
+      const configPath = path.posix.join(process.env.BIND9_CONF_DIR || "/etc/bind", `named.conf.${section}`);
+      await bind9Service.assertWritablePath(configPath, `write named.conf.${section}`);
+      await bind9Service.writeNamedConf(section, content);
+      await bind9Service.reload();
+      const snapshot = await storage.saveConfig(section, content);
 
       await storage.insertLog({
         level: "INFO",
@@ -2332,7 +2434,7 @@ export async function registerRoutes(
         return res.status(503).json({ message: "BIND9 is not available" });
       }
       const BIND9_CONF_DIR = process.env.BIND9_CONF_DIR || "/etc/bind";
-      const BIND9_ZONE_DIR = process.env.BIND9_ZONE_DIR || "/var/lib/bind";
+      const BIND9_ZONE_DIR = bind9Service.getZoneDir() || process.env.BIND9_ZONE_DIR || "/var/cache/bind";
       // Determine path: zone files in zone dir, config files in conf dir
       const isZone = file.startsWith("db.");
       const filePath = isZone
@@ -2372,6 +2474,16 @@ export async function registerRoutes(
   app.post("/api/acls", requireOperator, async (req: Request, res: Response) => {
     try {
       const data = insertAclSchema.parse(req.body);
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.acls) {
+        return res.status(409).json({ message: "ACL management is disabled because named.conf.acls is not included or not writable on this server" });
+      }
+      const existingAcls = await storage.getAcls();
+      await bind9Service.writeAclsConf([...existingAcls, data]);
+      await bind9Service.rndc("reconfig");
       const acl = await storage.createAcl(data);
 
       await storage.insertLog({
@@ -2379,17 +2491,6 @@ export async function registerRoutes(
         source: "security",
         message: `ACL '${acl.name}' created with networks: ${acl.networks}`,
       });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
-      }
 
       res.status(201).json(acl);
     } catch (error: any) {
@@ -2411,18 +2512,18 @@ export async function registerRoutes(
       if (name !== undefined) allowed.name = String(name);
       if (networks !== undefined) allowed.networks = String(networks);
       if (comment !== undefined) allowed.comment = String(comment);
-      const updated = await storage.updateAcl(id, allowed);
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
       }
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.acls) {
+        return res.status(409).json({ message: "ACL management is disabled because named.conf.acls is not included or not writable on this server" });
+      }
+      const currentAcls = await storage.getAcls();
+      const nextAcl = { ...acl, ...allowed };
+      await bind9Service.writeAclsConf(currentAcls.map((item) => item.id === id ? nextAcl : item));
+      await bind9Service.rndc("reconfig");
+      const updated = await storage.updateAcl(id, allowed);
 
       res.json(updated);
     } catch (error: any) {
@@ -2435,6 +2536,16 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const acl = await storage.getAcl(id);
       if (!acl) return res.status(404).json({ message: "ACL not found" });
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.acls) {
+        return res.status(409).json({ message: "ACL management is disabled because named.conf.acls is not included or not writable on this server" });
+      }
+      const currentAcls = await storage.getAcls();
+      await bind9Service.writeAclsConf(currentAcls.filter((item) => item.id !== id));
+      await bind9Service.rndc("reconfig");
       await storage.deleteAcl(id);
 
       await storage.insertLog({
@@ -2442,18 +2553,6 @@ export async function registerRoutes(
         source: "security",
         message: `ACL '${acl.name}' deleted`,
       });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allAcls = await storage.getAcls();
-          await bind9Service.writeAclsConf(allAcls);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync ACLs: ${e.message}`);
-      }
-
       res.json({ message: "ACL deleted" });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
@@ -2480,7 +2579,21 @@ export async function registerRoutes(
 
   app.post("/api/keys", requireOperator, async (req: Request, res: Response) => {
     try {
-      const data = insertTsigKeySchema.parse(req.body);
+      const parsed = insertTsigKeySchema.parse(req.body);
+      const data = {
+        ...parsed,
+        algorithm: parsed.algorithm || "hmac-sha256",
+      };
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.keys) {
+        return res.status(409).json({ message: "TSIG key management is disabled because named.conf.keys is not included or not writable on this server" });
+      }
+      const existingKeys = await storage.getKeys();
+      await bind9Service.writeKeysConf([...existingKeys, data]);
+      await bind9Service.rndc("reconfig");
       const key = await storage.createKey(data);
 
       await storage.insertLog({
@@ -2488,18 +2601,6 @@ export async function registerRoutes(
         source: "security",
         message: `TSIG key '${key.name}' created`,
       });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allKeys = await storage.getKeys();
-          await bind9Service.writeKeysConf(allKeys);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync Keys: ${e.message}`);
-      }
-
       res.status(201).json({
         ...key,
         secret: key.secret.slice(0, 5) + "...[hidden]",
@@ -2517,6 +2618,16 @@ export async function registerRoutes(
       const id = req.params.id as string;
       const key = await storage.getKey(id);
       if (!key) return res.status(404).json({ message: "Key not found" });
+      if (!(await bind9Service.isAvailable())) {
+        return res.status(503).json({ message: "BIND9 is not available" });
+      }
+      const management = await bind9Service.getManagementSummary();
+      if (!management.features.keys) {
+        return res.status(409).json({ message: "TSIG key management is disabled because named.conf.keys is not included or not writable on this server" });
+      }
+      const currentKeys = await storage.getKeys();
+      await bind9Service.writeKeysConf(currentKeys.filter((item) => item.id !== id));
+      await bind9Service.rndc("reconfig");
       await storage.deleteKey(id);
 
       await storage.insertLog({
@@ -2524,18 +2635,6 @@ export async function registerRoutes(
         source: "security",
         message: `TSIG key '${key.name}' deleted`,
       });
-
-      // Sync to BIND9
-      try {
-        if (await bind9Service.isAvailable()) {
-          const allKeys = await storage.getKeys();
-          await bind9Service.writeKeysConf(allKeys);
-          await bind9Service.rndc("reconfig");
-        }
-      } catch (e: any) {
-        console.error(`[bind9] Failed to sync Keys: ${e.message}`);
-      }
-
       res.json({ message: "Key deleted" });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
@@ -2621,7 +2720,10 @@ export async function registerRoutes(
   // ══════════════════════════════════════════════════════════════
   app.get("/api/status", requireViewer, async (_req: Request, res: Response) => {
     try {
-      const bind9Status = await bind9Service.getStatus();
+      const [bind9Status, management] = await Promise.all([
+        bind9Service.getStatus(),
+        bind9Service.getManagementSummary(),
+      ]);
       const metrics = await bind9Service.getSystemMetrics();
       const uptime = await bind9Service.getUptime();
       const hostname = await bind9Service.getHostname();
@@ -2633,6 +2735,7 @@ export async function registerRoutes(
         hostname,
         connectionMode: bind9Service.getMode(),
         sshState: sshManager.getState(),
+        management,
       });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
@@ -2642,12 +2745,13 @@ export async function registerRoutes(
   /** Advanced BIND9 server info — forwarders, ACLs, DNSSEC, transfers, slaves */
   app.get("/api/server/bind-info", requireViewer, async (_req: Request, res: Response) => {
     try {
-      const [forwarders, allowAcls, dnssec, transfers, slaveZones] = await Promise.all([
+      const [forwarders, allowAcls, dnssec, transfers, slaveZones, management] = await Promise.all([
         bind9Service.getForwarders(),
         bind9Service.getAllowRecursionQuery(),
         bind9Service.getDnssecStatus(),
         bind9Service.getZoneTransfers(),
         bind9Service.getSlaveZonesStatus(),
+        bind9Service.getManagementSummary(),
       ]);
 
       res.json({
@@ -2658,6 +2762,7 @@ export async function registerRoutes(
         dnssec,
         transfers,
         slaveZones,
+        management,
       });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });

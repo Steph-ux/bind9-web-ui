@@ -162,6 +162,40 @@ export interface StatusData {
     };
     uptime: string;
     hostname: string;
+    connectionMode?: string;
+    sshState?: { configured: boolean; connected: boolean; host: string | null };
+    management?: {
+        mode: string;
+        available: boolean;
+        includes: {
+            namedConfLocalIncluded: boolean;
+            namedConfAclsIncluded: boolean;
+            namedConfKeysIncluded: boolean;
+        };
+        zoneLayout: {
+            strategy: "flat" | "split";
+            forwardDir: string | null;
+            reverseDir: string | null;
+        };
+        writablePaths: {
+            namedConfLocal: boolean;
+            namedConfOptions: boolean;
+            namedConfAcls: boolean;
+            namedConfKeys: boolean;
+        };
+        rpz: {
+            configured: boolean;
+            zoneName: string | null;
+            filePath: string | null;
+            writable: boolean;
+        };
+        features: {
+            zones: boolean;
+            acls: boolean;
+            keys: boolean;
+            rpz: boolean;
+        };
+    };
 }
 
 export const getStatus = () => request<StatusData>("/status");
@@ -175,6 +209,7 @@ export interface BindInfoData {
     dnssec: Array<{ zone: string; signed: boolean; keys: Array<{ name: string; algorithm: string; status: string }> }>;
     transfers: { incoming: number; outgoing: number; details: string[] };
     slaveZones: Array<{ zone: string; file: string; lastModified: string | null; size: number }>;
+    management?: StatusData["management"];
 }
 
 export const getBindInfo = () => request<BindInfoData>("/server/bind-info");

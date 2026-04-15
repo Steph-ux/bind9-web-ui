@@ -163,6 +163,62 @@ export default function Status() {
       </Card>
 
       {/* ── BIND9 Advanced Info ──────────────────────────────── */}
+      {data?.management && (
+        <Card className="mb-6">
+          <CardHeader className="border-b flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            <CardTitle>Management Capabilities</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <div className="p-3 rounded-md border bg-muted/30">
+                <div className="text-muted-foreground uppercase mb-1 text-[10px] tracking-widest">Mode</div>
+                <div className="font-bold font-mono">{data.management.mode}</div>
+              </div>
+              <div className="p-3 rounded-md border bg-muted/30">
+                <div className="text-muted-foreground uppercase mb-1 text-[10px] tracking-widest">Zone Layout</div>
+                <div className="font-bold font-mono">{data.management.zoneLayout.strategy}</div>
+              </div>
+              <div className="p-3 rounded-md border bg-muted/30">
+                <div className="text-muted-foreground uppercase mb-1 text-[10px] tracking-widest">Forward Dir</div>
+                <div className="font-mono text-xs break-all">{data.management.zoneLayout.forwardDir || "Not detected"}</div>
+              </div>
+              <div className="p-3 rounded-md border bg-muted/30">
+                <div className="text-muted-foreground uppercase mb-1 text-[10px] tracking-widest">Reverse Dir</div>
+                <div className="font-mono text-xs break-all">{data.management.zoneLayout.reverseDir || "Not detected"}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={data.management.features.zones ? "default" : "secondary"}>Zones {data.management.features.zones ? "Writable" : "Read-only"}</Badge>
+              <Badge variant={data.management.features.acls ? "default" : "secondary"}>ACLs {data.management.features.acls ? "Writable" : "Read-only"}</Badge>
+              <Badge variant={data.management.features.keys ? "default" : "secondary"}>Keys {data.management.features.keys ? "Writable" : "Read-only"}</Badge>
+              <Badge variant={data.management.features.rpz ? "default" : "secondary"}>RPZ {data.management.features.rpz ? "Writable" : "Read-only"}</Badge>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Includes</div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={data.management.includes.namedConfLocalIncluded ? "outline" : "secondary"}>named.conf.local</Badge>
+                  <Badge variant={data.management.includes.namedConfAclsIncluded ? "outline" : "secondary"}>named.conf.acls</Badge>
+                  <Badge variant={data.management.includes.namedConfKeysIncluded ? "outline" : "secondary"}>named.conf.keys</Badge>
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Writable Paths</div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={data.management.writablePaths.namedConfLocal ? "outline" : "secondary"}>local</Badge>
+                  <Badge variant={data.management.writablePaths.namedConfOptions ? "outline" : "secondary"}>options</Badge>
+                  <Badge variant={data.management.writablePaths.namedConfAcls ? "outline" : "secondary"}>acls</Badge>
+                  <Badge variant={data.management.writablePaths.namedConfKeys ? "outline" : "secondary"}>keys</Badge>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2 mb-6">
         {/* Forwarders */}
         <Card>

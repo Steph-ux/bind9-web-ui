@@ -28,24 +28,19 @@ class DnssecService {
         return { success: false, message: "BIND9 is not available" };
       }
 
-      // Validate inputs to prevent command injection
       if (keyType !== "KSK" && keyType !== "ZSK") return { success: false, message: "Invalid keyType" };
       if (!VALID_ALGORITHMS.includes(algorithm)) return { success: false, message: "Invalid algorithm" };
       if (keySize && (!Number.isInteger(keySize) || keySize < 1 || keySize > 4096)) return { success: false, message: "Invalid keySize" };
       const safeDomain = sanitizeDomain(zone.domain);
 
-      // Generate key via rndc
       const sizeFlag = keySize ? ` -b ${keySize}` : "";
       const algoFlag = ` -a ${algorithm}`;
       const rndcCmd = `dnssec -keycreate ${keyType === "KSK" ? "-ksk" : "-zsk"}${algoFlag}${sizeFlag} ${safeDomain}`;
 
       const result = await bind9Service.rndc(rndcCmd);
-
-      // Parse key tag from rndc output
       const keyTagMatch = result.match(/key tag:\s*(\d+)/i) || result.match(/key=(\d+)/);
       const keyTag = keyTagMatch ? keyTagMatch[1] : `gen-${Date.now()}`;
 
-      // Store key record
       const key = await storage.createDnssecKey({
         zoneId,
         keyTag,
@@ -82,8 +77,6 @@ class DnssecService {
 
       if (zone.type !== "master") return { success: false, message: "Only master zones can be signed" };
       const safeDomain = sanitizeDomain(zone.domain);
-
-      // Use rndc to sign the zone
       await bind9Service.rndc(`signing -nsec3param 1 0 10 auto ${safeDomain}`);
 
       await storage.insertLog({
@@ -105,14 +98,13 @@ class DnssecService {
       if (!zone) return { signed: false, keys: [], details: "Zone not found" };
 
       const keys = await storage.getDnssecKeys(zoneId);
-      const activeKeys = keys.filter(k => k.status === "active");
+      const activeKeys = keys.filter((key) => key.status === "active");
 
       let details = "";
       if (await bind9Service.isAvailable()) {
         try {
           const safeDomain = sanitizeDomain(zone.domain);
-          const status = await bind9Service.rndc(`signing -list ${safeDomain}`);
-          details = status;
+          details = await bind9Service.rndc(`signing -list ${safeDomain}`);
         } catch {
           details = "Unable to retrieve signing status";
         }
@@ -136,17 +128,13 @@ class DnssecService {
 
       const zone = await storage.getZone(key.zoneId);
       if (!zone) return { success: false, message: "Zone not found" };
-
-      // Retire via rndc
-      if (await bind9Service.isAvailable()) {
-        try {
-          const safeDomain = sanitizeDomain(zone.domain);
-          if (!/^[0-9]+$/.test(key.keyTag)) return { success: false, message: "Invalid key tag" };
-          await bind9Service.rndc(`dnssec -keyretire ${key.keyTag} ${safeDomain}`);
-        } catch (err: any) {
-          console.error(`[dnssec] Failed to retire key ${key.keyTag}: ${err.message}`);
-        }
+      if (!(await bind9Service.isAvailable())) {
+        return { success: false, message: "BIND9 is not available" };
       }
+
+      const safeDomain = sanitizeDomain(zone.domain);
+      if (!/^[0-9]+$/.test(key.keyTag)) return { success: false, message: "Invalid key tag" };
+      await bind9Service.rndc(`dnssec -keyretire ${key.keyTag} ${safeDomain}`);
 
       await storage.updateDnssecKey(keyId, {
         status: "retired",
@@ -173,18 +161,14 @@ class DnssecService {
 
       const zone = await storage.getZone(key.zoneId);
       if (!zone) return { success: false, message: "Zone not found" };
-
-      // Remove via rndc
-      if (await bind9Service.isAvailable()) {
-        try {
-          if (key.status === "active") return { success: false, message: "Cannot delete an active key — retire it first" };
-          const safeDomain = sanitizeDomain(zone.domain);
-          if (!/^[0-9]+$/.test(key.keyTag)) return { success: false, message: "Invalid key tag" };
-          await bind9Service.rndc(`dnssec -keydelete ${key.keyTag} ${safeDomain}`);
-        } catch (err: any) {
-          console.error(`[dnssec] Failed to delete key ${key.keyTag}: ${err.message}`);
-        }
+      if (!(await bind9Service.isAvailable())) {
+        return { success: false, message: "BIND9 is not available" };
       }
+      if (key.status === "active") return { success: false, message: "Cannot delete an active key; retire it first" };
+
+      const safeDomain = sanitizeDomain(zone.domain);
+      if (!/^[0-9]+$/.test(key.keyTag)) return { success: false, message: "Invalid key tag" };
+      await bind9Service.rndc(`dnssec -keydelete ${key.keyTag} ${safeDomain}`);
 
       await storage.deleteDnssecKey(keyId);
 
