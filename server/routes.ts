@@ -1951,6 +1951,7 @@ export async function registerRoutes(
         }
       } catch (e: any) {
         console.error(`[api] Failed to remove zone from config: ${e.message}`);
+        return res.status(500).json({ message: `Zone removed from database but BIND9 config update failed: ${e.message}` });
       }
 
       await storage.insertLog({
