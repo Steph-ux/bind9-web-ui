@@ -2244,21 +2244,22 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid section name" });
       }
 
-      // Prefer DB content (user's last save) — it's the source of truth
-      // Only fall back to BIND9 file if DB has no snapshot for this section
-      const snapshot = await storage.getConfig(section as string);
-      let content = snapshot?.content || "";
+      // Prefer BIND9 file content (show what's actually on the server)
+      // Fall back to DB snapshot, then default template
+      let content = "";
+      try {
+        if (await bind9Service.isAvailable()) {
+          if (section === "options") {
+            content = await bind9Service.readNamedConfOptions();
+          } else {
+            content = await bind9Service.readNamedConf();
+          }
+        }
+      } catch { }
 
       if (!content) {
-        try {
-          if (await bind9Service.isAvailable()) {
-            if (section === "options") {
-              content = await bind9Service.readNamedConfOptions();
-            } else {
-              content = await bind9Service.readNamedConf();
-            }
-          }
-        } catch { }
+        const snapshot = await storage.getConfig(section as string);
+        content = snapshot?.content || "";
       }
 
       if (!content) {
@@ -2297,6 +2298,7 @@ export async function registerRoutes(
           source: "config",
           message: `Config saved to DB but BIND9 sync failed: ${e.message}`,
         });
+        return res.status(500).json({ message: `Config saved to database but BIND9 sync failed: ${e.message}` });
       }
 
       await storage.insertLog({
