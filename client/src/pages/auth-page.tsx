@@ -22,7 +22,9 @@ export default function AuthPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) setLocation("/");
+    if (user) {
+      setLocation(user.mustChangePassword ? "/change-password" : "/");
+    }
   }, [user, setLocation]);
 
   const form = useForm<z.infer<typeof loginSchema>>({
@@ -44,7 +46,7 @@ export default function AuthPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      {/* â”€â”€ Left panel â€“ Login form â”€â”€â”€ */}
+      {/* Left panel */}
       <div className="flex items-center justify-center p-6 lg:p-10 w-full lg:w-[480px] lg:max-w-[480px] shrink-0">
         <Card className="w-full max-w-[400px] shadow-lg border-border/50">
           <CardHeader className="pb-4">
@@ -68,6 +70,10 @@ export default function AuthPage() {
                   id="username"
                   type="text"
                   placeholder="admin"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   {...form.register("username")}
                 />
                 {form.formState.errors.username && (
@@ -80,7 +86,8 @@ export default function AuthPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                  placeholder="********"
+                  autoComplete="current-password"
                   {...form.register("password")}
                 />
                 {form.formState.errors.password && (
@@ -95,13 +102,13 @@ export default function AuthPage() {
             </form>
 
             <p className="text-muted-foreground text-center mt-6 text-xs">
-              Default credentials: <code className="rounded bg-muted px-1.5 py-0.5">admin</code> / <code className="rounded bg-muted px-1.5 py-0.5">admin</code>
+              Use the credentials provided by your administrator. First-login accounts will be prompted to set a new password.
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* â”€â”€ Right panel â€“ Branding â”€â”€â”€ */}
+      {/* Right panel */}
       <div className="hidden lg:flex flex-col p-10 flex-1 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white">
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="max-w-[480px]">

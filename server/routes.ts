@@ -94,6 +94,29 @@ function parseServerList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function normalizeApiScopePath(value: string): string {
+  return value.replace(/^\/+|\/+$/g, "");
+}
+
+function tokenScopeAllowsRequest(scopeValue: string, method: string, requestPath: string): boolean {
+  const [rawScopePath, rawAccessMode] = scopeValue.split(":");
+  const normalizedScopePath = normalizeApiScopePath(rawScopePath || "");
+  const normalizedRequestPath = normalizeApiScopePath(requestPath.replace(/^\/api\/?/, ""));
+
+  if (!normalizedScopePath) {
+    return false;
+  }
+
+  if (rawAccessMode === "read" && !["GET", "HEAD"].includes(method)) {
+    return false;
+  }
+
+  return (
+    normalizedRequestPath === normalizedScopePath ||
+    normalizedRequestPath.startsWith(`${normalizedScopePath}/`)
+  );
+}
+
 function isValidRemoteServer(value: string): boolean {
   const ipv4 = value.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
   if (ipv4) {
@@ -250,13 +273,8 @@ export async function registerRoutes(
         // Check permissions scope
         const scope = token.permissions;
         if (scope !== "*" && scope !== "all") {
-          // Check if the requested path matches any allowed scope
           const allowed = scope.split(",").map(s => s.trim());
-          const reqPath = req.path.replace(/^\/api\//, "");
-          const hasAccess = allowed.some(perm => {
-            if (perm.endsWith(":read") && req.method !== "GET") return false;
-            return reqPath.startsWith(perm.split(":")[0]);
-          });
+          const hasAccess = allowed.some((perm) => tokenScopeAllowsRequest(perm, req.method, req.path));
           if (!hasAccess) {
             return res.status(403).json({ message: "Token does not have permission for this resource" });
           }

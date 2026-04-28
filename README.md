@@ -712,6 +712,14 @@ chmod 440 /etc/sudoers.d/bind9
 
 ---
 
+## Bootstrap Password Note
+
+- In production, `DEFAULT_ADMIN_PASSWORD` must be set before the first startup if no `admin` user exists yet.
+- The bootstrap password is no longer written to server logs.
+- In local development only, a generated bootstrap password may still be logged when `DEFAULT_ADMIN_PASSWORD` is not set.
+
+---
+
 ## Licence
 
 MIT License — Copyright © 2025 Stephane ASSOGBA
