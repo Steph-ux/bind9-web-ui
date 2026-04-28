@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { MetricCard, PageHeader, PageState } from "@/components/layout";
 import {
-    getConnections, createConnection, deleteConnection,
+    getConnections, createConnection, updateConnection, deleteConnection,
     testConnection, activateConnection, deactivateConnections,
     type ConnectionData, type TestConnectionResult,
 } from "@/lib/api";
-import { Server, Plus, Trash2, Zap, ZapOff, TestTube, Loader2, Wifi, WifiOff, Terminal, FolderOpen } from "lucide-react";
+import { Server, Plus, Trash2, Zap, ZapOff, TestTube, Loader2, Wifi, WifiOff, Terminal, FolderOpen, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,15 +16,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function ConnectionsPage() {
     const [connections, setConnections] = useState<ConnectionData[]>([]);
     const [poolStatus, setPoolStatus] = useState<Record<string, { isConnected: boolean }>>({});
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [testing, setTesting] = useState<string | null>(null);
     const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
     const [activating, setActivating] = useState<string | null>(null);
+    const [editingConnection, setEditingConnection] = useState<ConnectionData | null>(null);
     const { toast } = useToast();
     const { isAdmin } = useAuth();
 
@@ -31,16 +36,54 @@ export default function ConnectionsPage() {
     const [host, setHost] = useState("");
     const [port, setPort] = useState("22");
     const [username, setUsername] = useState("root");
+    const [authType, setAuthType] = useState<"password" | "key">("password");
     const [password, setPassword] = useState("");
+    const [privateKey, setPrivateKey] = useState("");
     const [confDir, setConfDir] = useState("");
     const [zoneDir, setZoneDir] = useState("");
+    const [rndcBin, setRndcBin] = useState("");
     const [creating, setCreating] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+    const resetForm = () => {
+        setEditingConnection(null);
+        setName("");
+        setHost("");
+        setPort("22");
+        setUsername("root");
+        setAuthType("password");
+        setPassword("");
+        setPrivateKey("");
+        setConfDir("");
+        setZoneDir("");
+        setRndcBin("");
+    };
+
+    const openCreateModal = () => {
+        resetForm();
+        setShowModal(true);
+    };
+
+    const openEditModal = (conn: ConnectionData) => {
+        setEditingConnection(conn);
+        setName(conn.name);
+        setHost(conn.host);
+        setPort(String(conn.port));
+        setUsername(conn.username);
+        setAuthType(conn.authType === "key" ? "key" : "password");
+        setPassword("");
+        setPrivateKey("");
+        setConfDir(conn.bind9ConfDir || "");
+        setZoneDir(conn.bind9ZoneDir || "");
+        setRndcBin(conn.rndcBin || "");
+        setShowModal(true);
+    };
 
     const fetchConnections = async () => {
         try {
             const data = await getConnections();
             setConnections(data);
+            setError(null);
             // Also fetch pool status for connected indicators
             try {
                 const pool = await fetch("/api/connections/pool/status").then(r => r.json());
@@ -51,6 +94,7 @@ export default function ConnectionsPage() {
                 setPoolStatus(statusMap);
             } catch {}
         } catch (e: any) {
+            setError(e.message);
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
             setLoading(false);
@@ -59,21 +103,45 @@ export default function ConnectionsPage() {
 
     useEffect(() => { fetchConnections(); }, []);
 
-    const handleCreate = async () => {
+    const handleSaveConnection = async () => {
         if (!name.trim() || !host.trim() || !username.trim()) {
             toast({ title: "Error", description: "Name, host and username are required", variant: "destructive" });
             return;
         }
+        const authChanged = !!editingConnection && editingConnection.authType !== authType;
+        if (authType === "password" && (!editingConnection || authChanged) && !password.trim()) {
+            toast({ title: "Error", description: "A password is required for password authentication", variant: "destructive" });
+            return;
+        }
+        if (authType === "key" && (!editingConnection || authChanged) && !privateKey.trim()) {
+            toast({ title: "Error", description: "A private key is required for key authentication", variant: "destructive" });
+            return;
+        }
         setCreating(true);
         try {
-            await createConnection({
-                name: name.trim(), host: host.trim(), port: parseInt(port) || 22,
-                username: username.trim(), authType: "password", password: password,
-                bind9ConfDir: confDir.trim() || undefined, bind9ZoneDir: zoneDir.trim() || undefined,
-            });
-            toast({ title: "Connection created" });
+            const payload = {
+                name: name.trim(),
+                host: host.trim(),
+                port: parseInt(port, 10) || 22,
+                username: username.trim(),
+                authType,
+                bind9ConfDir: confDir.trim() || undefined,
+                bind9ZoneDir: zoneDir.trim() || undefined,
+                rndcBin: rndcBin.trim() || undefined,
+                ...(authType === "password"
+                    ? { password: password || undefined }
+                    : { privateKey: privateKey || undefined }),
+            };
+
+            if (editingConnection) {
+                await updateConnection(editingConnection.id, payload);
+                toast({ title: "Connection updated" });
+            } else {
+                await createConnection(payload);
+                toast({ title: "Connection created" });
+            }
             setShowModal(false);
-            setName(""); setHost(""); setPort("22"); setUsername("root"); setPassword(""); setConfDir(""); setZoneDir("");
+            resetForm();
             fetchConnections();
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -107,33 +175,84 @@ export default function ConnectionsPage() {
     };
 
     const activeConn = connections.find(c => c.isActive);
+    const connectedCount = connections.filter((c) => poolStatus[c.id]?.isConnected).length;
+    const idleCount = connections.filter((c) => !poolStatus[c.id]?.isConnected && !c.isActive).length;
 
     if (loading) {
         return (
             <DashboardLayout>
-                <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
+                <PageState
+                    loading
+                    title="Loading connections"
+                    description="Fetching remote BIND9 connection profiles and pool status."
+                    className="min-h-[60vh]"
+                />
+            </DashboardLayout>
+        );
+    }
+
+    if (error && connections.length === 0) {
+        return (
+            <DashboardLayout>
+                <PageState
+                    title="Unable to load connections"
+                    description={error}
+                    tone="danger"
+                    action={<Button onClick={fetchConnections}>Retry</Button>}
+                    className="min-h-[60vh]"
+                />
             </DashboardLayout>
         );
     }
 
     return (
         <DashboardLayout>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
-                <div>
-                    <h2 className="text-2xl font-bold tracking-tight">SSH Connections</h2>
-                    <p className="text-muted-foreground">Manage remote BIND9 servers securely.</p>
-                </div>
-                {isAdmin && (
-                    <Button className="gap-2" onClick={() => setShowModal(true)}>
-                        <Plus className="h-4 w-4" /> Add Connection
-                    </Button>
-                )}
-            </div>
+            <div className="space-y-6">
+                <PageHeader
+                    title="SSH Connections"
+                    description="Manage local and remote BIND9 targets from the same control surface."
+                    icon={Server}
+                    badge={<Badge variant="outline">{connections.length} saved profiles</Badge>}
+                    actions={
+                        isAdmin ? (
+                            <Button className="gap-2" onClick={openCreateModal}>
+                                <Plus className="h-4 w-4" />
+                                Add Connection
+                            </Button>
+                        ) : undefined
+                    }
+                />
 
-            {/* Status Banner */}
-            <Card className={`mb-6 border-l-4 ${activeConn ? "border-green-500" : "border-yellow-500"}`}>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <MetricCard
+                        label="Configured Profiles"
+                        value={connections.length}
+                        description="Saved remote endpoints for BIND9 administration."
+                        icon={Server}
+                    />
+                    <MetricCard
+                        label="Connected"
+                        value={connectedCount}
+                        description="Profiles with an active SSH session."
+                        icon={Wifi}
+                        tone="success"
+                    />
+                    <MetricCard
+                        label="Idle"
+                        value={idleCount}
+                        description="Profiles available but not currently connected."
+                        icon={WifiOff}
+                        tone="warning"
+                    />
+                    <MetricCard
+                        label="Current Mode"
+                        value={activeConn ? "SSH" : "Local"}
+                        description={activeConn ? activeConn.host : "Managing this server directly."}
+                        icon={activeConn ? Zap : ZapOff}
+                    />
+                </div>
+
+                <Card className={`border-l-4 ${activeConn ? "border-green-500" : "border-yellow-500"}`}>
                 <CardContent className="flex items-center gap-3 py-5">
                     <div className={`flex h-12 w-12 items-center justify-center rounded-full shrink-0 ${activeConn ? "bg-green-500/10 text-green-600" : "bg-yellow-500/10 text-yellow-600"}`}>
                         {activeConn ? <Wifi className="h-5 w-5" /> : <WifiOff className="h-5 w-5" />}
@@ -144,7 +263,7 @@ export default function ConnectionsPage() {
                         </h5>
                         <p className="text-muted-foreground mb-0 text-sm">
                             {activeConn
-                              ? `Managing ${activeConn.host} — ${connections.filter(c => poolStatus[c.id]?.isConnected && c.id !== activeConn.id).length} other connection(s) in pool`
+                              ? `Managing ${activeConn.host} - ${connections.filter(c => poolStatus[c.id]?.isConnected && c.id !== activeConn.id).length} other connection(s) in pool`
                               : "You are managing the local BIND9 instance on this machine."}
                         </p>
                     </div>
@@ -156,20 +275,26 @@ export default function ConnectionsPage() {
                 </CardContent>
             </Card>
 
-            <h5 className="flex items-center gap-2 mb-4 font-semibold">
-                <Server className="h-4 w-4 text-primary" /> Available Connections
-                <span className="text-muted-foreground font-normal text-sm">({connections.filter(c => poolStatus[c.id]?.isConnected).length} connected)</span>
-            </h5>
+            <div className="flex items-center gap-2 font-semibold">
+                <Server className="h-4 w-4 text-primary" />
+                <span>Available Connections</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                    ({connectedCount} connected)
+                </span>
+            </div>
 
             {connections.length === 0 ? (
-                <Card className="border-dashed text-center py-8">
-                    <CardContent>
-                        <Server className="h-10 w-10 text-muted-foreground/25 mb-3 mx-auto" />
-                        <h5 className="font-semibold">No Connections Configured</h5>
-                        <p className="text-muted-foreground mb-4">Add a remote SSH connection to manage another BIND9 server.</p>
-                        <Button variant="outline" onClick={() => setShowModal(true)}>Add First Connection</Button>
-                    </CardContent>
-                </Card>
+                <PageState
+                    title="No connections configured"
+                    description="Add a remote SSH endpoint to manage another BIND9 server."
+                    action={
+                        isAdmin ? (
+                            <Button variant="outline" onClick={openCreateModal}>
+                                Add First Connection
+                            </Button>
+                        ) : null
+                    }
+                />
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {connections.map((conn) => (
@@ -193,9 +318,14 @@ export default function ConnectionsPage() {
                                         </div>
                                     </div>
                                     {isAdmin && (
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteTarget(conn.id)} disabled={conn.isActive}>
-                                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                        </Button>
+                                        <div className="flex gap-1">
+                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditModal(conn)}>
+                                                <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteTarget(conn.id)} disabled={conn.isActive}>
+                                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                            </Button>
+                                        </div>
                                     )}
                                 </div>
 
@@ -239,14 +369,17 @@ export default function ConnectionsPage() {
                     ))}
                 </div>
             )}
+            </div>
 
             {/* Create Connection Dialog */}
-            <Dialog open={showModal} onOpenChange={setShowModal}>
+            <Dialog open={showModal} onOpenChange={(open) => { setShowModal(open); if (!open) resetForm(); }}>
                 <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
                     <DialogHeader>
-                        <DialogTitle>New SSH Connection</DialogTitle>
+                        <DialogTitle>{editingConnection ? "Edit SSH Connection" : "New SSH Connection"}</DialogTitle>
                     </DialogHeader>
-                    <p className="text-muted-foreground text-sm">Enter the details of the remote BIND9 server.</p>
+                    <p className="text-muted-foreground text-sm">
+                        {editingConnection ? "Update the details of the remote BIND9 server." : "Enter the details of the remote BIND9 server."}
+                    </p>
                     <div className="grid gap-4 py-4 overflow-y-auto flex-1 min-h-0">
                         {[
                             { label: "Name", value: name, setter: setName, placeholder: "e.g. Production DNS", mono: false },
@@ -260,9 +393,44 @@ export default function ConnectionsPage() {
                             </div>
                         ))}
                         <div className="grid gap-2">
-                            <Label>Password</Label>
-                            <Input type="password" className="font-mono" value={password} onChange={e => setPassword(e.target.value)} placeholder="SSH Password" />
+                            <Label>Authentication</Label>
+                            <Select value={authType} onValueChange={(value: "password" | "key") => setAuthType(value)}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select authentication" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="password">Password</SelectItem>
+                                    <SelectItem value="key">Private key</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
+                        {authType === "password" ? (
+                            <div className="grid gap-2">
+                                <Label>Password</Label>
+                                <Input
+                                    type="password"
+                                    className="font-mono"
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    placeholder={editingConnection ? "Leave blank to keep current password" : "SSH Password"}
+                                />
+                            </div>
+                        ) : (
+                            <div className="grid gap-2">
+                                <Label>Private Key</Label>
+                                <Textarea
+                                    className="font-mono min-h-[140px]"
+                                    value={privateKey}
+                                    onChange={e => setPrivateKey(e.target.value)}
+                                    placeholder={editingConnection ? "Leave blank to keep current private key" : "Paste the private key content"}
+                                />
+                            </div>
+                        )}
+                        {editingConnection && (
+                            <p className="text-xs text-muted-foreground">
+                                Leave the credential field blank if you do not want to replace the current secret.
+                            </p>
+                        )}
                         <div className="border-t pt-4">
                             <p className="text-muted-foreground text-center mb-3 text-xs">Optional: Override default paths if auto-detection fails</p>
                             <div className="grid gap-3">
@@ -274,14 +442,18 @@ export default function ConnectionsPage() {
                                     <Label className="text-sm">Zone Dir</Label>
                                     <Input className="font-mono h-8 text-sm" value={zoneDir} onChange={e => setZoneDir(e.target.value)} placeholder="/var/cache/bind" />
                                 </div>
+                                <div className="grid gap-2">
+                                    <Label className="text-sm">RNDC Binary</Label>
+                                    <Input className="font-mono h-8 text-sm" value={rndcBin} onChange={e => setRndcBin(e.target.value)} placeholder="/usr/sbin/rndc" />
+                                </div>
                             </div>
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-                        <Button className="gap-2" onClick={handleCreate} disabled={creating}>
+                        <Button variant="outline" onClick={() => { setShowModal(false); resetForm(); }}>Cancel</Button>
+                        <Button className="gap-2" onClick={handleSaveConnection} disabled={creating}>
                             {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-                            Create Connection
+                            {editingConnection ? "Save Changes" : "Create Connection"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -342,3 +514,5 @@ export default function ConnectionsPage() {
         </DashboardLayout>
     );
 }
+
+

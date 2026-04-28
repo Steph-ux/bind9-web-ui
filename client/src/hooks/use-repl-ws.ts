@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+﻿import { useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface ReplWsMessage {
@@ -43,3 +43,4 @@ export function useReplicationWs() {
     };
   }, [connect]);
 }
+

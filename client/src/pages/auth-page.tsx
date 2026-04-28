@@ -1,4 +1,4 @@
-import { useAuth } from "@/lib/auth-provider";
+﻿import { useAuth } from "@/lib/auth-provider";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -44,7 +44,7 @@ export default function AuthPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      {/* ── Left panel – Login form ─── */}
+      {/* â”€â”€ Left panel â€“ Login form â”€â”€â”€ */}
       <div className="flex items-center justify-center p-6 lg:p-10 w-full lg:w-[480px] lg:max-w-[480px] shrink-0">
         <Card className="w-full max-w-[400px] shadow-lg border-border/50">
           <CardHeader className="pb-4">
@@ -80,7 +80,7 @@ export default function AuthPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   {...form.register("password")}
                 />
                 {form.formState.errors.password && (
@@ -101,7 +101,7 @@ export default function AuthPage() {
         </Card>
       </div>
 
-      {/* ── Right panel – Branding ─── */}
+      {/* â”€â”€ Right panel â€“ Branding â”€â”€â”€ */}
       <div className="hidden lg:flex flex-col p-10 flex-1 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white">
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="max-w-[480px]">
@@ -134,3 +134,4 @@ export default function AuthPage() {
     </div>
   );
 }
+

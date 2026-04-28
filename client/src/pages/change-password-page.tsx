@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,7 +61,7 @@ export default function ChangePasswordPage() {
                 <Input
                   id="current-password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   value={currentPassword}
                   onChange={e => setCurrentPassword(e.target.value)}
                   autoFocus
@@ -73,7 +73,7 @@ export default function ChangePasswordPage() {
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
+                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 autoFocus
@@ -84,7 +84,7 @@ export default function ChangePasswordPage() {
               <Input
                 id="confirm"
                 type="password"
-                placeholder="••••••••"
+                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                 value={confirm}
                 onChange={e => setConfirm(e.target.value)}
               />
@@ -99,3 +99,4 @@ export default function ChangePasswordPage() {
     </div>
   );
 }
+

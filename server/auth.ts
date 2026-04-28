@@ -1,4 +1,4 @@
-// Copyright © 2025 Stephane ASSOGBA
+﻿// Copyright Â(c) 2025 Stephane ASSOGBA
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { type Express } from "express";
@@ -32,7 +32,7 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 export function setupAuth(app: Express) {
-    // Enforce a strong session secret — in production, MUST be set via env
+    // Enforce a strong session secret â€” in production, MUST be set via env
     let sessionSecret = process.env.SESSION_SECRET;
     if (!sessionSecret) {
         if (app.get("env") === "production") {
@@ -194,3 +194,4 @@ export function setupAuth(app: Express) {
 
 // Helper to hash passwords (e.g. for user creation routes)
 export { hashPassword };
+

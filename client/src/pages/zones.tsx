@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { MetricCard, PageHeader, PageState } from "@/components/layout";
 import { Plus, Search, FileEdit, Trash2, Globe, RefreshCcw, Loader2, LayoutGrid, List as ListIcon, MoreHorizontal, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { getZones, createZone, deleteZone, syncZones, type ZoneData } from "@/lib/api";
+import { getZones, createZone, deleteZone, syncZones, updateZone, type ZoneData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Zones() {
@@ -21,6 +22,7 @@ export default function Zones() {
   const [zones, setZones] = useState<ZoneData[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -33,6 +35,7 @@ export default function Zones() {
   const [network, setNetwork] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ZoneData | null>(null);
+  const [replicationSavingId, setReplicationSavingId] = useState<string | null>(null);
   const { toast } = useToast();
   const { canManageDNS } = useAuth();
 
@@ -41,7 +44,9 @@ export default function Zones() {
       setLoading(true);
       const data = await getZones();
       setZones(data);
+      setError(null);
     } catch (e: any) {
+      setError(e.message);
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -53,6 +58,9 @@ export default function Zones() {
   const filteredZones = zones.filter(zone =>
     zone.domain.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const activeZones = zones.filter((zone) => zone.status === "active").length;
+  const masterZones = zones.filter((zone) => zone.type === "master").length;
+  const secondaryZones = zones.filter((zone) => zone.type === "slave" || zone.type === "forward").length;
 
   const handleCreate = async () => {
     if (!newDomain.trim()) {
@@ -98,51 +106,139 @@ export default function Zones() {
     }
   };
 
+  const handleToggleReplication = async (zone: ZoneData) => {
+    const nextValue = zone.replicationEnabled === false;
+
+    try {
+      setReplicationSavingId(zone.id);
+      const updated = await updateZone(zone.id, { replicationEnabled: nextValue });
+      setZones((prev) => prev.map((item) => item.id === zone.id ? { ...item, replicationEnabled: updated.replicationEnabled } : item));
+      toast({
+        title: "Replication updated",
+        description: `${zone.domain} replication ${updated.replicationEnabled === false ? "disabled" : "enabled"}.`,
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setReplicationSavingId(null);
+    }
+  };
+
   const statusColor = (status: string) =>
     status === 'active' ? 'bg-green-500' : status === 'syncing' ? 'bg-yellow-500' : 'bg-red-500';
 
+  if (loading && zones.length === 0) {
+    return (
+      <DashboardLayout>
+        <PageState
+          loading
+          title="Loading zones"
+          description="Fetching zone inventory and management state."
+          className="min-h-[60vh]"
+        />
+      </DashboardLayout>
+    );
+  }
+
+  if (error && zones.length === 0) {
+    return (
+      <DashboardLayout>
+        <PageState
+          title="Unable to load zones"
+          description={error}
+          tone="danger"
+          action={<Button onClick={fetchZones}>Retry</Button>}
+          className="min-h-[60vh]"
+        />
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Zone Management</h2>
-          <p className="text-muted-foreground">Configure authoritative zones and forwarders.</p>
-        </div>
-        <div className="flex gap-2">
-          {canManageDNS && (
-            <Button
-              variant="outline"
-              className="gap-2"
-              disabled={syncing}
-              onClick={async () => {
-                setSyncing(true);
-                try {
-                  const result = await syncZones();
-                  toast({
-                    title: "Sync complete",
-                    description: `${result.synced} zones imported, ${result.skipped} already existed (${result.total} total in BIND9)`,
-                  });
-                  fetchZones();
-                } catch (e: any) {
-                  toast({ title: "Sync failed", description: e.message, variant: "destructive" });
-                } finally {
-                  setSyncing(false);
-                }
-              }}
-            >
-              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Sync from BIND9
-            </Button>
-          )}
-          {canManageDNS && (
-            <Button className="gap-2" onClick={() => setIsDialogOpen(true)}>
-              <Plus className="h-4 w-4" /> Add New Zone
-            </Button>
-          )}
-        </div>
-      </div>
+      <div className="space-y-6">
+        <PageHeader
+          title="Zone Management"
+          description="Create, import and maintain authoritative zones and forwarders from one workspace."
+          icon={Globe}
+          badge={<Badge variant="outline">{zones.length} total zones</Badge>}
+          actions={
+            <>
+              {canManageDNS && (
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  disabled={syncing}
+                  onClick={async () => {
+                    setSyncing(true);
+                    try {
+                      const result = await syncZones();
+                      toast({
+                        title: "Sync complete",
+                        description: `${result.synced} zones synchronized, ${result.skipped} skipped, ${result.total} found in BIND9.`,
+                      });
+                      fetchZones();
+                    } catch (e: any) {
+                      toast({ title: "Sync failed", description: e.message, variant: "destructive" });
+                    } finally {
+                      setSyncing(false);
+                    }
+                  }}
+                >
+                  {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                  Sync from BIND9
+                </Button>
+              )}
+              {canManageDNS && (
+                <Button className="gap-2" onClick={() => setIsDialogOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  Add New Zone
+                </Button>
+              )}
+            </>
+          }
+        />
 
-      <Card>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Visible Zones"
+            value={filteredZones.length}
+            description={searchTerm ? `Filtered from ${zones.length} total zones.` : "Current inventory in the panel."}
+            icon={Globe}
+          />
+          <MetricCard
+            label="Active Zones"
+            value={activeZones}
+            description="Zones currently marked active."
+            icon={RefreshCcw}
+            tone="success"
+          />
+          <MetricCard
+            label="Primary Zones"
+            value={masterZones}
+            description="Master zones editable from this panel."
+            icon={FileEdit}
+          />
+          <MetricCard
+            label="Secondary and Forward"
+            value={secondaryZones}
+            description="Zones synchronized or forwarded from upstream."
+            icon={Copy}
+            tone="warning"
+          />
+        </div>
+
+        <Card className="border-amber-200 bg-amber-50/70">
+          <CardContent className="flex flex-col gap-2 p-4 text-sm text-amber-950">
+            <div className="font-semibold">Zone structure policy</div>
+            <div>
+              The web UI can create zones, delete zones, edit records and toggle replication.
+              Structural changes such as zone type, domain name, master servers, forwarders or file path must be changed in BIND first, then re-imported with `Sync from BIND9`.
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
         <CardHeader className="p-4 border-b flex flex-row items-center justify-between gap-3 flex-wrap">
           <div className="relative flex-1" style={{ maxWidth: "300px" }}>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -179,13 +275,25 @@ export default function Zones() {
           </div>
         </CardHeader>
 
-        {loading && zones.length === 0 ? (
-          <div className="p-8 text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-          </div>
-        ) : filteredZones.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">
-            {searchTerm ? "No zones match your search" : "No zones configured. Click 'Add New Zone' to get started."}
+        {filteredZones.length === 0 ? (
+          <div className="p-6">
+            <PageState
+              title={searchTerm ? "No zones match your search" : "No zones configured"}
+              description={
+                searchTerm
+                  ? "Try a different domain filter or clear the search field."
+                  : "Create your first zone or import the current BIND9 inventory."
+              }
+              action={
+                searchTerm ? (
+                  <Button variant="outline" onClick={() => setSearchTerm("")}>
+                    Clear search
+                  </Button>
+                ) : canManageDNS ? (
+                  <Button onClick={() => setIsDialogOpen(true)}>Add New Zone</Button>
+                ) : null
+              }
+            />
           </div>
         ) : viewMode === "grid" ? (
           <CardContent className="p-4 bg-muted/30">
@@ -225,7 +333,7 @@ export default function Zones() {
                       </div>
                       <div className="rounded-md border bg-muted/50 p-2">
                         <small className="text-muted-foreground block mb-0.5 text-[11px]">Serial</small>
-                        <span className="font-mono font-semibold text-sm">{zone.serial || "—"}</span>
+                        <span className="font-mono font-semibold text-sm">{zone.serial || "-"}</span>
                       </div>
                     </div>
 
@@ -237,18 +345,11 @@ export default function Zones() {
                           <button
                             className={`ml-1 flex items-center gap-0.5 text-[10px] ${zone.replicationEnabled !== false ? "text-green-600" : "text-muted-foreground line-through"}`}
                             title={zone.replicationEnabled !== false ? "Replication enabled (click to disable)" : "Replication disabled (click to enable)"}
-                            onClick={async () => {
-                              try {
-                                await fetch(`/api/zones/${zone.id}`, {
-                                  method: "PUT",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ replicationEnabled: zone.replicationEnabled === false }),
-                                });
-                                setZones(prev => prev.map(z => z.id === zone.id ? { ...z, replicationEnabled: zone.replicationEnabled === false } : z));
-                              } catch {}
-                            }}
+                            disabled={replicationSavingId === zone.id}
+                            onClick={() => handleToggleReplication(zone)}
                           >
-                            <Copy className="h-3 w-3" />Repl
+                            {replicationSavingId === zone.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3" />}
+                            Repl
                           </button>
                         )}
                       </div>
@@ -296,7 +397,7 @@ export default function Zones() {
                       <Badge variant="outline" className="capitalize">{zone.type}</Badge>
                     </td>
                     <td className="px-4 py-3">{zone.records}</td>
-                    <td className="px-4 py-3 font-mono text-muted-foreground text-xs">{zone.serial || "—"}</td>
+                    <td className="px-4 py-3 font-mono text-muted-foreground text-xs">{zone.serial || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className={`inline-block h-2 w-2 rounded-full animate-pulse ${statusColor(zone.status)}`} />
@@ -330,7 +431,8 @@ export default function Zones() {
             </table>
           </div>
         )}
-      </Card>
+        </Card>
+      </div>
 
       {/* Create Zone Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -427,3 +529,5 @@ export default function Zones() {
     </DashboardLayout>
   );
 }
+
+

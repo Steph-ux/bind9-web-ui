@@ -1,4 +1,4 @@
-// Copyright © 2025 Stephane ASSOGBA
+﻿// Copyright Â(c) 2025 Stephane ASSOGBA
 /**
  * SSH Connection Manager
  * Manages multiple simultaneous SSH connections to remote BIND9 servers.
@@ -35,7 +35,7 @@ class SSHManager {
     /** The currently active connection ID (used by bind9-service) */
     private activeId: string | null = null;
 
-    // ── Pool Management ────────────────────────────────────────────
+    // â”€â”€ Pool Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Register a connection config in the pool (does NOT connect yet) */
     register(connectionId: string, config: SSHConnectionConfig) {
@@ -88,7 +88,7 @@ class SSHManager {
         return result;
     }
 
-    // ── Legacy Compatibility ──────────────────────────────────────
+    // â”€â”€ Legacy Compatibility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Check if the active SSH connection is configured */
     isConfigured(): boolean {
@@ -96,13 +96,13 @@ class SSHManager {
         return this.pool.has(this.activeId);
     }
 
-    /** Set the active SSH connection config (legacy — registers + sets active) */
+    /** Set the active SSH connection config (legacy â€” registers + sets active) */
     setConfig(config: SSHConnectionConfig | null) {
         if (config) {
             if (this.activeId) {
                 this.register(this.activeId, config);
             }
-            // If no activeId yet, setConfig alone is insufficient — caller must also setActive
+            // If no activeId yet, setConfig alone is insufficient â€” caller must also setActive
         } else if (!config && this.activeId) {
             this.unregister(this.activeId);
         }
@@ -128,7 +128,7 @@ class SSHManager {
         };
     }
 
-    // ── Connection ─────────────────────────────────────────────────
+    // â”€â”€ Connection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Connect a specific connection by ID */
     async connectById(connectionId: string): Promise<void> {
@@ -195,7 +195,7 @@ class SSHManager {
         }
     }
 
-    // ── Ensure Connected ───────────────────────────────────────────
+    // â”€â”€ Ensure Connected â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Ensure a specific connection is active, reconnect if needed */
     private async ensureConnectedById(connectionId: string): Promise<Client> {
@@ -213,7 +213,7 @@ class SSHManager {
         return this.ensureConnectedById(this.activeId);
     }
 
-    // ── Exec ───────────────────────────────────────────────────────
+    // â”€â”€ Exec â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Execute a command on a specific connection */
     async execById(connectionId: string, command: string): Promise<RemoteExecResult> {
@@ -290,7 +290,7 @@ class SSHManager {
         });
     }
 
-    // ── SFTP Read ──────────────────────────────────────────────────
+    // â”€â”€ SFTP Read â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Read a file on a specific connection via SFTP (with retry) */
     async readFileById(connectionId: string, remotePath: string): Promise<string> {
@@ -324,7 +324,7 @@ class SSHManager {
         });
     }
 
-    // ── SFTP Write ─────────────────────────────────────────────────
+    // â”€â”€ SFTP Write â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Write a file on a specific connection via SFTP (with retry) */
     async writeFileById(connectionId: string, remotePath: string, content: string): Promise<void> {
@@ -358,7 +358,7 @@ class SSHManager {
         });
     }
 
-    // ── File Exists ────────────────────────────────────────────────
+    // â”€â”€ File Exists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Check if a file exists on a specific connection */
     async fileExistsById(connectionId: string, remotePath: string): Promise<boolean> {
@@ -379,7 +379,7 @@ class SSHManager {
         return this.fileExistsById(this.activeId, remotePath);
     }
 
-    // ── Test Connection ────────────────────────────────────────────
+    // â”€â”€ Test Connection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Test SSH connection and return server info */
     async testConnection(config: SSHConnectionConfig): Promise<{
@@ -500,3 +500,4 @@ class SSHManager {
 }
 
 export const sshManager = new SSHManager();
+

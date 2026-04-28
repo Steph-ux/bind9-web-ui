@@ -1,4 +1,4 @@
-// Copyright © 2025 Stephane ASSOGBA
+﻿// Copyright Â(c) 2025 Stephane ASSOGBA
 import { exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
@@ -40,6 +40,67 @@ function shellSafe(input: string): string {
     throw new Error(`Invalid characters in input: ${input}`);
 }
 
+function shellSafeComment(input: string): string {
+    const trimmed = input.trim();
+    if (!trimmed) {
+        throw new Error("Comment cannot be empty");
+    }
+    if (/[\r\n`$\\]/.test(trimmed)) {
+        throw new Error("Comment contains invalid characters");
+    }
+    return trimmed.replace(/"/g, "'");
+}
+
+function validateRawRule(rawRule: string, backend: FirewallBackend): string {
+    const trimmed = rawRule.trim();
+    if (!trimmed) {
+        throw new Error("Raw rule command is required");
+    }
+    if (!/^[a-zA-Z0-9.\/_:\-=, ]+$/.test(trimmed)) {
+        throw new Error("Invalid raw rule characters");
+    }
+    if (/[;&|`$<>]/.test(trimmed)) {
+        throw new Error("Unsafe shell characters are not allowed in raw rules");
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (backend === "ufw") {
+        if (!/^(allow|deny|reject|limit)\b/.test(lower)) {
+            throw new Error("Raw UFW rules must start with allow, deny, reject or limit");
+        }
+        if (/\b(delete|reset|disable|enable)\b/.test(lower)) {
+            throw new Error("Destructive UFW raw rules are not allowed");
+        }
+        return trimmed;
+    }
+
+    if (backend === "firewalld") {
+        if (!/^--add-/.test(lower)) {
+            throw new Error("Raw firewalld rules must use --add-* operations only");
+        }
+        if (/^--remove-|^--delete-|--direct|passthrough/.test(lower)) {
+            throw new Error("Destructive firewalld raw rules are not allowed");
+        }
+        return trimmed;
+    }
+
+    if (backend === "iptables") {
+        if (!/^-a\b/.test(lower)) {
+            throw new Error("Raw iptables rules must start with -A");
+        }
+        return trimmed;
+    }
+
+    if (backend === "nftables") {
+        if (!/^add\b/.test(lower)) {
+            throw new Error("Raw nft rules must start with add");
+        }
+        return trimmed;
+    }
+
+    return trimmed;
+}
+
 export type RuleDirection = "in" | "out";
 export type RuleType = "port" | "service" | "portRange" | "multiPort" | "icmp" | "raw";
 
@@ -52,7 +113,7 @@ export interface FirewallRule {
     direction: RuleDirection;
     ruleType: RuleType;
     proto: string;
-    toPortEnd?: string;           // For port ranges (e.g. "1000-2000" → toPort="1000", toPortEnd="2000")
+    toPortEnd?: string;           // For port ranges (e.g. "1000-2000" â†’ toPort="1000", toPortEnd="2000")
     service?: string;             // Service name (ssh, http, dns, etc.)
     interface?: string;           // Network interface (eth0, wlan0, etc.)
     rateLimit?: string;           // Rate limit (e.g. "6/min", "10/hour")
@@ -290,7 +351,7 @@ class FirewallService {
         return "";
     }
 
-    // ── UFW Implementation ──────────────────────────────────────
+    // â”€â”€ UFW Implementation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private async getStatusUfw(available: FirewallBackend[]): Promise<FirewallStatus> {
         const output = await this.execCommand("sudo -n ufw status numbered");
@@ -354,8 +415,7 @@ class FirewallService {
 
         // Raw rule: execute directly
         if (ruleType === "raw" && rawRule) {
-            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
-            await this.execCommand(`sudo -n ufw ${rawRule}`);
+            await this.execCommand(`sudo -n ufw ${validateRawRule(rawRule, "ufw")}`);
             return;
         }
 
@@ -368,7 +428,7 @@ class FirewallService {
             if (direction === "out") cmd += ` out`;
             if (iface) cmd += ` on ${shellSafe(iface)}`;
             if (log) cmd += ` log`;
-            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            if (comment) cmd += ` comment "${shellSafeComment(comment)}"`;
             await this.execCommand(cmd);
             return;
         }
@@ -382,7 +442,7 @@ class FirewallService {
             if (iface) cmd += ` on ${shellSafe(iface)}`;
             if (rateLimit && action === "allow") cmd = cmd.replace("allow", "limit");
             if (log) cmd += ` log`;
-            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            if (comment) cmd += ` comment "${shellSafeComment(comment)}"`;
             await this.execCommand(cmd);
             return;
         }
@@ -397,7 +457,7 @@ class FirewallService {
             if (direction === "out") cmd += ` out`;
             if (iface) cmd += ` on ${shellSafe(iface)}`;
             if (log) cmd += ` log`;
-            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            if (comment) cmd += ` comment "${shellSafeComment(comment)}"`;
             await this.execCommand(cmd);
             return;
         }
@@ -411,7 +471,7 @@ class FirewallService {
             if (direction === "out") cmd += ` out`;
             if (iface) cmd += ` on ${shellSafe(iface)}`;
             if (log) cmd += ` log`;
-            if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+            if (comment) cmd += ` comment "${shellSafeComment(comment)}"`;
             await this.execCommand(cmd);
             return;
         }
@@ -429,7 +489,7 @@ class FirewallService {
         if (direction === "out") cmd += ` out`;
         if (iface) cmd += ` on ${shellSafe(iface)}`;
         if (log) cmd += ` log`;
-        if (comment) cmd += ` comment "${shellSafe(comment)}"`;
+        if (comment) cmd += ` comment "${shellSafeComment(comment)}"`;
         await this.execCommand(cmd);
     }
 
@@ -438,7 +498,7 @@ class FirewallService {
         await this.execCommand(`echo "y" | sudo -n ufw delete ${id}`);
     }
 
-    // ── Firewalld Implementation ────────────────────────────────
+    // â”€â”€ Firewalld Implementation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private async getStatusFirewalld(available: FirewallBackend[]): Promise<FirewallStatus> {
         const stateOutput = await this.execCommand("sudo -n firewall-cmd --state 2>/dev/null");
@@ -481,8 +541,7 @@ class FirewallService {
 
         // Raw rule
         if (ruleType === "raw" && rawRule) {
-            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
-            await this.execCommand(`sudo -n firewall-cmd ${perm} ${rawRule}`);
+            await this.execCommand(`sudo -n firewall-cmd ${perm} ${validateRawRule(rawRule, "firewalld")}`);
             await this.execCommand("sudo -n firewall-cmd --reload");
             return;
         }
@@ -593,7 +652,7 @@ class FirewallService {
         throw new Error("Firewalld rule deletion requires the rule details. Use remove-port or remove-service directly.");
     }
 
-    // ── iptables Implementation ──────────────────────────────────
+    // â”€â”€ iptables Implementation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private async getStatusIptables(available: FirewallBackend[]): Promise<FirewallStatus> {
         let output: string;
@@ -651,8 +710,7 @@ class FirewallService {
 
         // Raw rule
         if (ruleType === "raw" && rawRule) {
-            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
-            await this.execCommand(`sudo -n iptables ${rawRule}`);
+            await this.execCommand(`sudo -n iptables ${validateRawRule(rawRule, "iptables")}`);
             return;
         }
 
@@ -668,7 +726,7 @@ class FirewallService {
             return;
         }
 
-        // Service rule — resolve service to port
+        // Service rule â€” resolve service to port
         if (ruleType === "service") {
             const svcToPort: Record<string, string> = { ssh: "22", http: "80", https: "443", dns: "53", ftp: "21", smtp: "25", smtps: "465", imap: "143", imaps: "993", pop3: "110", pop3s: "995", mysql: "3306", postgresql: "5432", redis: "6379", mongodb: "27017", nfs: "2049", samba: "139", ntp: "123", syslog: "514", snmp: "161", rsync: "873", vnc: "5900", rdp: "3389", openvpn: "1194", wireguard: "51820" };
             const resolvedPort = svcToPort[service || ""] || toPort;
@@ -727,7 +785,7 @@ class FirewallService {
         await this.execCommand(`sudo -n iptables -D INPUT ${id}`);
     }
 
-    // ── nftables Implementation ──────────────────────────────────
+    // â”€â”€ nftables Implementation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private async getStatusNftables(available: FirewallBackend[]): Promise<FirewallStatus> {
         let output: string;
@@ -810,8 +868,7 @@ class FirewallService {
 
         // Raw rule
         if (ruleType === "raw" && rawRule) {
-            if (!/^[a-zA-Z0-9.\/_:\- ]+$/.test(rawRule)) throw new Error("Invalid raw rule characters");
-            await this.execCommand(`sudo -n nft ${rawRule}`);
+            await this.execCommand(`sudo -n nft ${validateRawRule(rawRule, "nftables")}`);
             return;
         }
 
@@ -831,7 +888,7 @@ class FirewallService {
             return;
         }
 
-        // Service rule — resolve to port
+        // Service rule â€” resolve to port
         if (ruleType === "service") {
             const svcToPort: Record<string, string> = { ssh: "22", http: "80", https: "443", dns: "53", ftp: "21", smtp: "25", smtps: "465", imap: "143", imaps: "993", pop3: "110", pop3s: "995", mysql: "3306", postgresql: "5432", redis: "6379", mongodb: "27017", nfs: "2049", samba: "139", ntp: "123", syslog: "514", snmp: "161", rsync: "873", vnc: "5900", rdp: "3389", openvpn: "1194", wireguard: "51820" };
             const resolvedPort = svcToPort[service || ""] || toPort;
@@ -907,7 +964,7 @@ class FirewallService {
         throw new Error("nftables rule deletion requires the rule handle. Use 'nft delete rule' directly.");
     }
 
-    // ── Unified API ──────────────────────────────────────────────
+    // â”€â”€ Unified API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getStatus(): Promise<FirewallStatus> {
         try {
@@ -1011,3 +1068,4 @@ class FirewallService {
 }
 
 export const firewallService = new FirewallService();
+

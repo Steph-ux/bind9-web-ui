@@ -1,99 +1,107 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, AlertTriangle, Loader2, Plus, RefreshCw, Server } from "lucide-react";
+
+import DashboardLayout from "@/components/layout/DashboardLayout";
+import { MetricCard, PageHeader, PageState } from "@/components/layout";
+import {
+  DEFAULT_NOTIFICATION_CHANNEL_FORM,
+  DEFAULT_REPLICATION_SERVER_FORM,
+  type NotificationChannelFormState,
+  type ReplicationBindingDraft,
+  type ReplicationServerFormState,
+} from "@/components/replication/constants";
+import { NotificationChannelDialog, ReplicationZoneBindingsDialog } from "@/components/replication/ReplicationAuxDialogs";
+import { ReplicationServerDialog } from "@/components/replication/ReplicationServerDialog";
+import { ReplicationServersSection } from "@/components/replication/ReplicationServersSection";
+import {
+  ReplicationBackupsSection,
+  ReplicationConflictsSection,
+  ReplicationHistorySection,
+  ReplicationNotificationSection,
+} from "@/components/replication/ReplicationSections";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  createBackup,
+  createNotificationChannel,
+  createReplicationServer,
+  deleteBackup,
+  deleteNotificationChannel,
+  deleteReplicationServer,
+  detectReplicationConflicts,
+  getBackups,
+  getHealthChecks,
+  getNotificationChannels,
+  getReplicationConflicts,
+  getReplicationServers,
+  getReplicationStats,
+  getReplicationZoneBindings,
+  getSyncHistory,
+  getSyncMetrics,
+  getZones,
+  resolveAllReplicationConflicts,
+  resolveReplicationConflict,
+  restoreBackup,
+  runHealthChecks,
+  setReplicationZoneBindings,
+  syncAllReplication,
+  testReplicationServer,
+  updateReplicationServer,
+  type BackupEntry,
+  type HealthCheckEntry,
+  type NotificationChannelEntry,
+  type ReplicationConflictEntry,
+  type ReplicationServerEntry,
+  type ReplicationStats,
+  type ReplicationZoneBindingEntry,
+  type SyncHistoryEntry,
+  type SyncMetrics,
+  type ZoneData,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
 import { useReplicationWs } from "@/hooks/use-repl-ws";
-import { Server, Plus, Trash2, Loader2, ShieldAlert, Plug, Pencil, Power, PowerOff, RefreshCw, Bell, AlertTriangle, CheckCircle, Globe, Heart, Activity, Mail, Webhook, MessageSquare, Archive, RotateCcw } from "lucide-react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { getReplicationServers, createReplicationServer, updateReplicationServer, deleteReplicationServer, testReplicationServer, syncAllReplication, getReplicationConflicts, detectReplicationConflicts, resolveReplicationConflict, resolveAllReplicationConflicts, getReplicationStats, getReplicationZoneBindings, setReplicationZoneBindings, getHealthChecks, runHealthChecks, getNotificationChannels, createNotificationChannel, deleteNotificationChannel, getSyncHistory, getSyncMetrics, getBackups, createBackup, restoreBackup, deleteBackup, type ReplicationServerEntry, type ReplicationConflictEntry, type ReplicationStats, type ReplicationZoneBindingEntry, type HealthCheckEntry, type NotificationChannelEntry, type SyncHistoryEntry, type SyncMetrics, type BackupEntry } from "@/lib/api";
+
+function createServerForm(): ReplicationServerFormState {
+  return { ...DEFAULT_REPLICATION_SERVER_FORM };
+}
+
+function createChannelForm(): NotificationChannelFormState {
+  return { ...DEFAULT_NOTIFICATION_CHANNEL_FORM };
+}
 
 export default function ReplicationPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
   useReplicationWs();
+
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ReplicationServerEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReplicationServerEntry | null>(null);
-  const [testTarget, setTestTarget] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testingServerId, setTestingServerId] = useState<string | null>(null);
   const [bindingTarget, setBindingTarget] = useState<ReplicationServerEntry | null>(null);
-  const [bindingZones, setBindingZones] = useState<{ id: string; domain: string; enabled: boolean; mode: "push" | "pull" | "both" }[]>([]);
+  const [bindingZones, setBindingZones] = useState<ReplicationBindingDraft[]>([]);
   const [bindingLoading, setBindingLoading] = useState(false);
-
-  // Form state
-  const [formName, setFormName] = useState("");
-  const [formHost, setFormHost] = useState("");
-  const [formPort, setFormPort] = useState("22");
-  const [formUsername, setFormUsername] = useState("root");
-  const [formAuthType, setFormAuthType] = useState<"password" | "key">("password");
-  const [formPassword, setFormPassword] = useState("");
-  const [formKey, setFormKey] = useState("");
-  const [formConfDir, setFormConfDir] = useState("/etc/bind");
-  const [formZoneDir, setFormZoneDir] = useState("");
-  const [formRole, setFormRole] = useState<"slave" | "secondary">("slave");
-
-  const resetForm = () => {
-    setFormName(""); setFormHost(""); setFormPort("22"); setFormUsername("root");
-    setFormAuthType("password"); setFormPassword(""); setFormKey("");
-    setFormConfDir("/etc/bind"); setFormZoneDir(""); setFormRole("slave");
-  };
+  const [serverForm, setServerForm] = useState<ReplicationServerFormState>(createServerForm);
+  const [addChannelOpen, setAddChannelOpen] = useState(false);
+  const [channelForm, setChannelForm] = useState<NotificationChannelFormState>(createChannelForm);
 
   const { data: servers, isLoading } = useQuery<ReplicationServerEntry[]>({
     queryKey: ["replication"],
     queryFn: getReplicationServers,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: createReplicationServer,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["replication"] });
-      setAddOpen(false);
-      resetForm();
-      toast({ title: "Server added" });
-    },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to add server", description: err.message });
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<ReplicationServerEntry> }) =>
-      updateReplicationServer(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["replication"] });
-      setEditTarget(null);
-      resetForm();
-      toast({ title: "Server updated" });
-    },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to update server", description: err.message });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: deleteReplicationServer,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["replication"] });
-      setDeleteTarget(null);
-      toast({ title: "Server deleted" });
-    },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to delete server", description: err.message });
-    },
-  });
-
-  const { data: conflicts } = useQuery<ReplicationConflictEntry[]>({
-    queryKey: ["replication-conflicts"],
-    queryFn: () => getReplicationConflicts(false),
   });
 
   const { data: stats } = useQuery<ReplicationStats>({
@@ -127,36 +135,79 @@ export default function ReplicationPage() {
     queryFn: () => getBackups(),
   });
 
-  const [addChannelOpen, setAddChannelOpen] = useState(false);
-  const [channelForm, setChannelForm] = useState({ name: "", type: "webhook" as "email" | "webhook" | "slack", url: "", email: "" });
+  const { data: conflicts } = useQuery<ReplicationConflictEntry[]>({
+    queryKey: ["replication-conflicts"],
+    queryFn: () => getReplicationConflicts(false),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: createReplicationServer,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["replication"] });
+      setAddOpen(false);
+      setServerForm(createServerForm());
+      toast({ title: "Server added" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to add server", description: error.message });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<ReplicationServerEntry> }) =>
+      updateReplicationServer(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["replication"] });
+      setEditTarget(null);
+      setServerForm(createServerForm());
+      toast({ title: "Server updated" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to update server", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteReplicationServer,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["replication"] });
+      setDeleteTarget(null);
+      toast({ title: "Server deleted" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to delete server", description: error.message });
+    },
+  });
 
   const syncMutation = useMutation({
     mutationFn: syncAllReplication,
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["replication"] });
-      const ok = result.results.filter(r => r.success).length;
-      toast({ title: "Sync completed", description: `${ok}/${result.results.length} servers OK (${result.totalZones} zones, ${result.duration}ms)` });
+      const successCount = result.results.filter((entry) => entry.success).length;
+      toast({
+        title: "Sync completed",
+        description: `${successCount}/${result.results.length} servers OK (${result.totalZones} zones, ${result.duration}ms)`,
+      });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Sync failed", description: err.message });
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Sync failed", description: error.message });
     },
   });
 
   const testMutation = useMutation({
     mutationFn: testReplicationServer,
-    onSuccess: (result, id) => {
-      setTestResult(result);
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["replication"] });
-      if (result.success) {
-        toast({ title: "Connection successful", description: result.message });
-      } else {
-        toast({ variant: "destructive", title: "Connection failed", description: result.message });
-      }
-      setTestTarget(null);
+      toast({
+        variant: result.success ? "default" : "destructive",
+        title: result.success ? "Connection successful" : "Connection failed",
+        description: result.message,
+      });
+      setTestingServerId(null);
     },
-    onError: (err: Error) => {
-      setTestResult({ success: false, message: err.message });
-      setTestTarget(null);
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Connection failed", description: error.message });
+      setTestingServerId(null);
     },
   });
 
@@ -166,8 +217,8 @@ export default function ReplicationPage() {
       queryClient.invalidateQueries({ queryKey: ["replication-conflicts"] });
       toast({ title: "Conflict detection complete", description: `${result.detected} new conflicts found` });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Detection failed", description: err.message });
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Detection failed", description: error.message });
     },
   });
 
@@ -177,8 +228,8 @@ export default function ReplicationPage() {
       queryClient.invalidateQueries({ queryKey: ["replication-conflicts"] });
       toast({ title: "Conflict resolved" });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to resolve", description: err.message });
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to resolve", description: error.message });
     },
   });
 
@@ -188,354 +239,418 @@ export default function ReplicationPage() {
       queryClient.invalidateQueries({ queryKey: ["replication-conflicts"] });
       toast({ title: "All conflicts resolved" });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to resolve all", description: err.message });
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to resolve all", description: error.message });
     },
   });
 
   if (!user || user.role !== "admin") {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-          <div className="text-center">
-            <ShieldAlert className="h-12 w-12 text-destructive mb-3" />
-            <h4 className="font-semibold">Access Denied</h4>
-            <p className="text-muted-foreground">You need admin role to access this page.</p>
-          </div>
-        </div>
+        <PageState
+          title="Access denied"
+          description="You need administrator privileges to manage replication."
+          icon={AlertTriangle}
+          tone="danger"
+          className="min-h-[60vh]"
+        />
       </DashboardLayout>
     );
   }
 
-  const statusBadge = (status: string) => {
-    if (status === "success") return <Badge className="bg-green-600">Connected</Badge>;
-    if (status === "failed") return <Badge variant="destructive">Failed</Badge>;
-    if (status === "pending") return <Badge className="bg-yellow-600">Pending</Badge>;
-    return <Badge variant="secondary">Never</Badge>;
+  const resetServerForm = () => setServerForm(createServerForm());
+  const resetChannelForm = () => setChannelForm(createChannelForm());
+
+  const openAddServerDialog = () => {
+    resetServerForm();
+    setAddOpen(true);
   };
 
-  const openEdit = (s: ReplicationServerEntry) => {
-    setFormName(s.name); setFormHost(s.host); setFormPort(String(s.port));
-    setFormUsername(s.username); setFormAuthType(s.authType);
-    setFormPassword(""); setFormKey("");
-    setFormConfDir(s.bind9ConfDir || "/etc/bind");
-    setFormZoneDir(s.bind9ZoneDir || "");
-    setFormRole(s.role);
-    setEditTarget(s);
+  const openEditDialog = (server: ReplicationServerEntry) => {
+    setServerForm({
+      name: server.name,
+      host: server.host,
+      port: String(server.port),
+      username: server.username,
+      authType: server.authType,
+      password: "",
+      privateKey: "",
+      bind9ConfDir: server.bind9ConfDir || "/etc/bind",
+      bind9ZoneDir: server.bind9ZoneDir || "",
+      role: server.role,
+    });
+    setEditTarget(server);
   };
 
-  const formFields = (
-    <>
-      <div className="grid gap-2">
-        <Label>Name</Label>
-        <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="ns2.example.com" />
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2 grid gap-2">
-          <Label>Host</Label>
-          <Input value={formHost} onChange={e => setFormHost(e.target.value)} placeholder="192.168.1.2" />
-        </div>
-        <div className="grid gap-2">
-          <Label>Port</Label>
-          <Input type="number" value={formPort} onChange={e => setFormPort(e.target.value)} />
-        </div>
-      </div>
-      <div className="grid gap-2">
-        <Label>Username</Label>
-        <Input value={formUsername} onChange={e => setFormUsername(e.target.value)} />
-      </div>
-      <div className="grid gap-2">
-        <Label>Auth Type</Label>
-        <Select value={formAuthType} onValueChange={v => setFormAuthType(v as "password" | "key")}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="password">Password</SelectItem>
-            <SelectItem value="key">SSH Key</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {formAuthType === "password" ? (
-        <div className="grid gap-2">
-          <Label>Password</Label>
-          <Input type="password" value={formPassword} onChange={e => setFormPassword(e.target.value)} placeholder="••••••••" />
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          <Label>Private Key</Label>
-          <Input type="password" value={formKey} onChange={e => setFormKey(e.target.value)} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
-        </div>
-      )}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-2">
-          <Label>BIND9 Conf Dir</Label>
-          <Input value={formConfDir} onChange={e => setFormConfDir(e.target.value)} />
-        </div>
-        <div className="grid gap-2">
-          <Label>BIND9 Zone Dir</Label>
-          <Input value={formZoneDir} onChange={e => setFormZoneDir(e.target.value)} />
-        </div>
-      </div>
-      <div className="grid gap-2">
-        <Label>Role</Label>
-        <Select value={formRole} onValueChange={v => setFormRole(v as "slave" | "secondary")}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="slave">Slave</SelectItem>
-            <SelectItem value="secondary">Secondary</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-    </>
-  );
+  const handleCreateServer = () => {
+    createMutation.mutate({
+      name: serverForm.name,
+      host: serverForm.host,
+      port: parseInt(serverForm.port, 10) || 22,
+      username: serverForm.username,
+      authType: serverForm.authType,
+      password: serverForm.password,
+      privateKey: serverForm.privateKey,
+      bind9ConfDir: serverForm.bind9ConfDir,
+      bind9ZoneDir: serverForm.bind9ZoneDir,
+      role: serverForm.role,
+    });
+  };
+
+  const handleUpdateServer = () => {
+    if (!editTarget) {
+      return;
+    }
+
+    const data: Partial<ReplicationServerEntry> = {};
+    if (serverForm.name !== editTarget.name) data.name = serverForm.name;
+    if (serverForm.host !== editTarget.host) data.host = serverForm.host;
+    if ((parseInt(serverForm.port, 10) || 22) !== editTarget.port) data.port = parseInt(serverForm.port, 10) || 22;
+    if (serverForm.username !== editTarget.username) data.username = serverForm.username;
+    if (serverForm.authType !== editTarget.authType) data.authType = serverForm.authType;
+    if (serverForm.password) data.password = serverForm.password;
+    if (serverForm.privateKey) data.privateKey = serverForm.privateKey;
+    if (serverForm.bind9ConfDir !== (editTarget.bind9ConfDir || "/etc/bind")) data.bind9ConfDir = serverForm.bind9ConfDir;
+    if (serverForm.bind9ZoneDir !== (editTarget.bind9ZoneDir || "")) data.bind9ZoneDir = serverForm.bind9ZoneDir;
+    if (serverForm.role !== editTarget.role) data.role = serverForm.role;
+
+    updateMutation.mutate({ id: editTarget.id, data });
+  };
+
+  const handleToggleEnabled = (server: ReplicationServerEntry) => {
+    updateMutation.mutate({ id: server.id, data: { enabled: !server.enabled } });
+  };
+
+  const handleTestServer = (serverId: string) => {
+    setTestingServerId(serverId);
+    testMutation.mutate(serverId);
+  };
+
+  const handleManageZones = async (server: ReplicationServerEntry) => {
+    setBindingTarget(server);
+    setBindingLoading(true);
+    try {
+      const [bindings, allZones] = await Promise.all([
+        getReplicationZoneBindings(server.id),
+        getZones(),
+      ]);
+      const bindingMap = new Map(
+        bindings.map((binding: ReplicationZoneBindingEntry) => [binding.zoneId, binding])
+      );
+      setBindingZones(
+        allZones
+          .filter((zone: ZoneData) => zone.type === "master" && zone.status === "active")
+          .map((zone: ZoneData) => ({
+            id: zone.id,
+            domain: zone.domain,
+            enabled: bindingMap.has(zone.id) ? bindingMap.get(zone.id)!.enabled : true,
+            mode: bindingMap.get(zone.id)?.mode || "push",
+          }))
+      );
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Failed to load bindings", description: error.message });
+    } finally {
+      setBindingLoading(false);
+    }
+  };
+
+  const handleSaveBindings = async () => {
+    if (!bindingTarget) {
+      return;
+    }
+    try {
+      await setReplicationZoneBindings(
+        bindingTarget.id,
+        bindingZones.map((binding) => ({
+          zoneId: binding.id,
+          mode: binding.mode,
+          enabled: binding.enabled,
+        }))
+      );
+      toast({ title: "Zone bindings updated" });
+      setBindingTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["replication"] });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Failed to save bindings", description: error.message });
+    }
+  };
+
+  const handleHealthCheck = async () => {
+    try {
+      await runHealthChecks();
+      queryClient.invalidateQueries({ queryKey: ["health-checks"] });
+      toast({ title: "Health check completed" });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Health check failed", description: error.message });
+    }
+  };
+
+  const handleCreateChannel = async () => {
+    try {
+      const config: Record<string, string> = {};
+      if (channelForm.type === "webhook") config.url = channelForm.url;
+      if (channelForm.type === "slack") config.webhookUrl = channelForm.url;
+      if (channelForm.type === "email") config.email = channelForm.email;
+
+      await createNotificationChannel({
+        name: channelForm.name,
+        type: channelForm.type,
+        config,
+      });
+      toast({ title: "Channel created" });
+      setAddChannelOpen(false);
+      resetChannelForm();
+      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Failed", description: error.message });
+    }
+  };
+
+  const handleDeleteChannel = async (channelId: string) => {
+    try {
+      await deleteNotificationChannel(channelId);
+      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
+      toast({ title: "Channel deleted" });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Failed", description: error.message });
+    }
+  };
+
+  const handleCreateBackup = async (scope: "full" | "zones") => {
+    try {
+      await createBackup("manual", scope);
+      toast({ title: scope === "full" ? "Full backup created" : "Zone backup created" });
+      queryClient.invalidateQueries({ queryKey: ["backups"] });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Backup failed", description: error.message });
+    }
+  };
+
+  const handleRestoreBackup = async (backupId: string) => {
+    try {
+      const result = await restoreBackup(backupId);
+      toast({
+        title: result.success ? "Restored" : "Failed",
+        description: result.message,
+        variant: result.success ? "default" : "destructive",
+      });
+      if (result.success) {
+        queryClient.invalidateQueries();
+      }
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Restore failed", description: error.message });
+    }
+  };
+
+  const handleDeleteBackup = async (backupId: string) => {
+    try {
+      await deleteBackup(backupId);
+      toast({ title: "Backup deleted" });
+      queryClient.invalidateQueries({ queryKey: ["backups"] });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Failed", description: error.message });
+    }
+  };
 
   return (
     <DashboardLayout>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Replication Servers</h2>
-          <p className="text-muted-foreground">Manage BIND9 slave/secondary servers for zone replication.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
-            {syncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Sync All
-          </Button>
-          <Button variant="outline" className="gap-2" onClick={async () => {
-            try { await runHealthChecks(); queryClient.invalidateQueries({ queryKey: ["health-checks"] }); toast({ title: "Health check completed" }); }
-            catch (err: any) { toast({ variant: "destructive", title: "Health check failed", description: err.message }); }
-          }}>
-            <Activity className="h-4 w-4" /> Health Check
-          </Button>
-          <Button className="gap-2" onClick={() => { resetForm(); setAddOpen(true); }}>
-            <Plus className="h-4 w-4" /> Add Server
-          </Button>
-        </div>
+      <div className="space-y-6">
+        <PageHeader
+          title="Replication Servers"
+          description="Manage slave and secondary BIND9 nodes, synchronization health and recovery workflows."
+          icon={Server}
+          badge={<Badge variant="outline">{servers?.length || 0} configured nodes</Badge>}
+          actions={
+            <>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+              >
+                {syncMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Sync All
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={handleHealthCheck}>
+                <Activity className="h-4 w-4" />
+                Health Check
+              </Button>
+              <Button className="gap-2" onClick={openAddServerDialog}>
+                <Plus className="h-4 w-4" />
+                Add Server
+              </Button>
+            </>
+          }
+        />
+
+        {stats ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MetricCard
+              label="Servers"
+              value={stats.totalServers}
+              description={`${stats.enabledServers} enabled, ${stats.connectedServers} connected`}
+              icon={Server}
+            />
+            <MetricCard
+              label="Master Zones"
+              value={stats.totalZones}
+              description="Zones available for replication."
+              icon={Server}
+            />
+            <MetricCard
+              label="Conflicts"
+              value={stats.unresolvedConflicts}
+              description={`${stats.serialMismatches} serial, ${stats.zoneMissing} missing`}
+              icon={AlertTriangle}
+              tone={stats.unresolvedConflicts > 0 ? "warning" : "success"}
+            />
+            <MetricCard
+              label="Last Sync"
+              value={stats.lastSyncAt ? new Date(stats.lastSyncAt).toLocaleString() : "Never"}
+              description={`${stats.failedServers} failed, ${stats.neverSyncedServers} never synced`}
+              icon={RefreshCw}
+            />
+            {syncMetrics ? (
+              <MetricCard
+                label="Sync Rate"
+                value={`${syncMetrics.total > 0 ? Math.round((syncMetrics.success / syncMetrics.total) * 100) : 0}%`}
+                description={`${syncMetrics.success}/${syncMetrics.total} OK, avg ${syncMetrics.avgDurationMs}ms`}
+                icon={Activity}
+                tone="success"
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        {isLoading ? (
+          <PageState
+            loading
+            title="Loading replication servers"
+            description="Fetching replication topology, health state and recent history."
+            className="min-h-[40vh]"
+          />
+        ) : !servers || servers.length === 0 ? (
+          <PageState
+            title="No replication servers"
+            description="Add a slave or secondary server to start replicating zones."
+            icon={Server}
+            action={
+              <Button className="gap-2" onClick={openAddServerDialog}>
+                <Plus className="h-4 w-4" />
+                Add Server
+              </Button>
+            }
+          />
+        ) : (
+          <ReplicationServersSection
+            servers={servers}
+            healthChecks={healthChecks}
+            testing={testingServerId !== null}
+            onTest={handleTestServer}
+            onToggleEnabled={handleToggleEnabled}
+            onManageZones={handleManageZones}
+            onEdit={openEditDialog}
+            onDelete={setDeleteTarget}
+          />
+        )}
+
+        <ReplicationConflictsSection
+          conflicts={conflicts}
+          detecting={detectMutation.isPending}
+          resolvingAll={resolveAllMutation.isPending}
+          onDetect={() => detectMutation.mutate()}
+          onResolveAll={() => resolveAllMutation.mutate()}
+          onResolve={(conflictId) => resolveMutation.mutate(conflictId)}
+        />
+
+        <ReplicationHistorySection history={syncHistoryData} />
+
+        <ReplicationNotificationSection
+          channels={channels}
+          onOpenCreate={() => setAddChannelOpen(true)}
+          onDelete={handleDeleteChannel}
+        />
+
+        <ReplicationBackupsSection
+          backups={backups}
+          onCreateBackup={handleCreateBackup}
+          onRestore={handleRestoreBackup}
+          onDelete={handleDeleteBackup}
+        />
       </div>
 
-      {/* Insights Summary */}
-      {stats && (
-        <div className="grid gap-4 md:grid-cols-5 mb-6">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Servers</p>
-                  <p className="text-2xl font-bold">{stats.totalServers}</p>
-                </div>
-                <Server className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">{stats.enabledServers} enabled, {stats.connectedServers} connected</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Master Zones</p>
-                  <p className="text-2xl font-bold">{stats.totalZones}</p>
-                </div>
-                <Globe className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Zones available for replication</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Conflicts</p>
-                  <p className="text-2xl font-bold">{stats.unresolvedConflicts}</p>
-                </div>
-                <AlertTriangle className={`h-8 w-8 ${stats.unresolvedConflicts > 0 ? "text-yellow-500" : "text-muted-foreground"}`} />
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">{stats.serialMismatches} serial, {stats.zoneMissing} missing</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Last Sync</p>
-                  <p className="text-lg font-bold">{stats.lastSyncAt ? new Date(stats.lastSyncAt).toLocaleString() : "Never"}</p>
-                </div>
-                <RefreshCw className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">{stats.failedServers} failed, {stats.neverSyncedServers} never synced</p>
-            </CardContent>
-          </Card>
-          {syncMetrics && (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Sync Rate</p>
-                    <p className="text-2xl font-bold">{syncMetrics.total > 0 ? Math.round(syncMetrics.success / syncMetrics.total * 100) : 0}%</p>
-                  </div>
-                  <Activity className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">{syncMetrics.success}/{syncMetrics.total} OK, avg {syncMetrics.avgDurationMs}ms</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
+      <ReplicationServerDialog
+        open={addOpen}
+        title="Add Replication Server"
+        submitLabel="Add Server"
+        saving={createMutation.isPending}
+        form={serverForm}
+        setForm={setServerForm}
+        onOpenChange={(open) => {
+          setAddOpen(open);
+          if (!open) {
+            resetServerForm();
+          }
+        }}
+        onSubmit={handleCreateServer}
+      />
 
-      {isLoading ? (
-        <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
-      ) : servers?.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16">
-            <Server className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-1">No replication servers</h3>
-            <p className="text-muted-foreground mb-4">Add a slave server to start replicating zones.</p>
-            <Button className="gap-2" onClick={() => { resetForm(); setAddOpen(true); }}>
-              <Plus className="h-4 w-4" /> Add Server
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {servers?.map(s => (
-            <Card key={s.id} className={!s.enabled ? "opacity-60" : ""}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Server className="h-4 w-4" /> {s.name}
-                    {(() => {
-                      const hc = healthChecks?.find(h => h.serverId === s.id);
-                      if (!hc || !s.enabled) return null;
-                      return hc.status === "healthy"
-                        ? <Heart className="h-3.5 w-3.5 text-green-500" />
-                        : hc.status === "degraded"
-                          ? <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
-                          : <AlertTriangle className="h-3.5 w-3.5 text-red-500" />;
-                    })()}
-                  </CardTitle>
-                  {statusBadge(s.lastSyncStatus)}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Host</span>
-                  <span className="font-mono">{s.host}:{s.port}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Role</span>
-                  <Badge variant="outline">{s.role}</Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Last Sync</span>
-                  <span>{s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : "Never"}</span>
-                </div>
-                <div className="flex gap-1 pt-2">
-                  <Button variant="ghost" size="sm" className="gap-1 h-8" onClick={() => { setTestTarget(s.id); setTestResult(null); testMutation.mutate(s.id); }} disabled={testMutation.isPending}>
-                    <Plug className="h-3 w-3" /> Test
-                  </Button>
-                  <Button variant="ghost" size="sm" className="gap-1 h-8" onClick={() => updateMutation.mutate({ id: s.id, data: { enabled: !s.enabled } as any })}>
-                    {s.enabled ? <><PowerOff className="h-3 w-3" /> Disable</> : <><Power className="h-3 w-3" /> Enable</>}
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-8" title="Manage zones" onClick={async () => {
-                    setBindingTarget(s);
-                    setBindingLoading(true);
-                    try {
-                      const [bindings, allZones] = await Promise.all([
-                        getReplicationZoneBindings(s.id),
-                        fetch("/api/zones").then(r => r.json()),
-                      ]);
-                      const bindingMap = new Map(bindings.map((b: ReplicationZoneBindingEntry) => [b.zoneId, b]));
-                      setBindingZones(allZones
-                        .filter((z: any) => z.type === "master" && z.status === "active")
-                        .map((z: any) => ({
-                          id: z.id,
-                          domain: z.domain,
-                          enabled: bindingMap.has(z.id) ? bindingMap.get(z.id)!.enabled : true,
-                          mode: bindingMap.get(z.id)?.mode || "push" as const,
-                        })));
-                    } catch {}
-                    setBindingLoading(false);
-                  }}>
-                    <Globe className="h-3 w-3" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-8" onClick={() => openEdit(s)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-8" onClick={() => setDeleteTarget(s)}>
-                    <Trash2 className="h-3 w-3 text-destructive" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <ReplicationServerDialog
+        open={!!editTarget}
+        title={`Edit: ${editTarget?.name || ""}`}
+        submitLabel="Save Changes"
+        saving={updateMutation.isPending}
+        form={serverForm}
+        setForm={setServerForm}
+        editTarget={editTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditTarget(null);
+            resetServerForm();
+          }
+        }}
+        onSubmit={handleUpdateServer}
+      />
 
-      {/* Add Server Dialog */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add Replication Server</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3 py-2 max-h-[60vh] overflow-y-auto">
-            {formFields}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button
-              className="gap-2"
-              disabled={createMutation.isPending || !formName || !formHost}
-              onClick={() => createMutation.mutate({
-                name: formName, host: formHost, port: parseInt(formPort) || 22,
-                username: formUsername, authType: formAuthType,
-                password: formPassword, privateKey: formKey,
-                bind9ConfDir: formConfDir, bind9ZoneDir: formZoneDir, role: formRole,
-              })}
-            >
-              {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Add Server
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ReplicationZoneBindingsDialog
+        open={!!bindingTarget}
+        serverName={bindingTarget?.name}
+        loading={bindingLoading}
+        bindings={bindingZones}
+        setBindings={setBindingZones}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBindingTarget(null);
+          }
+        }}
+        onSave={handleSaveBindings}
+      />
 
-      {/* Edit Server Dialog */}
-      <Dialog open={!!editTarget} onOpenChange={open => { if (!open) setEditTarget(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Edit: {editTarget?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3 py-2 max-h-[60vh] overflow-y-auto">
-            {formFields}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
-            <Button
-              className="gap-2"
-              disabled={updateMutation.isPending}
-              onClick={() => {
-                if (!editTarget) return;
-                const data: any = {};
-                if (formName !== editTarget.name) data.name = formName;
-                if (formHost !== editTarget.host) data.host = formHost;
-                if (parseInt(formPort) !== editTarget.port) data.port = parseInt(formPort);
-                if (formUsername !== editTarget.username) data.username = formUsername;
-                if (formAuthType !== editTarget.authType) data.authType = formAuthType;
-                if (formPassword) data.password = formPassword;
-                if (formKey) data.privateKey = formKey;
-                if (formConfDir !== (editTarget.bind9ConfDir || "/etc/bind")) data.bind9ConfDir = formConfDir;
-                if (formZoneDir !== (editTarget.bind9ZoneDir || "")) data.bind9ZoneDir = formZoneDir;
-                if (formRole !== editTarget.role) data.role = formRole;
-                updateMutation.mutate({ id: editTarget.id, data });
-              }}
-            >
-              {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <NotificationChannelDialog
+        open={addChannelOpen}
+        form={channelForm}
+        setForm={setChannelForm}
+        onOpenChange={(open) => {
+          setAddChannelOpen(open);
+          if (!open) {
+            resetChannelForm();
+          }
+        }}
+        onSubmit={handleCreateChannel}
+      />
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Server</AlertDialogTitle>
@@ -545,398 +660,19 @@ export default function ReplicationPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => {
-              if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
-            }}>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteTarget) {
+                  deleteMutation.mutate(deleteTarget.id);
+                }
+              }}
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Zone Bindings Dialog */}
-      <Dialog open={!!bindingTarget} onOpenChange={open => { if (!open) setBindingTarget(null); }}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Manage Zones — {bindingTarget?.name}</DialogTitle>
-          </DialogHeader>
-          {bindingLoading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
-          ) : bindingZones.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">No master zones available.</p>
-          ) : (
-            <div className="space-y-3">
-              {bindingZones.map(z => (
-                <div key={z.id} className="flex items-center justify-between gap-3 border rounded-md px-3 py-2">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={z.enabled}
-                      onChange={e => setBindingZones(prev => prev.map(b => b.id === z.id ? { ...b, enabled: e.target.checked } : b))}
-                      className="h-4 w-4"
-                    />
-                    <span className="font-mono text-sm truncate">{z.domain}</span>
-                  </div>
-                  <Select value={z.mode} onValueChange={v => setBindingZones(prev => prev.map(b => b.id === z.id ? { ...b, mode: v as "push" | "pull" | "both" } : b))}>
-                    <SelectTrigger className="w-24 h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="push">Push</SelectItem>
-                      <SelectItem value="pull">Pull</SelectItem>
-                      <SelectItem value="both">Both</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBindingTarget(null)}>Cancel</Button>
-            <Button onClick={async () => {
-              if (!bindingTarget) return;
-              try {
-                await setReplicationZoneBindings(bindingTarget.id, bindingZones.map(z => ({ zoneId: z.id, mode: z.mode, enabled: z.enabled })));
-                toast({ title: "Zone bindings updated" });
-                setBindingTarget(null);
-                queryClient.invalidateQueries({ queryKey: ["replication"] });
-              } catch (err: any) {
-                toast({ variant: "destructive", title: "Failed to save bindings", description: err.message });
-              }
-            }}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Conflicts Section */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
-              Conflicts
-              {conflicts && conflicts.length > 0 && (
-                <Badge variant="destructive">{conflicts.length}</Badge>
-              )}
-            </h3>
-            <p className="text-sm text-muted-foreground">Serial mismatches and missing zones on slave servers.</p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => detectMutation.mutate()} disabled={detectMutation.isPending}>
-              {detectMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-              Detect
-            </Button>
-            {conflicts && conflicts.length > 0 && (
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => resolveAllMutation.mutate()} disabled={resolveAllMutation.isPending}>
-                <CheckCircle className="h-3 w-3" /> Resolve All
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {!conflicts || conflicts.length === 0 ? (
-          <Card>
-            <CardContent className="flex items-center justify-center py-8">
-              <CheckCircle className="h-8 w-8 text-green-500 mr-3" />
-              <span className="text-muted-foreground">No unresolved conflicts detected</span>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="px-4 py-3 text-left font-medium">Zone</th>
-                    <th className="px-4 py-3 text-left font-medium">Server</th>
-                    <th className="px-4 py-3 text-left font-medium">Type</th>
-                    <th className="px-4 py-3 text-left font-medium">Master Serial</th>
-                    <th className="px-4 py-3 text-left font-medium">Slave Serial</th>
-                    <th className="px-4 py-3 text-left font-medium">Detected</th>
-                    <th className="px-4 py-3 text-right font-medium">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {conflicts.map(c => (
-                    <tr key={c.id} className="border-b last:border-0 hover:bg-muted/50">
-                      <td className="px-4 py-2 font-mono">{c.zoneDomain}</td>
-                      <td className="px-4 py-2">{c.serverName}</td>
-                      <td className="px-4 py-2">
-                        <Badge variant={c.conflictType === "zone_missing" ? "destructive" : "outline"}>
-                          {c.conflictType.replace("_", " ")}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2 font-mono">{c.masterSerial || "-"}</td>
-                      <td className="px-4 py-2 font-mono">{c.slaveSerial || "-"}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{new Date(c.detectedAt).toLocaleString()}</td>
-                      <td className="px-4 py-2 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => resolveMutation.mutate(c.id)}>
-                          <CheckCircle className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      {/* Sync History */}
-      {syncHistoryData && syncHistoryData.length > 0 && (
-        <div className="mt-8">
-          <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-            <RefreshCw className="h-5 w-5" />
-            Recent Sync History
-          </h3>
-          <Card>
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Zone</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Action</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Duration</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {syncHistoryData.map(h => (
-                    <tr key={h.id} className="border-b last:border-0 hover:bg-muted/50">
-                      <td className="px-4 py-2 font-mono">{h.zoneDomain}</td>
-                      <td className="px-4 py-2"><Badge variant="outline" className="capitalize">{h.action}</Badge></td>
-                      <td className="px-4 py-2">
-                        {h.success
-                          ? <span className="text-green-600 flex items-center gap-1"><CheckCircle className="h-3.5 w-3.5" /> OK</span>
-                          : <span className="text-red-600 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Fail</span>
-                        }
-                      </td>
-                      <td className="px-4 py-2 text-muted-foreground">{h.durationMs != null ? `${h.durationMs}ms` : "—"}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{new Date(h.createdAt).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Notification Channels */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold flex items-center gap-2">
-            <Bell className="h-5 w-5" />
-            Notification Channels
-          </h3>
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setAddChannelOpen(true)}>
-            <Plus className="h-4 w-4" /> Add Channel
-          </Button>
-        </div>
-        {channels && channels.length > 0 ? (
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {channels.map(ch => {
-              let config: Record<string, string> = {};
-              try { config = JSON.parse(ch.config); } catch {}
-              return (
-                <Card key={ch.id}>
-                  <CardContent className="pt-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {ch.type === "webhook" ? <Webhook className="h-4 w-4" /> : ch.type === "slack" ? <MessageSquare className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
-                        <span className="font-medium">{ch.name}</span>
-                      </div>
-                      <Badge variant={ch.enabled ? "default" : "secondary"}>{ch.enabled ? "Active" : "Disabled"}</Badge>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      <span className="capitalize">{ch.type}</span>
-                      {config.url && <span className="ml-2 font-mono">{config.url.replace(/^https?:\/\/[^/]+/, "***")}</span>}
-                      {config.webhookUrl && <span className="ml-2 font-mono">{config.webhookUrl.replace(/^https?:\/\/[^/]+/, "***")}</span>}
-                      {config.email && <span className="ml-2">{config.email}</span>}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Events: {ch.events}
-                    </div>
-                    <div className="flex gap-2 pt-1">
-                      <Button variant="ghost" size="sm" className="h-7" onClick={async () => {
-                        try { await deleteNotificationChannel(ch.id); queryClient.invalidateQueries({ queryKey: ["notification-channels"] }); toast({ title: "Channel deleted" }); }
-                        catch (err: any) { toast({ variant: "destructive", title: "Failed", description: err.message }); }
-                      }}>
-                        <Trash2 className="h-3 w-3 text-destructive" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        ) : (
-          <Card>
-            <CardContent className="flex flex-col items-center py-8">
-              <Bell className="h-10 w-10 text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">No notification channels configured.</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      {/* Add Channel Dialog */}
-      <Dialog open={addChannelOpen} onOpenChange={setAddChannelOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Notification Channel</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Name</Label>
-              <Input value={channelForm.name} onChange={e => setChannelForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Ops Slack" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Type</Label>
-              <Select value={channelForm.type} onValueChange={v => setChannelForm(f => ({ ...f, type: v as "email" | "webhook" | "slack" }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="webhook">Webhook</SelectItem>
-                  <SelectItem value="slack">Slack</SelectItem>
-                  <SelectItem value="email">Email</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {channelForm.type === "webhook" && (
-              <div className="grid gap-2">
-                <Label>Webhook URL</Label>
-                <Input value={channelForm.url} onChange={e => setChannelForm(f => ({ ...f, url: e.target.value }))} placeholder="https://hooks.example.com/..." />
-              </div>
-            )}
-            {channelForm.type === "slack" && (
-              <div className="grid gap-2">
-                <Label>Slack Webhook URL</Label>
-                <Input value={channelForm.url} onChange={e => setChannelForm(f => ({ ...f, url: e.target.value }))} placeholder="https://hooks.slack.com/services/..." />
-              </div>
-            )}
-            {channelForm.type === "email" && (
-              <div className="grid gap-2">
-                <Label>Email Address</Label>
-                <Input value={channelForm.email} onChange={e => setChannelForm(f => ({ ...f, email: e.target.value }))} placeholder="admin@example.com" />
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddChannelOpen(false)}>Cancel</Button>
-            <Button onClick={async () => {
-              try {
-                const config: Record<string, string> = {};
-                if (channelForm.type === "webhook") config.url = channelForm.url;
-                else if (channelForm.type === "slack") config.webhookUrl = channelForm.url;
-                else if (channelForm.type === "email") config.email = channelForm.email;
-                await createNotificationChannel({ name: channelForm.name, type: channelForm.type, config });
-                toast({ title: "Channel created" });
-                setAddChannelOpen(false);
-                setChannelForm({ name: "", type: "webhook", url: "", email: "" });
-                queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
-              } catch (err: any) {
-                toast({ variant: "destructive", title: "Failed", description: err.message });
-              }
-            }}>
-              Create
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Backups & Disaster Recovery */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold flex items-center gap-2">
-            <Archive className="h-5 w-5" />
-            Backups & Disaster Recovery
-          </h3>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
-              try {
-                await createBackup("manual", "full");
-                toast({ title: "Full backup created" });
-                queryClient.invalidateQueries({ queryKey: ["backups"] });
-              } catch (err: any) { toast({ variant: "destructive", title: "Backup failed", description: err.message }); }
-            }}>
-              <Archive className="h-4 w-4" /> Full Backup
-            </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
-              try {
-                await createBackup("manual", "zones");
-                toast({ title: "Zone backup created" });
-                queryClient.invalidateQueries({ queryKey: ["backups"] });
-              } catch (err: any) { toast({ variant: "destructive", title: "Backup failed", description: err.message }); }
-            }}>
-              <Globe className="h-4 w-4" /> Zones Only
-            </Button>
-          </div>
-        </div>
-        {backups && backups.length > 0 ? (
-          <Card>
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Type</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Scope</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Description</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Size</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Created</th>
-                    <th className="h-10 px-4 text-right font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {backups.map(b => (
-                    <tr key={b.id} className="border-b last:border-0 hover:bg-muted/50">
-                      <td className="px-4 py-2">
-                        <Badge variant={b.type === "auto" ? "secondary" : b.type === "snapshot" ? "outline" : "default"}>
-                          {b.type}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2"><span className="capitalize">{b.scope.replace("_", " ")}</span></td>
-                      <td className="px-4 py-2 text-muted-foreground">{b.description}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{b.sizeBytes ? `${(b.sizeBytes / 1024).toFixed(1)} KB` : "—"}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{new Date(b.createdAt).toLocaleString()}</td>
-                      <td className="px-4 py-2 text-right flex gap-1 justify-end">
-                        <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={async () => {
-                          try {
-                            const res = await restoreBackup(b.id);
-                            toast({ title: res.success ? "Restored" : "Failed", description: res.message, variant: res.success ? "default" : "destructive" });
-                            if (res.success) queryClient.invalidateQueries();
-                          } catch (err: any) { toast({ variant: "destructive", title: "Restore failed", description: err.message }); }
-                        }}>
-                          <RotateCcw className="h-3 w-3" /> Restore
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-7" onClick={async () => {
-                          try {
-                            await deleteBackup(b.id);
-                            toast({ title: "Backup deleted" });
-                            queryClient.invalidateQueries({ queryKey: ["backups"] });
-                          } catch (err: any) { toast({ variant: "destructive", title: "Failed", description: err.message }); }
-                        }}>
-                          <Trash2 className="h-3 w-3 text-destructive" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="flex flex-col items-center py-8">
-              <Archive className="h-10 w-10 text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">No backups yet. Auto-backups run every 6 hours.</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
     </DashboardLayout>
   );
 }

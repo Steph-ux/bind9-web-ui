@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -115,7 +115,7 @@ export default function ProfilePage() {
                                     <Input
                                         id="current-password"
                                         type="password"
-                                        placeholder="••••••••"
+                                        placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                         value={currentPassword}
                                         onChange={e => setCurrentPassword(e.target.value)}
                                     />
@@ -126,7 +126,7 @@ export default function ProfilePage() {
                                 <Input
                                     id="password"
                                     type="password"
-                                    placeholder="••••••••"
+                                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                     value={password}
                                     onChange={e => setPassword(e.target.value)}
                                 />
@@ -136,7 +136,7 @@ export default function ProfilePage() {
                                 <Input
                                     id="confirm"
                                     type="password"
-                                    placeholder="••••••••"
+                                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                     value={confirm}
                                     onChange={e => setConfirm(e.target.value)}
                                 />
@@ -152,3 +152,4 @@ export default function ProfilePage() {
         </DashboardLayout>
     );
 }
+

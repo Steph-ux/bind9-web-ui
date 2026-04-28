@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useRoute, Link } from "wouter";
 import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { MetricCard, PageState } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ export default function ZoneEditor() {
     const [dnssecStatus, setDnssecStatus] = useState<DnssecStatus | null>(null);
     const [dnssecLoading, setDnssecLoading] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [creating, setCreating] = useState(false);
@@ -63,6 +65,7 @@ export default function ZoneEditor() {
             ]);
             setZone(z);
             setRecords(r);
+            setError(null);
 
             // Fetch DNSSEC info separately to not block main load
             try {
@@ -86,6 +89,7 @@ export default function ZoneEditor() {
             } catch (e) { console.error("Failed to fetch DNSSEC keys", e); }
 
         } catch (e: any) {
+            setError(e.message);
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
             setLoading(false);
@@ -181,13 +185,34 @@ export default function ZoneEditor() {
 
     if (loading && !zone) {
         return (
-            <div className="flex items-center justify-center h-screen">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            </div>
+            <DashboardLayout>
+                <PageState
+                    loading
+                    title="Loading zone editor"
+                    description="Fetching zone details, records and DNSSEC state."
+                    className="min-h-[60vh]"
+                />
+            </DashboardLayout>
         );
     }
 
-    if (!zone) return <div>Zone not found</div>;
+    if (!zone) {
+        return (
+            <DashboardLayout>
+                <PageState
+                    title="Zone not found"
+                    description={error || "The requested zone could not be loaded."}
+                    tone="danger"
+                    action={
+                        <Link href="/zones">
+                            <Button variant="outline">Back to zones</Button>
+                        </Link>
+                    }
+                    className="min-h-[60vh]"
+                />
+            </DashboardLayout>
+        );
+    }
 
     return (
         <DashboardLayout>
@@ -202,7 +227,7 @@ export default function ZoneEditor() {
                         <div>
                             <h1 className="text-2xl font-bold tracking-tight">{zone.domain}</h1>
                             <p className="text-muted-foreground text-sm">
-                                {records.length} records • {zone.type}
+                                {records.length} records - {zone.type}
                             </p>
                         </div>
                     </div>
@@ -263,6 +288,34 @@ export default function ZoneEditor() {
                             </Dialog>
                         </div>
                     )}
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <MetricCard
+                        label="Records"
+                        value={records.length}
+                        description="Total DNS records in this zone."
+                        icon={Copy}
+                    />
+                    <MetricCard
+                        label="Filtered Results"
+                        value={filteredRecords.length}
+                        description={searchTerm ? `Filter: ${searchTerm}` : "Current visible result set."}
+                        icon={Search}
+                    />
+                    <MetricCard
+                        label="DNSSEC"
+                        value={dnssec?.enabled || dnssecStatus?.signed ? "Enabled" : "Disabled"}
+                        description={managedKeys.length > 0 ? `${managedKeys.length} managed key(s)` : "No managed key detected."}
+                        icon={ShieldCheck}
+                        tone={dnssec?.enabled || dnssecStatus?.signed ? "success" : "warning"}
+                    />
+                    <MetricCard
+                        label="Editing"
+                        value={canManageDNS ? "Writable" : "Read-only"}
+                        description={canManageDNS ? "You can create and modify records." : "You can only inspect this zone."}
+                        icon={Pencil}
+                    />
                 </div>
 
                 <Tabs defaultValue="records" className="w-full">
@@ -573,3 +626,5 @@ export default function ZoneEditor() {
         </DashboardLayout>
     );
 }
+
+

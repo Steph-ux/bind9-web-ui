@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Save, AlertTriangle, ShieldCheck, Network, Loader2, CheckCircle2, FileJson, ServerCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ export default function Config() {
     if (listenV6Match) setListenV6(listenV6Match[1].trim());
     const fwdMatch = content.match(/forwarders\s*{\s*([^}]+)}/);
     if (fwdMatch) setForwarders(fwdMatch[1].trim().replace(/;\s*/g, ";\n").trim());
+    setForwardOnly(/\bforward\s+only\s*;/m.test(content));
     const aqMatch = content.match(/allow-query\s*{\s*([^}]+)}/);
     if (aqMatch) setAllowQuery(aqMatch[1].trim());
     const atMatch = content.match(/allow-transfer\s*{\s*([^}]+)}/);
@@ -64,12 +65,105 @@ export default function Config() {
     }
   };
 
+  useEffect(() => {
+    if (activeTab !== "advanced" && optionsContent) {
+      parseConfigForForm(optionsContent);
+    }
+  }, [activeTab, optionsContent]);
+
+  const buildOptionsTemplate = () => `options {
+    directory "/var/cache/bind";
+
+    // Network
+    listen-on { ${listenV4} };
+    listen-on-v6 { ${listenV6} };
+
+    // Forwarding
+    forwarders {
+        ${forwarders.split("\n").map((line) => line.trim()).filter(Boolean).join("\n        ")}
+    };
+    forward ${forwardOnly ? "only" : "first"};
+
+    // Security
+    dnssec-validation ${dnssecEnabled ? "auto" : "no"};
+    auth-nxdomain no;
+
+    // Access Control
+    allow-query { ${allowQuery} };
+    allow-transfer { ${allowTransfer} };
+    allow-recursion { ${allowRecursion} };
+
+    // Logging
+    querylog yes;
+};`;
+
+  const insertBeforeOptionsClose = (content: string, directiveBlock: string) => {
+    const closeIndex = content.lastIndexOf("};");
+    if (closeIndex === -1) {
+      return buildOptionsTemplate();
+    }
+
+    const beforeClose = content.slice(0, closeIndex).replace(/\s*$/, "");
+    const afterClose = content.slice(closeIndex);
+    return `${beforeClose}\n${directiveBlock}\n${afterClose}`;
+  };
+
+  const upsertBraceDirective = (content: string, directive: string, body: string) => {
+    const block = `    ${directive} { ${body} };`;
+    const pattern = new RegExp(`^\\s*${directive}\\s*\\{[^}]*\\};`, "m");
+    return pattern.test(content)
+      ? content.replace(pattern, block)
+      : insertBeforeOptionsClose(content, block);
+  };
+
+  const upsertMultilineBlock = (content: string, directive: string, blockBody: string) => {
+    const block = `    ${directive} {\n${blockBody}\n    };`;
+    const pattern = new RegExp(`^\\s*${directive}\\s*\\{[\\s\\S]*?^\\s*\\};`, "m");
+    return pattern.test(content)
+      ? content.replace(pattern, block)
+      : insertBeforeOptionsClose(content, block);
+  };
+
+  const upsertSimpleDirective = (content: string, directive: string, value: string) => {
+    const line = `    ${directive} ${value};`;
+    const pattern = new RegExp(`^\\s*${directive}\\s+[^;]+;`, "m");
+    return pattern.test(content)
+      ? content.replace(pattern, line)
+      : insertBeforeOptionsClose(content, line);
+  };
+
+  const mergeFormIntoOptionsContent = (baseContent: string) => {
+    let nextContent = baseContent.trim() ? baseContent : buildOptionsTemplate();
+    const formattedForwarders = forwarders
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => `        ${line}`)
+      .join("\n");
+
+    nextContent = upsertBraceDirective(nextContent, "listen-on", listenV4);
+    nextContent = upsertBraceDirective(nextContent, "listen-on-v6", listenV6);
+    nextContent = upsertMultilineBlock(nextContent, "forwarders", formattedForwarders || "        8.8.8.8;");
+    nextContent = upsertSimpleDirective(nextContent, "forward", forwardOnly ? "only" : "first");
+    nextContent = upsertSimpleDirective(nextContent, "dnssec-validation", dnssecEnabled ? "auto" : "no");
+    nextContent = upsertSimpleDirective(nextContent, "auth-nxdomain", "no");
+    nextContent = upsertBraceDirective(nextContent, "allow-query", allowQuery);
+    nextContent = upsertBraceDirective(nextContent, "allow-transfer", allowTransfer);
+    nextContent = upsertBraceDirective(nextContent, "allow-recursion", allowRecursion);
+    nextContent = upsertSimpleDirective(nextContent, "querylog", "yes");
+
+    return nextContent;
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
-      // Always rebuild config from form fields before saving
-      const content = buildConfigFromForm();
+      const content = activeTab === "advanced"
+        ? optionsContent
+        : mergeFormIntoOptionsContent(optionsContent);
       await saveConfig("options", content);
+      setOptionsContent(content);
+      parseConfigForForm(content);
       setSaved(true);
       toast({ title: "Saved", description: "Configuration saved successfully" });
       setTimeout(() => setSaved(false), 3000);
@@ -81,31 +175,7 @@ export default function Config() {
   };
 
   const buildConfigFromForm = () => {
-    const content = `options {
-    directory "/var/cache/bind";
-
-    // Network
-    listen-on { ${listenV4} };
-    listen-on-v6 { ${listenV6} };
-
-    // Forwarding
-    forwarders {
-        ${forwarders.split("\n").map(l => l.trim()).filter(Boolean).join("\n        ")}
-    };
-    ${forwardOnly ? 'forward only;' : '// forward only; (disabled)'}
-
-    // Security
-    dnssec-validation ${dnssecEnabled ? 'auto' : 'no'};
-    auth-nxdomain no;
-
-    // Access Control
-    allow-query { ${allowQuery} };
-    allow-transfer { ${allowTransfer} };
-    allow-recursion { ${allowRecursion} };
-
-    // Logging
-    querylog yes;
-};`;
+    const content = mergeFormIntoOptionsContent(optionsContent);
     setOptionsContent(content);
     return content;
   };
@@ -286,3 +356,4 @@ export default function Config() {
     </DashboardLayout>
   );
 }
+

@@ -1,4 +1,4 @@
-import { storage } from "./storage";
+﻿import { storage } from "./storage";
 import { replicationService } from "./replication-service";
 import type { ReplicationServer } from "@shared/schema";
 
@@ -172,7 +172,7 @@ class HealthService {
             signal: AbortSignal.timeout(5000),
           });
         }
-        // Email type would require a mail transport — placeholder for now
+        // Email type would require a mail transport â€” placeholder for now
         if (channel.type === "email") {
           console.log(`[health] Email notification to ${config.email}: ${message}`);
         }
@@ -185,9 +185,10 @@ class HealthService {
     await storage.insertLog({
       level: alert.newStatus === "down" ? "ERROR" : "WARN",
       source: "health",
-      message: `${alert.serverName}: ${alert.previousStatus} → ${alert.newStatus} (${alert.details})`,
+      message: `${alert.serverName}: ${alert.previousStatus} â†’ ${alert.newStatus} (${alert.details})`,
     });
   }
 }
 
 export const healthService = new HealthService();
+

@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { getIpBlacklist, banIp, unbanIp, cleanupBlacklist, type IpBlacklistEntry } from "@/lib/api";
@@ -249,3 +249,4 @@ export default function BlacklistPage() {
         </DashboardLayout>
     );
 }
+

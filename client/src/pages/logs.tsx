@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Terminal, Search, Download, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -190,7 +190,7 @@ export default function Logs() {
               <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-500 text-xs">
                 <Terminal className="h-3 w-3" />
                 <span>
-                  {wsRef.current?.readyState === WebSocket.OPEN ? "connected — tailing logs..." : "connecting..."}
+                  {wsRef.current?.readyState === WebSocket.OPEN ? "connected â€” tailing logs..." : "connecting..."}
                 </span>
               </div>
             </div>

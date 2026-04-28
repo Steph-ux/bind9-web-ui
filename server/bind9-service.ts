@@ -1,4 +1,4 @@
-// Copyright © 2025 Stephane ASSOGBA
+﻿// Copyright Â(c) 2025 Stephane ASSOGBA
 /**
  * BIND9 Integration Service
  * Interacts with a real BIND9 installation via rndc, zone files and system commands.
@@ -15,7 +15,7 @@ import { sshManager } from "./ssh-manager";
 
 const execAsync = promisify(exec);
 
-// Default paths — used for local mode, overridden by SSH connection config
+// Default paths â€” used for local mode, overridden by SSH connection config
 let BIND9_CONF_DIR = process.env.BIND9_CONF_DIR || "/etc/bind";
 let BIND9_ZONE_DIR = process.env.BIND9_ZONE_DIR || "/var/cache/bind";
 let RNDC_BIN = process.env.RNDC_BIN || "rndc";
@@ -346,7 +346,7 @@ class Bind9Service {
         return sshManager.readFileById(connectionId, filePath);
     }
 
-    /** Read a raw file (locally or via SSH/SFTP) — public for replication */
+    /** Read a raw file (locally or via SSH/SFTP) â€” public for replication */
     async readRawFile(filePath: string): Promise<string> {
         return this.readRemoteFile(filePath);
     }
@@ -359,13 +359,13 @@ class Bind9Service {
         return fsPromises.readFile(filePath, "utf-8");
     }
 
-    /** Write a file (locally or via SSH/SFTP) — tries SFTP first, falls back to sudo tee */
+    /** Write a file (locally or via SSH/SFTP) â€” tries SFTP first, falls back to sudo tee */
     private async writeRemoteFile(filePath: string, content: string): Promise<void> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             try {
                 await sshManager.writeFile(filePath, content);
             } catch {
-                // SFTP failed (likely permission denied) — try via sudo tee
+                // SFTP failed (likely permission denied) â€” try via sudo tee
                 await this.writeRemoteFilePrivileged(filePath, content);
             }
             this.managementSummaryCache = null;
@@ -397,7 +397,7 @@ class Bind9Service {
         }
     }
 
-    /** Write a file with non-destructive backup — preserves the original as .bak before overwriting */
+    /** Write a file with non-destructive backup â€” preserves the original as .bak before overwriting */
     private async writeWithBackup(filePath: string, content: string): Promise<void> {
         // Preserve original file as .bak (only if it exists)
         try {
@@ -407,7 +407,7 @@ class Bind9Service {
                 await this.writeRemoteFile(backupPath, existing);
             }
         } catch {
-            // File doesn't exist yet — no backup needed
+            // File doesn't exist yet â€” no backup needed
         }
         await this.writeRemoteFile(filePath, content);
     }
@@ -439,7 +439,7 @@ class Bind9Service {
         return this.available;
     }
 
-    /** Execute an rndc command — input is validated to prevent injection */
+    /** Execute an rndc command â€” input is validated to prevent injection */
     async rndc(command: string): Promise<string> {
         // Only allow safe characters in rndc commands (alphanumeric, dots, dashes, underscores, slashes, spaces)
         // Spaces are allowed for sub-commands like "reload zone.example.com"
@@ -767,7 +767,7 @@ zone "${safeDomain}" {
         return this.rndc("flush");
     }
 
-    /** Get system metrics — local uses Node.js os, SSH uses remote commands */
+    /** Get system metrics â€” local uses Node.js os, SSH uses remote commands */
     async getSystemMetrics(): Promise<SystemMetrics> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             return this.getRemoteSystemMetrics();
@@ -892,7 +892,7 @@ zone "${safeDomain}" {
         return `${bytes} B`;
     }
 
-    /** Get system uptime — local or remote */
+    /** Get system uptime â€” local or remote */
     async getUptime(): Promise<string> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             try {
@@ -908,7 +908,7 @@ zone "${safeDomain}" {
         return this.getLocalUptime();
     }
 
-    /** Get hostname — local or remote */
+    /** Get hostname â€” local or remote */
     async getHostname(): Promise<string> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             try {
@@ -1066,7 +1066,7 @@ zone "${safeDomain}" {
         return validZones;
     }
 
-    // ── Advanced BIND9 Server Info ────────────────────────────────
+    // â”€â”€ Advanced BIND9 Server Info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Get configured forwarders from named-checkconf */
     async getForwarders(): Promise<string[]> {
@@ -1389,7 +1389,7 @@ zone "${safeDomain}" {
         return keys;
     }
 
-    // ── BIND9 Log Reading ───────────────────────────────────────────
+    // â”€â”€ BIND9 Log Reading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Read real BIND9 log files and return parsed entries.
@@ -1497,7 +1497,7 @@ zone "${safeDomain}" {
 
 
 
-    // ── Private helpers ──────────────────────────────────────────
+    // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private generateSerial(): string {
         const now = new Date();
@@ -1923,12 +1923,12 @@ zone "${safeDomain}" {
             // Determine RPZ action from CNAME target
             if (rrType === "CNAME") {
                 if (rrValue === "." || rrValue === "root.zone.") {
-                    // NXDOMAIN — but skip wildcard duplicates
+                    // NXDOMAIN â€” but skip wildcard duplicates
                     if (!rrName.startsWith("*.")) {
                         entries.push({ name: rrName, type: "nxdomain", target: "" });
                     }
                 } else if (rrValue === "*." || rrValue === "*.root.zone.") {
-                    // NODATA — skip wildcard duplicates
+                    // NODATA â€” skip wildcard duplicates
                     if (!rrName.startsWith("*.")) {
                         entries.push({ name: rrName, type: "nodata", target: "" });
                     }
@@ -2047,3 +2047,4 @@ zone "${safeDomain}" {
 }
 
 export const bind9Service = new Bind9Service();
+

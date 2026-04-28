@@ -1,4 +1,4 @@
-// Copyright © 2025 Stephane ASSOGBA
+﻿// Copyright Â(c) 2025 Stephane ASSOGBA
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import http from "http";
@@ -14,7 +14,19 @@ import { replicationService } from "./replication-service";
 import { healthService } from "./health-service";
 import { dnssecService } from "./dnssec-service";
 import { backupService } from "./backup-service";
-import { insertZoneSchema, insertDnsRecordSchema, insertAclSchema, insertTsigKeySchema, insertConnectionSchema, insertRpzEntrySchema } from "@shared/schema";
+import {
+  configSectionContentSchema,
+  createFirewallRuleSchema,
+  insertAclSchema,
+  insertConnectionSchema,
+  insertDnsRecordSchema,
+  insertReplicationServerSchema,
+  insertRpzEntrySchema,
+  insertTsigKeySchema,
+  insertZoneSchema,
+  updateConnectionSchema,
+  updateReplicationServerSchema,
+} from "@shared/schema";
 import { z } from "zod";
 
 import { hashPassword } from "./auth";
@@ -109,7 +121,7 @@ function parseReverseZoneFromCidr(cidr: string): string {
   return octets.slice(0, octetCount).reverse().join(".") + ".in-addr.arpa";
 }
 
-/** Sanitize error messages — in production, hide internal details for 500 errors */
+/** Sanitize error messages â€” in production, hide internal details for 500 errors */
 function safeError(status: number, message: string): string {
   if (process.env.NODE_ENV === "production" && status >= 500) {
     return "Internal Server Error";
@@ -123,6 +135,94 @@ function maskNotificationConfig(config: Record<string, any>, type: string): Reco
   if (masked.webhookUrl) masked.webhookUrl = masked.webhookUrl.replace(/\/[^/]+$/, "/***");
   if (masked.email) masked.email = masked.email.replace(/^(.).*(@.*)$/, "$1***$2");
   return masked;
+}
+
+async function refreshAclsFromBind() {
+  const fileAcls = await bind9Service.syncAclsFromConfig();
+  const currentDbAcls = await storage.getAcls();
+  const seen = new Set<string>();
+
+  for (const fileAcl of fileAcls) {
+    seen.add(fileAcl.name);
+    const existing = currentDbAcls.find((item) => item.name === fileAcl.name);
+    if (!existing) {
+      await storage.createAcl({
+        name: fileAcl.name,
+        networks: fileAcl.networks,
+        comment: "Imported from named.conf.acls",
+      });
+      continue;
+    }
+
+    if (existing.networks !== fileAcl.networks) {
+      await storage.updateAcl(existing.id, { networks: fileAcl.networks });
+    }
+  }
+
+  for (const stale of currentDbAcls) {
+    if (!seen.has(stale.name)) {
+      await storage.deleteAcl(stale.id);
+    }
+  }
+
+  return storage.getAcls();
+}
+
+async function refreshKeysFromBind() {
+  const fileKeys = await bind9Service.syncKeysFromConfig();
+  const currentDbKeys = await storage.getKeys();
+  const seen = new Set<string>();
+
+  for (const fileKey of fileKeys) {
+    seen.add(fileKey.name);
+    const existing = currentDbKeys.find((item) => item.name === fileKey.name);
+    if (!existing) {
+      await storage.createKey({
+        name: fileKey.name,
+        algorithm: fileKey.algorithm as any,
+        secret: fileKey.secret,
+      });
+      continue;
+    }
+
+    if (existing.algorithm !== fileKey.algorithm || existing.secret !== fileKey.secret) {
+      await storage.updateKey(existing.id, {
+        algorithm: fileKey.algorithm as any,
+        secret: fileKey.secret,
+      });
+    }
+  }
+
+  for (const stale of currentDbKeys) {
+    if (!seen.has(stale.name)) {
+      await storage.deleteKey(stale.id);
+    }
+  }
+
+  return storage.getKeys();
+}
+
+function getRecordSignature(record: { name: string; type: string; value: string; ttl: number; priority?: number | null }) {
+  return [
+    record.name,
+    record.type,
+    record.value,
+    String(record.ttl ?? 3600),
+    String(record.priority ?? ""),
+  ].join("|");
+}
+
+function recordSetsDiffer(
+  currentRecords: Array<{ name: string; type: string; value: string; ttl: number; priority?: number | null }>,
+  parsedRecords: Array<{ name: string; type: string; value: string; ttl: number; priority?: number | null }>
+) {
+  if (currentRecords.length !== parsedRecords.length) {
+    return true;
+  }
+
+  const current = currentRecords.map(getRecordSignature).sort();
+  const parsed = parsedRecords.map(getRecordSignature).sort();
+  return current.some((signature, index) => signature !== parsed[index]);
 }
 
 export async function registerRoutes(
@@ -228,7 +328,7 @@ export async function registerRoutes(
   // Protect all API routes defined below
   app.use("/api", requireAuth);
 
-  // ── Firewall Management (Admin Only) ──────────────────────────
+  // â”€â”€ Firewall Management (Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/firewall/status", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const status = await firewallService.getStatus();
@@ -274,32 +374,33 @@ export async function registerRoutes(
 
   app.post("/api/firewall/rules", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface: iface, rateLimit, icmpType, log, comment, rawRule } = req.body;
-      const ALLOWED_PROTOS = ["tcp", "udp", "any"];
-      const ALLOWED_ACTIONS = ["allow", "deny", "reject"];
-      const ALLOWED_DIRECTIONS = ["in", "out"];
-      const ALLOWED_RULE_TYPES = ["port", "service", "portRange", "multiPort", "icmp", "raw"];
-      const ALLOWED_ICMP_TYPES = ["echo-request", "echo-reply", "destination-unreachable", "time-exceeded", "redirect", "router-advertisement", "router-solicitation", "parameter-problem"];
-
-      // Validate required fields based on rule type
-      const resolvedRuleType = ruleType || "port";
-      if (resolvedRuleType !== "icmp" && resolvedRuleType !== "raw" && !toPort && !service) {
-        return res.status(400).json({ message: "Port or service is required" });
+      const parsed = createFirewallRuleSchema.parse(req.body);
+      const resolvedRuleType = parsed.ruleType || "port";
+      if (parsed.rateLimit && !/^\d+\/(sec|min|hour|day)$/.test(parsed.rateLimit)) {
+        return res.status(400).json({ message: "Invalid rate limit format. Use: N/sec, N/min, N/hour, N/day" });
       }
-      if (proto && !ALLOWED_PROTOS.includes(proto)) return res.status(400).json({ message: `Invalid protocol. Allowed: ${ALLOWED_PROTOS.join(", ")}` });
-      if (action && !ALLOWED_ACTIONS.includes(action)) return res.status(400).json({ message: `Invalid action. Allowed: ${ALLOWED_ACTIONS.join(", ")}` });
-      if (direction && !ALLOWED_DIRECTIONS.includes(direction)) return res.status(400).json({ message: `Invalid direction. Allowed: ${ALLOWED_DIRECTIONS.join(", ")}` });
-      if (ruleType && !ALLOWED_RULE_TYPES.includes(ruleType)) return res.status(400).json({ message: `Invalid rule type. Allowed: ${ALLOWED_RULE_TYPES.join(", ")}` });
-      if (icmpType && !ALLOWED_ICMP_TYPES.includes(icmpType)) return res.status(400).json({ message: `Invalid ICMP type. Allowed: ${ALLOWED_ICMP_TYPES.join(", ")}` });
-      if (rateLimit && !/^\d+\/(sec|min|hour|day)$/.test(rateLimit)) return res.status(400).json({ message: "Invalid rate limit format. Use: N/sec, N/min, N/hour, N/day" });
 
       await firewallService.addRule({
-        toPort: toPort || "", proto: proto || "tcp", action: action || "allow", fromIp: fromIp || "any",
-        direction, ruleType: resolvedRuleType, toPortEnd, service,
-        interface_: iface, rateLimit, icmpType, log, comment, rawRule,
+        toPort: parsed.toPort || "",
+        proto: parsed.proto || "tcp",
+        action: parsed.action || "allow",
+        fromIp: parsed.fromIp || "any",
+        direction: parsed.direction,
+        ruleType: resolvedRuleType,
+        toPortEnd: parsed.toPortEnd,
+        service: parsed.service,
+        interface_: parsed.interface,
+        rateLimit: parsed.rateLimit,
+        icmpType: parsed.icmpType,
+        log: parsed.log,
+        comment: parsed.comment,
+        rawRule: parsed.rawRule,
       });
       res.json({ message: "Rule added" });
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
       res.status(400).json({ message: error.message });
     }
   });
@@ -314,7 +415,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── IP Blacklist ─────────────────────────────────────────────────
+  // â”€â”€ IP Blacklist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/blacklist", requireOperator, async (_req: Request, res: Response) => {
     try {
       const list = await storage.getIpBlacklist();
@@ -373,7 +474,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── API Tokens ─────────────────────────────────────────────────
+  // â”€â”€ API Tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/tokens", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const tokens = await storage.getApiTokens();
@@ -412,7 +513,7 @@ export async function registerRoutes(
         message: `API token '${name}' created (prefix: ${tokenPrefix})`,
       });
 
-      // Return the raw token ONLY on creation — never again
+      // Return the raw token ONLY on creation â€” never again
       const { tokenHash: _th, ...safe } = token;
       res.status(201).json({ ...safe, token: raw });
     } catch (error: any) {
@@ -436,7 +537,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── DNS Firewall (RPZ) ────────────────────────────────────────
+  // â”€â”€ DNS Firewall (RPZ) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/rpz", requireOperator, async (req: Request, res: Response) => {
     try {
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -471,7 +572,7 @@ export async function registerRoutes(
       }
       // Normalize name to lowercase to prevent case-sensitive duplicates
       data.name = nameStr;
-      // Validate target for redirect type — target is REQUIRED for redirect
+      // Validate target for redirect type â€” target is REQUIRED for redirect
       if (data.type === "redirect") {
         if (!data.target || !String(data.target).trim()) {
           return res.status(400).json({ message: "Redirect type requires a target IP or domain" });
@@ -483,7 +584,7 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Invalid redirect target: must be IP or domain" });
         }
       }
-      // Sanitize comment — prevent zone file injection
+      // Sanitize comment â€” prevent zone file injection
       if (data.comment && /[\n\r$]/.test(String(data.comment))) {
         return res.status(400).json({ message: "Comment contains invalid characters" });
       }
@@ -660,7 +761,7 @@ export async function registerRoutes(
       if (!url || typeof url !== "string") {
         return res.status(400).json({ message: "url is required" });
       }
-      // Validate URL — only allow http/https
+      // Validate URL â€” only allow http/https
       let parsedUrl: URL;
       try {
         parsedUrl = new URL(url);
@@ -670,7 +771,7 @@ export async function registerRoutes(
       if (!["http:", "https:"].includes(parsedUrl.protocol)) {
         return res.status(400).json({ message: "Only http/https URLs are allowed" });
       }
-      // Prevent SSRF — block internal/private IPs
+      // Prevent SSRF â€” block internal/private IPs
       const hostname = parsedUrl.hostname;
       if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|localhost|::1|fe80::|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:|169\.254\.|100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\.)/i.test(hostname)) {
         return res.status(400).json({ message: "Private/internal URLs are not allowed" });
@@ -768,7 +869,7 @@ export async function registerRoutes(
   });
 
 
-  // ── Users Management (Admin Only) ─────────────────────────────
+  // â”€â”€ Users Management (Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/users", requireAdmin, async (req: Request, res: Response) => {
     try {
       const users = await storage.getUsers();
@@ -854,7 +955,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Domain Jailing (User-Domain assignments) ────────────────────
+  // â”€â”€ Domain Jailing (User-Domain assignments) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/users/:id/domains", requireAdmin, async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.id);
@@ -884,7 +985,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Replication Servers ────────────────────────────────────────
+  // â”€â”€ Replication Servers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/replication/stats", requireOperator, async (_req: Request, res: Response) => {
     try {
       const servers = await storage.getReplicationServers();
@@ -934,31 +1035,26 @@ export async function registerRoutes(
 
   app.post("/api/replication", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, role, enabled } = req.body;
-      if (!name || !host) return res.status(400).json({ message: "name and host are required" });
-      const safeHost = String(host).trim();
-      if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
-      const safePort = parseInt(port, 10) || 22;
-      if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port" });
+      const data = insertReplicationServerSchema.parse(req.body);
 
       const server = await storage.createReplicationServer({
-        name: String(name),
-        host: safeHost,
-        port: safePort,
-        username: String(username || "root"),
-        authType: authType === "key" ? "key" : "password",
-        password: password ? String(password) : "",
-        privateKey: privateKey ? String(privateKey) : "",
-        bind9ConfDir: bind9ConfDir || "/etc/bind",
-        bind9ZoneDir: bind9ZoneDir || "",
-        role: role === "secondary" ? "secondary" : "slave",
-        enabled: enabled !== false,
+        name: data.name,
+        host: data.host,
+        port: data.port,
+        username: data.username,
+        authType: data.authType,
+        password: data.password,
+        privateKey: data.privateKey,
+        bind9ConfDir: data.bind9ConfDir || "/etc/bind",
+        bind9ZoneDir: data.bind9ZoneDir || "",
+        role: data.role || "slave",
+        enabled: data.enabled !== false,
       });
 
       await storage.insertLog({
         level: "INFO",
         source: "replication",
-        message: `Replication server '${name}' added (${safeHost}:${safePort})`,
+        message: `Replication server '${data.name}' added (${data.host}:${data.port})`,
       });
 
       res.status(201).json({
@@ -967,6 +1063,9 @@ export async function registerRoutes(
         privateKey: server.privateKey ? "***" : "",
       });
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
@@ -977,27 +1076,29 @@ export async function registerRoutes(
       const existing = await storage.getReplicationServer(id);
       if (!existing) return res.status(404).json({ message: "Server not found" });
 
+      const parsed = updateReplicationServerSchema.parse(req.body);
       const allowed: Record<string, any> = {};
-      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, role, enabled } = req.body;
-      if (name !== undefined) allowed.name = String(name);
-      if (host !== undefined) {
-        const safeHost = String(host).trim();
-        if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
-        allowed.host = safeHost;
+      if (parsed.name !== undefined) allowed.name = parsed.name;
+      if (parsed.host !== undefined) allowed.host = parsed.host;
+      if (parsed.port !== undefined) allowed.port = parsed.port;
+      if (parsed.username !== undefined) allowed.username = parsed.username;
+      if (parsed.authType !== undefined) allowed.authType = parsed.authType;
+      if (parsed.password !== undefined && parsed.password !== "***") allowed.password = parsed.password;
+      if (parsed.privateKey !== undefined && parsed.privateKey !== "***") allowed.privateKey = parsed.privateKey;
+      if (parsed.bind9ConfDir !== undefined) allowed.bind9ConfDir = parsed.bind9ConfDir;
+      if (parsed.bind9ZoneDir !== undefined) allowed.bind9ZoneDir = parsed.bind9ZoneDir;
+      if (parsed.role !== undefined) allowed.role = parsed.role;
+      if (parsed.enabled !== undefined) allowed.enabled = parsed.enabled;
+
+      const nextAuthType = parsed.authType ?? existing.authType;
+      const hasPassword = typeof allowed.password === "string" ? allowed.password.length > 0 : Boolean(existing.password);
+      const hasPrivateKey = typeof allowed.privateKey === "string" ? allowed.privateKey.length > 0 : Boolean(existing.privateKey);
+      if (nextAuthType === "password" && !hasPassword) {
+        return res.status(400).json({ message: "Password is required when authType is password" });
       }
-      if (port !== undefined) {
-        const safePort = parseInt(port, 10) || 22;
-        if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port" });
-        allowed.port = safePort;
+      if (nextAuthType === "key" && !hasPrivateKey) {
+        return res.status(400).json({ message: "Private key is required when authType is key" });
       }
-      if (username !== undefined) allowed.username = String(username);
-      if (authType !== undefined) allowed.authType = authType === "key" ? "key" : "password";
-      if (password !== undefined && password !== "***") allowed.password = String(password);
-      if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
-      if (bind9ConfDir !== undefined) allowed.bind9ConfDir = String(bind9ConfDir);
-      if (bind9ZoneDir !== undefined) allowed.bind9ZoneDir = String(bind9ZoneDir);
-      if (role !== undefined) allowed.role = role === "secondary" ? "secondary" : "slave";
-      if (enabled !== undefined) allowed.enabled = !!enabled;
 
       const updated = await storage.updateReplicationServer(id, allowed);
       res.json({
@@ -1006,6 +1107,9 @@ export async function registerRoutes(
         privateKey: updated.privateKey ? "***" : "",
       });
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
@@ -1051,7 +1155,7 @@ export async function registerRoutes(
 
 
 
-  // ── Replication Sync & Notify ──────────────────────────────────
+  // â”€â”€ Replication Sync & Notify â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.post("/api/replication/sync", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const result = await replicationService.syncAll();
@@ -1092,7 +1196,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Replication Conflicts ─────────────────────────────────────
+  // â”€â”€ Replication Conflicts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/replication/conflicts", requireOperator, async (req: Request, res: Response) => {
     try {
       const resolved = req.query.resolved === "true" ? true : req.query.resolved === "false" ? false : undefined;
@@ -1133,7 +1237,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Replication Zone Bindings ─────────────────────────────────
+  // â”€â”€ Replication Zone Bindings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/replication/:serverId/bindings", requireOperator, async (req: Request, res: Response) => {
     try {
       const serverId = req.params.serverId as string;
@@ -1164,7 +1268,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Health Checks ──────────────────────────────────────────────
+  // â”€â”€ Health Checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/health-checks", requireOperator, async (req: Request, res: Response) => {
     try {
       const serverId = req.query.serverId as string | undefined;
@@ -1185,7 +1289,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Notification Channels ──────────────────────────────────────
+  // â”€â”€ Notification Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/notification-channels", requireOperator, async (_req: Request, res: Response) => {
     try {
       const channels = await storage.getNotificationChannels();
@@ -1293,7 +1397,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Sync History & Metrics ─────────────────────────────────────
+  // â”€â”€ Sync History & Metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/sync-history", requireOperator, async (req: Request, res: Response) => {
     try {
       const serverId = req.query.serverId as string | undefined;
@@ -1315,7 +1419,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── DNSSEC ─────────────────────────────────────────────────────
+  // â”€â”€ DNSSEC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/dnssec/keys", requireOperator, async (req: Request, res: Response) => {
     try {
       const zoneId = req.query.zoneId as string | undefined;
@@ -1382,7 +1486,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Backups ───────────────────────────────────────────────────
+  // â”€â”€ Backups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/api/backups", requireOperator, async (req: Request, res: Response) => {
     try {
       const type = req.query.type as string | undefined;
@@ -1430,7 +1534,7 @@ export async function registerRoutes(
   });
 
 
-  // ── Restore SSH connections on startup ────────────────────────
+  // â”€â”€ Restore SSH connections on startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
     const allConns = await storage.getConnections();
     // Register all connections in the pool
@@ -1470,48 +1574,19 @@ export async function registerRoutes(
     console.log(`[startup] No active connection: ${e.message}`);
   }
 
-  // ── Auto-sync ACLs and Keys on startup ────────────────────────
+  // â”€â”€ Auto-sync ACLs and Keys on startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
     if (await bind9Service.isAvailable()) {
       console.log("[startup] Syncing ACLs and Keys...");
-
-      // 1. Import existing ACLs from file if DB is empty or missing them
-      const existingAcls = await bind9Service.syncAclsFromConfig();
-      const currentDbAcls = await storage.getAcls();
-
-      for (const fileAcl of existingAcls) {
-        if (!currentDbAcls.find(a => a.name === fileAcl.name)) {
-          console.log(`[startup] Importing ACL '${fileAcl.name}' from named.conf.acls`);
-          await storage.createAcl({
-            name: fileAcl.name,
-            networks: fileAcl.networks,
-            comment: "Imported from named.conf.acls"
-          });
-        }
-      }
-
-      // 2. Import existing Keys from file (recursively) if DB is empty or missing them
-      const existingKeys = await bind9Service.syncKeysFromConfig();
-      const currentDbKeys = await storage.getKeys();
-
-      for (const fileKey of existingKeys) {
-        if (!currentDbKeys.find(k => k.name === fileKey.name)) {
-          console.log(`[startup] Importing Key '${fileKey.name}' from config`);
-          await storage.createKey({
-            name: fileKey.name,
-            algorithm: fileKey.algorithm as any,
-            secret: fileKey.secret
-          });
-        }
-      }
-
+      await refreshAclsFromBind();
+      await refreshKeysFromBind();
       console.log("[startup] ACLs and Keys imported from BIND9 without rewriting server config");
     }
   } catch (e: any) {
     console.log(`[startup] Failed to sync ACLs/Keys: ${e.message}`);
   }
 
-  // ── Auto-sync zones from BIND9 config on startup ──────────────
+  // â”€â”€ Auto-sync zones from BIND9 config on startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
     if (await bind9Service.isAvailable()) {
       console.log("[startup] Starting zone sync...");
@@ -1533,7 +1608,7 @@ export async function registerRoutes(
 
           if (found) {
             zoneId = found.id;
-            await storage.updateZone(found.id, { filePath: cz.filePath });
+            await storage.updateZone(found.id, { type: cz.type as any, filePath: cz.filePath });
           } else {
             const zone = await storage.createZone({
               domain: cz.domain,
@@ -1549,9 +1624,8 @@ export async function registerRoutes(
               const records = await bind9Service.readZoneFile(cz.filePath);
               if (records.length > 0) {
                 const currentRecords = await storage.getRecords(zoneId);
-                // Only re-import if DB has fewer records than zone file (avoid overwriting unsynced changes)
                 const nonSoaRecords = records.filter(r => r.type !== "SOA");
-                if (currentRecords.length < nonSoaRecords.length) {
+                if (recordSetsDiffer(currentRecords, nonSoaRecords)) {
                   for (const r of currentRecords) {
                     await storage.deleteRecord(r.id);
                   }
@@ -1597,9 +1671,9 @@ export async function registerRoutes(
     console.log(`[startup] Zone sync process failed: ${e.message}`);
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  DASHBOARD
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/dashboard", requireViewer, async (_req: Request, res: Response) => {
     try {
       const allZones = await storage.getZones();
@@ -1646,9 +1720,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  ZONES
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/zones", requireViewer, async (req: Request, res: Response) => {
     try {
       let allZones = await storage.getZones();
@@ -1699,7 +1773,7 @@ export async function registerRoutes(
           if (found) {
             console.log(`[api] Zone ${cz.domain} exists, updating details...`);
             zoneId = found.id;
-            await storage.updateZone(found.id, { filePath: cz.filePath });
+            await storage.updateZone(found.id, { type: cz.type as any, filePath: cz.filePath });
           } else {
             const newZone = await storage.createZone({
               domain: cz.domain,
@@ -2010,9 +2084,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  DNS RECORDS
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   const toBindZoneRecords = (records: Array<{ name: string; type: string; value: string; ttl: number; priority: number | null }>) =>
     records.map((record) => ({
       name: record.name,
@@ -2341,9 +2415,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  CONFIG
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/config/:section", requireViewer, async (req: Request, res: Response) => {
     try {
       const section = String(req.params.section);
@@ -2387,11 +2461,7 @@ export async function registerRoutes(
       if (!/^[a-zA-Z0-9_-]+$/.test(section)) {
         return res.status(400).json({ message: "Invalid section name" });
       }
-      const { content } = req.body;
-
-      if (!content || typeof content !== "string") {
-        return res.status(400).json({ message: "content is required" });
-      }
+      const { content } = configSectionContentSchema.parse(req.body);
 
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
@@ -2411,13 +2481,16 @@ export async function registerRoutes(
 
       res.json(snapshot);
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
-  //  ROLLBACK — Restore BIND9 files from .bak backups
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  ROLLBACK â€” Restore BIND9 files from .bak backups
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.post("/api/rollback/:file", requireAdmin, async (req: Request, res: Response) => {
     try {
       const file = String(req.params.file);
@@ -2428,7 +2501,7 @@ export async function registerRoutes(
       ];
       // Also allow db.* zone files
       if (!allowedFiles.includes(file) && !/^db\.[a-z0-9._-]+$/i.test(file)) {
-        return res.status(400).json({ message: "Unknown file — rollback not allowed" });
+        return res.status(400).json({ message: "Unknown file â€” rollback not allowed" });
       }
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
@@ -2449,7 +2522,7 @@ export async function registerRoutes(
       try {
         await bind9Service.reload();
       } catch (reloadErr: any) {
-        // File restored but reload failed — still report success with warning
+        // File restored but reload failed â€” still report success with warning
         await storage.insertLog({ level: "WARN", source: "rollback", message: `Restored ${file} from backup but reload failed: ${reloadErr.message}` });
         return res.json({ message: `Restored ${file} from backup but BIND9 reload failed`, warning: reloadErr.message });
       }
@@ -2460,12 +2533,19 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  ACLs
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/acls", requireViewer, async (_req: Request, res: Response) => {
     try {
-      res.json(await storage.getAcls());
+      let acls = await storage.getAcls();
+      if (await bind9Service.isAvailable()) {
+        const management = await bind9Service.getManagementSummary();
+        if (management.features.acls) {
+          acls = await refreshAclsFromBind();
+        }
+      }
+      res.json(acls);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -2481,7 +2561,10 @@ export async function registerRoutes(
       if (!management.features.acls) {
         return res.status(409).json({ message: "ACL management is disabled because named.conf.acls is not included or not writable on this server" });
       }
-      const existingAcls = await storage.getAcls();
+      const existingAcls = await refreshAclsFromBind();
+      if (existingAcls.some((item) => item.name === data.name)) {
+        return res.status(409).json({ message: `ACL '${data.name}' already exists` });
+      }
       await bind9Service.writeAclsConf([...existingAcls, data]);
       await bind9Service.rndc("reconfig");
       const acl = await storage.createAcl(data);
@@ -2519,8 +2602,11 @@ export async function registerRoutes(
       if (!management.features.acls) {
         return res.status(409).json({ message: "ACL management is disabled because named.conf.acls is not included or not writable on this server" });
       }
-      const currentAcls = await storage.getAcls();
+      const currentAcls = await refreshAclsFromBind();
       const nextAcl = { ...acl, ...allowed };
+      if (currentAcls.some((item) => item.id !== id && item.name === nextAcl.name)) {
+        return res.status(409).json({ message: `ACL '${nextAcl.name}' already exists` });
+      }
       await bind9Service.writeAclsConf(currentAcls.map((item) => item.id === id ? nextAcl : item));
       await bind9Service.rndc("reconfig");
       const updated = await storage.updateAcl(id, allowed);
@@ -2543,7 +2629,7 @@ export async function registerRoutes(
       if (!management.features.acls) {
         return res.status(409).json({ message: "ACL management is disabled because named.conf.acls is not included or not writable on this server" });
       }
-      const currentAcls = await storage.getAcls();
+      const currentAcls = await refreshAclsFromBind();
       await bind9Service.writeAclsConf(currentAcls.filter((item) => item.id !== id));
       await bind9Service.rndc("reconfig");
       await storage.deleteAcl(id);
@@ -2560,12 +2646,18 @@ export async function registerRoutes(
   });
 
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  TSIG KEYS
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/keys", requireViewer, async (_req: Request, res: Response) => {
     try {
-      const keys = await storage.getKeys();
+      let keys = await storage.getKeys();
+      if (await bind9Service.isAvailable()) {
+        const management = await bind9Service.getManagementSummary();
+        if (management.features.keys) {
+          keys = await refreshKeysFromBind();
+        }
+      }
       // Hide secrets
       const safeKeys = keys.map(k => ({
         ...k,
@@ -2591,7 +2683,10 @@ export async function registerRoutes(
       if (!management.features.keys) {
         return res.status(409).json({ message: "TSIG key management is disabled because named.conf.keys is not included or not writable on this server" });
       }
-      const existingKeys = await storage.getKeys();
+      const existingKeys = await refreshKeysFromBind();
+      if (existingKeys.some((item) => item.name === data.name)) {
+        return res.status(409).json({ message: `TSIG key '${data.name}' already exists` });
+      }
       await bind9Service.writeKeysConf([...existingKeys, data]);
       await bind9Service.rndc("reconfig");
       const key = await storage.createKey(data);
@@ -2625,7 +2720,7 @@ export async function registerRoutes(
       if (!management.features.keys) {
         return res.status(409).json({ message: "TSIG key management is disabled because named.conf.keys is not included or not writable on this server" });
       }
-      const currentKeys = await storage.getKeys();
+      const currentKeys = await refreshKeysFromBind();
       await bind9Service.writeKeysConf(currentKeys.filter((item) => item.id !== id));
       await bind9Service.rndc("reconfig");
       await storage.deleteKey(id);
@@ -2641,9 +2736,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  LOGS
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/logs", requireViewer, async (req: Request, res: Response) => {
     try {
       const filter = {
@@ -2715,9 +2810,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  SERVER STATUS
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/status", requireViewer, async (_req: Request, res: Response) => {
     try {
       const [bind9Status, management] = await Promise.all([
@@ -2742,7 +2837,7 @@ export async function registerRoutes(
     }
   });
 
-  /** Advanced BIND9 server info — forwarders, ACLs, DNSSEC, transfers, slaves */
+  /** Advanced BIND9 server info â€” forwarders, ACLs, DNSSEC, transfers, slaves */
   app.get("/api/server/bind-info", requireViewer, async (_req: Request, res: Response) => {
     try {
       const [forwarders, allowAcls, dnssec, transfers, slaveZones, management] = await Promise.all([
@@ -2769,9 +2864,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  RNDC COMMANDS
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.post("/api/rndc/:command", requireOperator, async (req: Request, res: Response) => {
     try {
       const command = req.params.command as string;
@@ -2798,9 +2893,9 @@ export async function registerRoutes(
     }
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  SSH CONNECTIONS
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   app.get("/api/connections", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const conns = await storage.getConnections();
@@ -2845,41 +2940,28 @@ export async function registerRoutes(
       const conn = await storage.getConnection(id);
       if (!conn) return res.status(404).json({ message: "Connection not found" });
 
-      // Only allow specific fields to be updated
+      const parsed = updateConnectionSchema.parse(req.body);
       const allowed: Record<string, any> = {};
-      const { name, host, port, username, authType, password, privateKey, bind9ConfDir, bind9ZoneDir, rndcBin } = req.body;
-      if (name !== undefined) allowed.name = String(name);
-      if (host !== undefined) {
-        const safeHost = String(host).trim();
-        if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) return res.status(400).json({ message: "Invalid host format" });
-        allowed.host = safeHost;
+      if (parsed.name !== undefined) allowed.name = parsed.name;
+      if (parsed.host !== undefined) allowed.host = parsed.host;
+      if (parsed.port !== undefined) allowed.port = parsed.port;
+      if (parsed.username !== undefined) allowed.username = parsed.username;
+      if (parsed.authType !== undefined) allowed.authType = parsed.authType;
+      if (parsed.bind9ConfDir !== undefined) allowed.bind9ConfDir = parsed.bind9ConfDir;
+      if (parsed.bind9ZoneDir !== undefined) allowed.bind9ZoneDir = parsed.bind9ZoneDir;
+      if (parsed.rndcBin !== undefined) allowed.rndcBin = parsed.rndcBin;
+      if (parsed.password !== undefined && parsed.password !== "***") allowed.password = parsed.password;
+      if (parsed.privateKey !== undefined && parsed.privateKey !== "***") allowed.privateKey = parsed.privateKey;
+
+      const nextAuthType = parsed.authType ?? conn.authType;
+      const hasPassword = typeof allowed.password === "string" ? allowed.password.length > 0 : Boolean(conn.password);
+      const hasPrivateKey = typeof allowed.privateKey === "string" ? allowed.privateKey.length > 0 : Boolean(conn.privateKey);
+      if (nextAuthType === "password" && !hasPassword) {
+        return res.status(400).json({ message: "Password is required when authType is password" });
       }
-      if (port !== undefined) {
-        const safePort = parseInt(port, 10) || 22;
-        if (safePort < 1 || safePort > 65535) return res.status(400).json({ message: "Invalid port number" });
-        allowed.port = safePort;
+      if (nextAuthType === "key" && !hasPrivateKey) {
+        return res.status(400).json({ message: "Private key is required when authType is key" });
       }
-      if (username !== undefined) allowed.username = String(username);
-      if (authType !== undefined) {
-        const safeAuthType = String(authType);
-        if (safeAuthType !== "password" && safeAuthType !== "key") return res.status(400).json({ message: "Invalid authType. Allowed: password, key" });
-        allowed.authType = safeAuthType;
-      }
-      if (bind9ConfDir !== undefined) {
-        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(bind9ConfDir))) return res.status(400).json({ message: "Invalid confDir path" });
-        allowed.bind9ConfDir = String(bind9ConfDir);
-      }
-      if (bind9ZoneDir !== undefined) {
-        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(bind9ZoneDir))) return res.status(400).json({ message: "Invalid zoneDir path" });
-        allowed.bind9ZoneDir = String(bind9ZoneDir);
-      }
-      if (rndcBin !== undefined) {
-        if (!/^[a-zA-Z0-9.\/_-]+$/.test(String(rndcBin))) return res.status(400).json({ message: "Invalid rndcBin path" });
-        allowed.rndcBin = String(rndcBin);
-      }
-      // Don't overwrite password/key if they come as "***"
-      if (password !== undefined && password !== "***") allowed.password = String(password);
-      if (privateKey !== undefined && privateKey !== "***") allowed.privateKey = String(privateKey);
 
       const updated = await storage.updateConnection(id, allowed);
 
@@ -2907,6 +2989,9 @@ export async function registerRoutes(
         privateKey: updated.privateKey ? "***" : "",
       });
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
@@ -2981,7 +3066,7 @@ export async function registerRoutes(
       if (!host || !username) {
         return res.status(400).json({ message: "host and username are required" });
       }
-      // Validate host: prevent SSRF — only allow hostnames/IPs, no schemes or internal addrs
+      // Validate host: prevent SSRF â€” only allow hostnames/IPs, no schemes or internal addrs
       const safeHost = String(host).trim();
       if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) {
         return res.status(400).json({ message: "Invalid host format" });
@@ -3007,7 +3092,7 @@ export async function registerRoutes(
     }
   });
 
-  /** Activate a connection — switches bind9-service to SSH mode */
+  /** Activate a connection â€” switches bind9-service to SSH mode */
   app.put("/api/connections/:id/activate", requireAdmin, async (req: Request, res: Response) => {
     try {
       const id = req.params.id as string;
@@ -3050,30 +3135,8 @@ export async function registerRoutes(
       // Sync ACLs and Keys from the newly activated connection
       try {
         console.log(`[connections] Syncing ACLs and Keys from ${conn.name}...`);
-        const existingAcls = await bind9Service.syncAclsFromConfig();
-        const currentDbAcls = await storage.getAcls();
-        for (const fileAcl of existingAcls) {
-          if (!currentDbAcls.find(a => a.name === fileAcl.name)) {
-            console.log(`[connections] Importing ACL '${fileAcl.name}' from ${conn.name}`);
-            await storage.createAcl({
-              name: fileAcl.name,
-              networks: fileAcl.networks,
-              comment: `Imported from ${conn.host}`
-            });
-          }
-        }
-        const existingKeys = await bind9Service.syncKeysFromConfig();
-        const currentDbKeys = await storage.getKeys();
-        for (const fileKey of existingKeys) {
-          if (!currentDbKeys.find(k => k.name === fileKey.name)) {
-            console.log(`[connections] Importing Key '${fileKey.name}' from ${conn.name}`);
-            await storage.createKey({
-              name: fileKey.name,
-              algorithm: fileKey.algorithm as any,
-              secret: fileKey.secret
-            });
-          }
-        }
+        await refreshAclsFromBind();
+        await refreshKeysFromBind();
       } catch (e: any) {
         console.log(`[connections] Failed to sync ACLs/Keys from ${conn.name}: ${e.message}`);
       }
@@ -3081,7 +3144,7 @@ export async function registerRoutes(
       await storage.insertLog({
         level: "INFO",
         source: "connections",
-        message: `Connection '${conn.name}' activated — SSH mode enabled (${conn.host}:${conn.port})`,
+        message: `Connection '${conn.name}' activated â€” SSH mode enabled (${conn.host}:${conn.port})`,
       });
 
       res.json({
@@ -3095,7 +3158,7 @@ export async function registerRoutes(
     }
   });
 
-  /** Deactivate — switch back to local mode (keeps other connections alive) */
+  /** Deactivate â€” switch back to local mode (keeps other connections alive) */
   app.put("/api/connections/deactivate", requireAdmin, async (_req: Request, res: Response) => {
     try {
       sshManager.setActive(null);
@@ -3105,7 +3168,7 @@ export async function registerRoutes(
       await storage.insertLog({
         level: "INFO",
         source: "connections",
-        message: "All connections deactivated — switched to local mode",
+        message: "All connections deactivated â€” switched to local mode",
       });
 
       res.json({ message: "Switched to local mode" });
@@ -3135,9 +3198,9 @@ export async function registerRoutes(
   });
 
 
-  // ══════════════════════════════════════════════════════════════
-  //  WEBSOCKET — Live Logs (requires auth via cookie)
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  WEBSOCKET â€” Live Logs (requires auth via cookie)
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   const wss = new WebSocketServer({
     server: httpServer,
     path: "/ws/logs",
@@ -3159,12 +3222,12 @@ export async function registerRoutes(
     });
   });
 
-  // ── Replication/Health WebSocket ────────────────────────────────
+  // â”€â”€ Replication/Health WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const replWss = new WebSocketServer({
     server: httpServer,
     path: "/ws/replication",
     verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
-      // Same auth as log WS — cookie-based
+      // Same auth as log WS â€” cookie-based
       const cookie = info.req.headers?.cookie || "";
       verifySessionCookie(cookie, callback);
     },
@@ -3214,9 +3277,9 @@ export async function registerRoutes(
     message: "BIND9 Admin Panel server started",
   });
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  BIND9 LOG MONITORING
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   bind9Service.monitorLogFile(async (line) => {
     // Basic parsing to extract level if possible, else default to INFO
     let level: "INFO" | "WARN" | "ERROR" = "INFO";
@@ -3240,7 +3303,7 @@ export async function registerRoutes(
   return httpServer;
 }
 
-// ── Default config templates ────────────────────────────────────
+// â”€â”€ Default config templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getDefaultConfig(section: string): string {
   if (section === "options") {
     return `options {
@@ -3282,3 +3345,4 @@ function getDefaultConfig(section: string): string {
   }
   return `// Configuration section: ${section}\n`;
 }
+

@@ -4,6 +4,49 @@ import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+const hostSchema = z
+  .string()
+  .trim()
+  .min(1, "Host is required")
+  .max(255, "Host is too long")
+  .regex(/^[a-zA-Z0-9.:-]+$/, "Host contains invalid characters");
+
+const nameSchema = z
+  .string()
+  .trim()
+  .min(1, "Name is required")
+  .max(100, "Name is too long")
+  .regex(/^[a-zA-Z0-9._ -]+$/, "Name contains invalid characters");
+
+const usernameSchema = z
+  .string()
+  .trim()
+  .min(1, "Username is required")
+  .max(64, "Username is too long")
+  .regex(/^[a-zA-Z0-9._-]+$/, "Username contains invalid characters");
+
+const linuxPathSchema = z
+  .string()
+  .trim()
+  .max(255, "Path is too long")
+  .refine(
+    (value) =>
+      value === "" ||
+      (/^[a-zA-Z0-9._/-]+$/.test(value) && !value.split("/").includes("..")),
+    "Path contains invalid characters"
+  );
+
+const portSchema = z
+  .coerce.number()
+  .int()
+  .min(1, "Port must be between 1 and 65535")
+  .max(65535, "Port must be between 1 and 65535");
+
+const authTypeSchema = z.enum(["password", "key"]);
+const secretSchema = z.string().max(4096, "Secret is too long").optional().default("");
+const privateKeySchema = z.string().max(20000, "Private key is too long").optional().default("");
+const boolSchema = z.boolean().optional();
+
 // ── Users ────────────────────────────────────────────────────────
 export const users = sqliteTable("users", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -135,7 +178,7 @@ export const connections = sqliteTable("connections", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
-export const insertConnectionSchema = createInsertSchema(connections).pick({
+const connectionPayloadSchema = createInsertSchema(connections).pick({
   name: true,
   host: true,
   port: true,
@@ -146,6 +189,49 @@ export const insertConnectionSchema = createInsertSchema(connections).pick({
   bind9ConfDir: true,
   bind9ZoneDir: true,
   rndcBin: true,
+}).extend({
+  name: nameSchema,
+  host: hostSchema,
+  port: portSchema,
+  username: usernameSchema,
+  authType: authTypeSchema,
+  password: secretSchema,
+  privateKey: privateKeySchema,
+  bind9ConfDir: linuxPathSchema.default(""),
+  bind9ZoneDir: linuxPathSchema.default(""),
+  rndcBin: linuxPathSchema.default("rndc"),
+});
+export const insertConnectionSchema = connectionPayloadSchema.superRefine((value, ctx) => {
+  if (value.authType === "password" && !value.password) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "Password is required when authType is password",
+    });
+  }
+  if (value.authType === "key" && !value.privateKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["privateKey"],
+      message: "Private key is required when authType is key",
+    });
+  }
+});
+export const updateConnectionSchema = connectionPayloadSchema.partial().superRefine((value, ctx) => {
+  if (value.authType === "password" && value.password === "") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "Password cannot be blank when switching to password auth",
+    });
+  }
+  if (value.authType === "key" && value.privateKey === "") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["privateKey"],
+      message: "Private key cannot be blank when switching to key auth",
+    });
+  }
 });
 export type InsertConnection = z.infer<typeof insertConnectionSchema>;
 export type Connection = typeof connections.$inferSelect;
@@ -243,6 +329,63 @@ export const replicationServers = sqliteTable("replication_servers", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
+const replicationServerPayloadSchema = createInsertSchema(replicationServers).pick({
+  name: true,
+  host: true,
+  port: true,
+  username: true,
+  authType: true,
+  password: true,
+  privateKey: true,
+  bind9ConfDir: true,
+  bind9ZoneDir: true,
+  role: true,
+  enabled: true,
+}).extend({
+  name: nameSchema,
+  host: hostSchema,
+  port: portSchema,
+  username: usernameSchema,
+  authType: authTypeSchema,
+  password: secretSchema,
+  privateKey: privateKeySchema,
+  bind9ConfDir: linuxPathSchema.default("/etc/bind"),
+  bind9ZoneDir: linuxPathSchema.default(""),
+  role: z.enum(["slave", "secondary"]).optional().default("slave"),
+  enabled: boolSchema.default(true),
+});
+export const insertReplicationServerSchema = replicationServerPayloadSchema.superRefine((value, ctx) => {
+  if (value.authType === "password" && !value.password) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "Password is required when authType is password",
+    });
+  }
+  if (value.authType === "key" && !value.privateKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["privateKey"],
+      message: "Private key is required when authType is key",
+    });
+  }
+});
+export const updateReplicationServerSchema = replicationServerPayloadSchema.partial().superRefine((value, ctx) => {
+  if (value.authType === "password" && value.password === "") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "Password cannot be blank when switching to password auth",
+    });
+  }
+  if (value.authType === "key" && value.privateKey === "") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["privateKey"],
+      message: "Private key cannot be blank when switching to key auth",
+    });
+  }
+});
 export type ReplicationServer = typeof replicationServers.$inferSelect;
 
 // ── Replication Conflicts ───────────────────────────────────────
@@ -343,3 +486,91 @@ export const backups = sqliteTable("backups", {
 });
 
 export type Backup = typeof backups.$inferSelect;
+
+const firewallRuleTypeSchema = z.enum(["port", "service", "portRange", "multiPort", "icmp", "raw"]);
+const firewallProtoSchema = z.enum(["tcp", "udp", "any", "icmp"]);
+const firewallActionSchema = z.enum(["allow", "deny", "reject"]);
+const firewallDirectionSchema = z.enum(["in", "out"]);
+const firewallIcmpTypeSchema = z.enum([
+  "echo-request",
+  "echo-reply",
+  "destination-unreachable",
+  "time-exceeded",
+  "redirect",
+  "router-advertisement",
+  "router-solicitation",
+  "parameter-problem",
+  "timestamp-request",
+  "timestamp-reply",
+]);
+
+export const createFirewallRuleSchema = z.object({
+  toPort: z.string().trim().max(128).optional().default(""),
+  proto: firewallProtoSchema.optional().default("tcp"),
+  action: firewallActionSchema.optional().default("allow"),
+  fromIp: z.string().trim().max(128).optional().default("any"),
+  direction: firewallDirectionSchema.optional().default("in"),
+  ruleType: firewallRuleTypeSchema.optional().default("port"),
+  toPortEnd: z.string().trim().max(128).optional(),
+  service: z.string().trim().max(64).optional(),
+  interface: z
+    .string()
+    .trim()
+    .max(32)
+    .regex(/^[a-zA-Z0-9._:-]+$/, "Interface contains invalid characters")
+    .optional(),
+  rateLimit: z.string().trim().max(32).optional(),
+  icmpType: firewallIcmpTypeSchema.optional(),
+  log: z.boolean().optional(),
+  comment: z.string().trim().max(120).optional(),
+  rawRule: z
+    .string()
+    .trim()
+    .max(160)
+    .regex(/^[a-zA-Z0-9./_:\- ]+$/, "Raw rule contains invalid characters")
+    .optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.ruleType === "port" && !value.toPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["toPort"],
+      message: "Port number is required",
+    });
+  }
+  if (value.ruleType === "service" && !value.service) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["service"],
+      message: "Service is required",
+    });
+  }
+  if (value.ruleType === "portRange" && (!value.toPort || !value.toPortEnd)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["toPortEnd"],
+      message: "Start and end port are required",
+    });
+  }
+  if (value.ruleType === "multiPort" && !value.toPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["toPort"],
+      message: "Comma-separated ports are required",
+    });
+  }
+  if (value.ruleType === "raw" && !value.rawRule) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rawRule"],
+      message: "Raw rule command is required",
+    });
+  }
+});
+
+export const configSectionContentSchema = z.object({
+  content: z
+    .string()
+    .min(1, "content is required")
+    .max(500000, "Configuration content is too large")
+    .refine((value) => !value.includes("\0"), "Configuration content contains invalid null bytes"),
+}).strict();

@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { getApiTokens, createApiToken, revokeApiToken, type ApiTokenEntry } from "@/lib/api";
@@ -45,7 +45,7 @@ export default function ApiTokensPage() {
             setTokenName("");
             setTokenPerms("*");
             setTokenExpiry("");
-            toast({ title: "Token created", description: "Copy the token now — it won't be shown again!" });
+            toast({ title: "Token created", description: "Copy the token now â€” it won't be shown again!" });
         },
         onError: (err: Error) => {
             toast({ variant: "destructive", title: "Failed to create token", description: err.message });
@@ -149,7 +149,7 @@ export default function ApiTokensPage() {
                             <div className="flex items-start gap-3">
                                 <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                                 <div className="flex-1">
-                                    <p className="font-semibold text-amber-800 dark:text-amber-200">Copy this token now — it won't be shown again!</p>
+                                    <p className="font-semibold text-amber-800 dark:text-amber-200">Copy this token now â€” it won't be shown again!</p>
                                     <div className="mt-2 flex items-center gap-2">
                                         <code className="bg-black/10 dark:bg-white/10 px-3 py-1.5 rounded text-sm font-mono break-all select-all">
                                             {revealedToken}
@@ -192,7 +192,7 @@ export default function ApiTokensPage() {
                                     {tokens.map((t) => (
                                         <TableRow key={t.id}>
                                             <TableCell className="font-medium">{t.name}</TableCell>
-                                            <TableCell><code className="text-xs bg-muted px-1.5 py-0.5 rounded">{t.tokenPrefix}…</code></TableCell>
+                                            <TableCell><code className="text-xs bg-muted px-1.5 py-0.5 rounded">{t.tokenPrefix}â€¦</code></TableCell>
                                             <TableCell>
                                                 <Badge variant={t.permissions === "*" ? "default" : "secondary"}>
                                                     {t.permissions}
@@ -229,3 +229,4 @@ export default function ApiTokensPage() {
         </DashboardLayout>
     );
 }
+

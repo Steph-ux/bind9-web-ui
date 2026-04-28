@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from "react";
+﻿import { createContext, type ComponentType, ReactNode, useContext, useEffect, useState } from "react";
 import { useLocation, Route } from "wouter";
 import { User, InsertUser } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
@@ -159,7 +159,7 @@ export function ProtectedRoute({
     adminOnly = false,
 }: {
     path: string;
-    component: () => React.JSX.Element;
+    component: ComponentType<any>;
     adminOnly?: boolean;
 }) {
     const { user, isLoading } = useAuth();
@@ -182,3 +182,5 @@ export function ProtectedRoute({
 
     return <Route path={path} component={Component} />;
 }
+
+

@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+﻿import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { PageHeader, PageState } from "@/components/layout";
 import { Shield, Plus, Trash2, Globe, AlertTriangle, Loader2, Upload, Link, RefreshCw, FileText, Search, X, ChevronLeft, ChevronRight } from "lucide-react";
 import {
     Card,
@@ -275,9 +276,12 @@ export default function FirewallDNS() {
     if (isLoading) {
         return (
             <DashboardLayout>
-                <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
+                <PageState
+                    loading
+                    title="Loading DNS firewall"
+                    description="Fetching RPZ rules, counters and policy details."
+                    className="min-h-[60vh]"
+                />
             </DashboardLayout>
         );
     }
@@ -285,18 +289,22 @@ export default function FirewallDNS() {
     if (queryError) {
         return (
             <DashboardLayout>
-                <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-                    <Alert variant="destructive" className="max-w-md">
-                        <AlertTriangle className="h-4 w-4" />
-                        <AlertTitle>Failed to load firewall rules</AlertTitle>
-                        <AlertDescription>
-                            {queryError.message || "An unexpected error occurred."}
-                            <Button variant="outline" size="sm" className="mt-2" onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/rpz"] })}>
-                                <RefreshCw className="h-4 w-4 mr-2" /> Retry
-                            </Button>
-                        </AlertDescription>
-                    </Alert>
-                </div>
+                <PageState
+                    title="Failed to load firewall rules"
+                    description={queryError.message || "An unexpected error occurred."}
+                    tone="danger"
+                    action={
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/rpz"] })}
+                        >
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Retry
+                        </Button>
+                    }
+                    className="min-h-[60vh]"
+                />
             </DashboardLayout>
         );
     }
@@ -304,22 +312,18 @@ export default function FirewallDNS() {
     return (
         <DashboardLayout>
             <div className="space-y-6">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                        <Shield className="h-7 w-7 text-primary shrink-0" />
-                        <div>
-                            <h2 className="text-2xl font-bold tracking-tight">DNS Firewall (RPZ)</h2>
-                            <p className="text-muted-foreground text-sm">
-                                Manage Response Policy Zones to block or redirect malicious domains.
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="shrink-0">
+                <PageHeader
+                    title="DNS Firewall (RPZ)"
+                    description="Manage Response Policy Zones to block, redirect or null-route malicious domains."
+                    icon={Shield}
+                    badge={
+                        <Badge variant="outline">
                             {stats?.total || 0} rule{(stats?.total || 0) !== 1 ? "s" : ""}
                         </Badge>
-                        <Dialog open={importOpen} onOpenChange={setImportOpen}>
+                    }
+                    actions={
+                        <div className="flex items-center gap-2">
+                            <Dialog open={importOpen} onOpenChange={setImportOpen}>
                             <DialogTrigger asChild>
                                 <Button variant="outline" size="sm">
                                     <Upload className="h-4 w-4 mr-2" /> Import
@@ -434,9 +438,10 @@ export default function FirewallDNS() {
                                     </TabsContent>
                                 </Tabs>
                             </DialogContent>
-                        </Dialog>
-                    </div>
-                </div>
+                            </Dialog>
+                        </div>
+                    }
+                />
 
                 <Alert>
                     <AlertTriangle className="h-4 w-4" />
@@ -597,7 +602,7 @@ export default function FirewallDNS() {
                                 <div>
                                     <CardTitle>Active Rules</CardTitle>
                                     <CardDescription>
-                                        {totalEntries} total rules • Page {page} of {totalPages}
+                                        {totalEntries} total rules â€¢ Page {page} of {totalPages}
                                     </CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -747,3 +752,4 @@ export default function FirewallDNS() {
         </DashboardLayout>
     );
 }
+

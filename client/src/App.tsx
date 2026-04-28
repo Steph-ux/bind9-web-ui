@@ -1,28 +1,42 @@
-// Copyright © 2025 Stephane ASSOGBA
-import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
+﻿// Copyright (c) 2025 Stephane ASSOGBA
+
+import { Suspense, lazy } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Route, Switch } from "wouter";
+
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, ProtectedRoute } from "@/lib/auth-provider";
-import NotFound from "@/pages/not-found";
-import AuthPage from "@/pages/auth-page";
-import ChangePasswordPage from "@/pages/change-password-page";
-import Dashboard from "@/pages/dashboard";
-import Zones from "@/pages/zones";
-import Config from "@/pages/config";
-import Logs from "@/pages/logs";
-import ACLs from "@/pages/acls";
-import Status from "@/pages/status";
-import Connections from "@/pages/connections";
-import ZoneEditor from "@/pages/zone-editor";
-import UsersPage from "@/pages/users-page";
-import FirewallPage from "@/pages/firewall";
-import FirewallDNS from "@/pages/firewall-dns";
-import BlacklistPage from "@/pages/blacklist";
-import ProfilePage from "@/pages/profile";
-import ApiTokensPage from "@/pages/api-tokens";
-import ReplicationPage from "@/pages/replication-page";
+import { queryClient } from "@/lib/queryClient";
+
+const ACLs = lazy(() => import("@/pages/acls"));
+const ApiTokensPage = lazy(() => import("@/pages/api-tokens"));
+const AuthPage = lazy(() => import("@/pages/auth-page"));
+const BlacklistPage = lazy(() => import("@/pages/blacklist"));
+const ChangePasswordPage = lazy(() => import("@/pages/change-password-page"));
+const Config = lazy(() => import("@/pages/config"));
+const Connections = lazy(() => import("@/pages/connections"));
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const FirewallPage = lazy(() => import("@/pages/firewall"));
+const FirewallDNS = lazy(() => import("@/pages/firewall-dns"));
+const Logs = lazy(() => import("@/pages/logs"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+const ProfilePage = lazy(() => import("@/pages/profile"));
+const ReplicationPage = lazy(() => import("@/pages/replication-page"));
+const Status = lazy(() => import("@/pages/status"));
+const UsersPage = lazy(() => import("@/pages/users-page"));
+const ZoneEditor = lazy(() => import("@/pages/zone-editor"));
+const Zones = lazy(() => import("@/pages/zones"));
+
+function RouteFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.08),_transparent_55%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+      <div className="rounded-xl border border-slate-200 bg-white/85 px-5 py-4 text-sm text-slate-600 shadow-sm backdrop-blur">
+        Loading page...
+      </div>
+    </div>
+  );
+}
 
 function Router() {
   return (
@@ -49,17 +63,19 @@ function Router() {
   );
 }
 
-function App() {
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <Suspense fallback={<RouteFallback />}>
+            <Router />
+          </Suspense>
         </TooltipProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
 }
 
-export default App;
+

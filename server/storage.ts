@@ -1,4 +1,4 @@
-// Copyright © 2025 Stephane ASSOGBA
+﻿// Copyright Â(c) 2025 Stephane ASSOGBA
 import { eq, desc, like, and, sql, inArray } from "drizzle-orm";
 import { db, dbReady } from "./db";
 import {
@@ -63,6 +63,7 @@ export interface IStorage {
   getKeys(): Promise<TsigKey[]>;
   getKey(id: string): Promise<TsigKey | undefined>;
   createKey(key: InsertTsigKey): Promise<TsigKey>;
+  updateKey(id: string, data: Partial<TsigKey>): Promise<TsigKey>;
   deleteKey(id: string): Promise<void>;
   // RPZ
   // IP Blacklist
@@ -170,7 +171,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // ── Users ────────────────────────────────────────────
+  // â”€â”€ Users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getUser(id: string): Promise<User | undefined> {
     await this.ensureDb();
     const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -206,7 +207,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  // ── Zones ────────────────────────────────────────────
+  // â”€â”€ Zones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getZones(): Promise<Zone[]> {
     await this.ensureDb();
     return db.select().from(zones).orderBy(zones.domain);
@@ -257,7 +258,7 @@ export class DatabaseStorage implements IStorage {
     return result[0]?.count || 0;
   }
 
-  // ── DNS Records ──────────────────────────────────────
+  // â”€â”€ DNS Records â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getRecords(zoneId: string): Promise<DnsRecord[]> {
     await this.ensureDb();
     return db.select().from(dnsRecords).where(eq(dnsRecords.zoneId, zoneId)).orderBy(dnsRecords.name);
@@ -289,7 +290,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(dnsRecords).where(eq(dnsRecords.id, id));
   }
 
-  // ── ACLs ─────────────────────────────────────────────
+  // â”€â”€ ACLs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getAcls(): Promise<Acl[]> {
     await this.ensureDb();
     return db.select().from(acls).orderBy(acls.name);
@@ -324,7 +325,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(acls).where(eq(acls.id, id));
   }
 
-  // ── TSIG Keys ────────────────────────────────────────
+  // â”€â”€ TSIG Keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getKeys(): Promise<TsigKey[]> {
     await this.ensureDb();
     return db.select().from(tsigKeys).orderBy(tsigKeys.name);
@@ -345,12 +346,21 @@ export class DatabaseStorage implements IStorage {
     return key;
   }
 
+  async updateKey(id: string, data: Partial<TsigKey>): Promise<TsigKey> {
+    await this.ensureDb();
+    const [key] = await db.update(tsigKeys)
+      .set(data)
+      .where(eq(tsigKeys.id, id))
+      .returning();
+    return key;
+  }
+
   async deleteKey(id: string): Promise<void> {
     await this.ensureDb();
     await db.delete(tsigKeys).where(eq(tsigKeys.id, id));
   }
 
-  // ── Log Entries ──────────────────────────────────────
+  // â”€â”€ Log Entries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getLogs(filter?: LogFilter): Promise<LogEntry[]> {
     await this.ensureDb();
     let query = db.select().from(logEntries);
@@ -389,7 +399,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(logEntries);
   }
 
-  // ── Config Snapshots ─────────────────────────────────
+  // â”€â”€ Config Snapshots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getConfig(section: string): Promise<ConfigSnapshot | undefined> {
     await this.ensureDb();
     const [config] = await db.select().from(configSnapshots)
@@ -409,7 +419,7 @@ export class DatabaseStorage implements IStorage {
     return config;
   }
 
-  // ── Connections ──────────────────────────────────────
+  // â”€â”€ Connections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getConnections(): Promise<Connection[]> {
     await this.ensureDb();
     return db.select().from(connections).orderBy(connections.name);
@@ -467,7 +477,7 @@ export class DatabaseStorage implements IStorage {
     await db.update(connections).set({ isActive: false });
   }
 
-  // ── RPZ ──────────────────────────────────────────────
+  // â”€â”€ RPZ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /** @deprecated Use getRpzZoneData() for BIND9 sync or getRpzEntriesPaged() for UI */
   async getRpzEntries(): Promise<RpzEntry[]> {
     await this.ensureDb();
@@ -597,7 +607,7 @@ export class DatabaseStorage implements IStorage {
     return stats;
   }
 
-  // ── IP Blacklist ──────────────────────────────────────────
+  // â”€â”€ IP Blacklist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private static readonly BAN_THRESHOLD = 10;      // attempts before auto-ban
   private static readonly BAN_DURATION_MS = 24 * 60 * 60 * 1000; // 24h default ban
 
@@ -641,7 +651,7 @@ export class DatabaseStorage implements IStorage {
         }).where(eq(ipBlacklist.ip, ip));
       }
     } else {
-      // First offense — just record it, don't ban yet
+      // First offense â€” just record it, don't ban yet
       await db.insert(ipBlacklist).values({
         ip,
         attemptCount: 1,
@@ -690,7 +700,7 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  // ── API Tokens ─────────────────────────────────────────────
+  // â”€â”€ API Tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getApiTokens(): Promise<ApiToken[]> {
     await this.ensureDb();
     return db.select({
@@ -745,7 +755,7 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(apiTokens.tokenHash, tokenHash));
   }
 
-  // ── Domain Jailing ──────────────────────────────────────────
+  // â”€â”€ Domain Jailing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getUserDomains(userId: string): Promise<UserDomain[]> {
     await this.ensureDb();
     return db.select().from(userDomains).where(eq(userDomains.userId, userId));
@@ -777,7 +787,7 @@ export class DatabaseStorage implements IStorage {
     return assignments.length > 0;
   }
 
-  // ── Replication Servers ─────────────────────────────────────
+  // â”€â”€ Replication Servers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getReplicationServers(): Promise<ReplicationServer[]> {
     await this.ensureDb();
     return db.select().from(replicationServers).orderBy(replicationServers.name);
@@ -819,7 +829,7 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(replicationServers.id, id));
   }
 
-  // ── Replication Conflicts ─────────────────────────────────
+  // â”€â”€ Replication Conflicts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getReplicationConflicts(resolved?: boolean): Promise<ReplicationConflict[]> {
     await this.ensureDb();
     if (resolved !== undefined) {
@@ -855,7 +865,7 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(replicationConflicts.resolved, false));
   }
 
-  // ── Replication Zone Bindings ─────────────────────────────
+  // â”€â”€ Replication Zone Bindings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getReplicationZoneBindings(serverId?: string, zoneId?: string): Promise<ReplicationZoneBinding[]> {
     await this.ensureDb();
     const conditions = [];
@@ -893,7 +903,7 @@ export class DatabaseStorage implements IStorage {
     return binding;
   }
 
-  // ── Health Checks ───────────────────────────────────────────
+  // â”€â”€ Health Checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getHealthChecks(serverId?: string, limit = 100): Promise<HealthCheck[]> {
     await this.ensureDb();
     if (serverId) {
@@ -925,7 +935,7 @@ export class DatabaseStorage implements IStorage {
     return check;
   }
 
-  // ── Notification Channels ───────────────────────────────────
+  // â”€â”€ Notification Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getNotificationChannels(): Promise<NotificationChannel[]> {
     await this.ensureDb();
     return db.select().from(notificationChannels);
@@ -962,7 +972,7 @@ export class DatabaseStorage implements IStorage {
     return (result as any).changes > 0;
   }
 
-  // ── Sync History ────────────────────────────────────────────
+  // â”€â”€ Sync History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getSyncHistory(serverId?: string, limit = 100): Promise<SyncHistoryEntry[]> {
     await this.ensureDb();
     if (serverId) {
@@ -1000,7 +1010,7 @@ export class DatabaseStorage implements IStorage {
     return { total, success, failed, avgDurationMs };
   }
 
-  // ── DNSSEC Keys ────────────────────────────────────────────────
+  // â”€â”€ DNSSEC Keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getDnssecKeys(zoneId?: string): Promise<DnssecKey[]> {
     await this.ensureDb();
     if (zoneId) {
@@ -1043,7 +1053,7 @@ export class DatabaseStorage implements IStorage {
     return (result as any).changes > 0;
   }
 
-  // ── Backups ────────────────────────────────────────────────────
+  // â”€â”€ Backups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getBackups(type?: string): Promise<Backup[]> {
     await this.ensureDb();
     if (type) {
@@ -1080,3 +1090,4 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+

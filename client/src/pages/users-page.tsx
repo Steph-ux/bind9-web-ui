@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
 import { User, InsertUser, insertUserSchema } from "@shared/schema";
@@ -167,7 +167,7 @@ export default function UsersPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   {...form.register("password")}
                 />
                 {form.formState.errors.password && (
@@ -318,7 +318,7 @@ export default function UsersPage() {
               <Label>New Password <span className="text-muted-foreground font-normal">(leave blank to keep current)</span></Label>
               <Input
                 type="password"
-                placeholder="••••••••"
+                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                 value={editPassword}
                 onChange={e => setEditPassword(e.target.value)}
               />
@@ -430,3 +430,4 @@ export default function UsersPage() {
     </DashboardLayout>
   );
 }
+

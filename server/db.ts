@@ -1,5 +1,5 @@
-// Copyright 2025 Stephane ASSOGBA
-// Multi-database factory — supports SQLite (default), PostgreSQL, MySQL
+﻿// Copyright 2025 Stephane ASSOGBA
+// Multi-database factory â€” supports SQLite (default), PostgreSQL, MySQL
 // Set DB_TYPE=postgresql or DB_TYPE=mysql + DATABASE_URL to switch
 import path from "path";
 import { mkdirSync } from "fs";
@@ -9,10 +9,10 @@ const DB_TYPE = (process.env.DB_TYPE || "sqlite").toLowerCase();
 export let db: any;
 export let schema: any;
 
-// Initialize DB — this promise is awaited by storage.ts on first use
+// Initialize DB â€” this promise is awaited by storage.ts on first use
 const dbReady = (async () => {
 if (DB_TYPE === "sqlite") {
-  // ── SQLite (default) ──────────────────────────────────────────
+  // â”€â”€ SQLite (default) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const Database = (await import("better-sqlite3")).default;
   const { drizzle } = await import("drizzle-orm/better-sqlite3");
   const sqliteSchema = await import("@shared/schema");
@@ -27,7 +27,7 @@ if (DB_TYPE === "sqlite") {
   db = drizzle(sqlite, { schema: sqliteSchema });
   schema = sqliteSchema;
 
-  // Auto-create tables (SQLite only — PG/MySQL use drizzle-kit push)
+  // Auto-create tables (SQLite only â€” PG/MySQL use drizzle-kit push)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -253,7 +253,7 @@ if (DB_TYPE === "sqlite") {
   console.log(`[db] SQLite database ready at ${dbPath}`);
 
 } else if (DB_TYPE === "postgresql" || DB_TYPE === "postgres") {
-  // ── PostgreSQL ────────────────────────────────────────────────
+  // â”€â”€ PostgreSQL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const { drizzle } = await import("drizzle-orm/node-postgres");
   const { Pool } = (await import("pg")).default;
   const pgSchema = await import("@shared/schema-pg");
@@ -281,7 +281,7 @@ if (DB_TYPE === "sqlite") {
   console.log(`[db] PostgreSQL database ready (${DATABASE_URL.replace(/:[^:@]+@/, ":****@")})`);
 
 } else if (DB_TYPE === "mysql") {
-  // ── MySQL ─────────────────────────────────────────────────────
+  // â”€â”€ MySQL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const { drizzle } = await import("drizzle-orm/mysql2");
   const mysql = (await import("mysql2/promise")).default;
   const mysqlSchema = await import("@shared/schema-mysql");
@@ -316,3 +316,4 @@ if (DB_TYPE === "sqlite") {
 // Export the ready promise so callers can await initialization if needed
 export { dbReady };
 export default db;
+
