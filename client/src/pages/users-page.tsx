@@ -1,433 +1,342 @@
-﻿import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/lib/auth-provider";
-import { User, InsertUser, insertUserSchema } from "@shared/schema";
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useToast } from "@/hooks/use-toast";
-import { Trash2, UserPlus, Loader2, Users, ShieldAlert, Pencil, Globe } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Eye, KeyRound, RefreshCw, Shield, ShieldAlert, Users } from "lucide-react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricCard, PageHeader, PageState } from "@/components/layout";
+import { DeleteUserDialog } from "@/components/users/DeleteUserDialog";
+import { EditUserDialog } from "@/components/users/EditUserDialog";
+import { type UserRole, type ZoneAccessOption } from "@/components/users/user-types";
+import { UserCreateCard } from "@/components/users/UserCreateCard";
+import { UserDomainAccessDialog } from "@/components/users/UserDomainAccessDialog";
+import { UsersTableCard } from "@/components/users/UsersTableCard";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { getUserDomains, setUserDomains } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-provider";
+import {
+  createUser,
+  deleteUser,
+  getUserDomains,
+  getUsers,
+  getZones,
+  type ManagedUser,
+  setUserDomains,
+  type CreateManagedUserInput,
+  updateUser,
+} from "@/lib/api";
+import { insertUserSchema } from "@shared/schema";
 
 export default function UsersPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
-  const [editTarget, setEditTarget] = useState<User | null>(null);
-  const [jailTarget, setJailTarget] = useState<User | null>(null);
+
+  const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
+  const [editTarget, setEditTarget] = useState<ManagedUser | null>(null);
+  const [jailTarget, setJailTarget] = useState<ManagedUser | null>(null);
   const [jailZoneIds, setJailZoneIds] = useState<string[]>([]);
-  const [jailAllZones, setJailAllZones] = useState<{ id: string; domain: string }[]>([]);
+  const [jailAllZones, setJailAllZones] = useState<ZoneAccessOption[]>([]);
   const [jailLoading, setJailLoading] = useState(false);
-  const [editRole, setEditRole] = useState<string>("viewer");
-  const [editPassword, setEditPassword] = useState<string>("");
+  const [editRole, setEditRole] = useState<UserRole>("viewer");
+  const [editPassword, setEditPassword] = useState("");
+  const [editMustChangePassword, setEditMustChangePassword] = useState(false);
 
-  const { data: users, isLoading } = useQuery<User[]>({
-    queryKey: ["users"],
-    queryFn: async () => {
-      const res = await fetch("/api/users");
-      if (!res.ok) throw new Error("Failed to fetch users");
-      return res.json();
-    },
-  });
-
-  const form = useForm<InsertUser>({
+  const form = useForm<CreateManagedUserInput>({
     resolver: zodResolver(insertUserSchema),
     defaultValues: { username: "", password: "", role: "viewer" },
   });
 
+  const {
+    data: users,
+    error,
+    isPending,
+    isFetching,
+    refetch,
+  } = useQuery<ManagedUser[]>({
+    queryKey: ["users"],
+    queryFn: getUsers,
+  });
+
   const createMutation = useMutation({
-    mutationFn: async (data: InsertUser) => {
-      const res = await fetch("/api/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        let message = "Failed to create user";
-        try { const err = await res.json(); message = err.message || message; } catch {}
-        throw new Error(message);
-      }
-      try { return await res.json(); } catch { return null; }
-    },
+    mutationFn: createUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      form.reset();
+      form.reset({ username: "", password: "", role: "viewer" });
       toast({ title: "User created" });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to create user", description: err.message });
+    onError: (mutationError: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Failed to create user",
+        description: mutationError.message,
+      });
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: { role?: string; password?: string } }) => {
-      const res = await fetch(`/api/users/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        let message = "Failed to update user";
-        try { const err = await res.json(); message = err.message || message; } catch {}
-        throw new Error(message);
-      }
-      try { return await res.json(); } catch { return null; }
-    },
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof updateUser>[1] }) =>
+      updateUser(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setEditTarget(null);
       setEditPassword("");
       toast({ title: "User updated" });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to update user", description: err.message });
+    onError: (mutationError: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Failed to update user",
+        description: mutationError.message,
+      });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        let message = "Failed to delete user";
-        try { const err = await res.json(); message = err.message || message; } catch {}
-        throw new Error(message);
-      }
-    },
+    mutationFn: deleteUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      setDeleteTarget(null);
       toast({ title: "User deleted" });
     },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "Failed to delete user", description: err.message });
+    onError: (mutationError: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Failed to delete user",
+        description: mutationError.message,
+      });
     },
   });
+
+  const domainAccessMutation = useMutation({
+    mutationFn: ({ id, zoneIds }: { id: string; zoneIds: string[] }) => setUserDomains(id, zoneIds),
+    onSuccess: () => {
+      toast({ title: "Domain access updated" });
+      closeDomainDialog();
+    },
+    onError: (mutationError: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Failed to update domain access",
+        description: mutationError.message,
+      });
+    },
+  });
+
+  const closeDomainDialog = () => {
+    setJailTarget(null);
+    setJailZoneIds([]);
+    setJailAllZones([]);
+    setJailLoading(false);
+  };
+
+  const openEditDialog = (managedUser: ManagedUser) => {
+    setEditTarget(managedUser);
+    setEditRole(managedUser.role);
+    setEditPassword("");
+    setEditMustChangePassword(managedUser.mustChangePassword);
+  };
+
+  const openDomainDialog = async (managedUser: ManagedUser) => {
+    setJailTarget(managedUser);
+    setJailZoneIds([]);
+    setJailAllZones([]);
+    setJailLoading(true);
+
+    try {
+      const [assignments, zones] = await Promise.all([getUserDomains(managedUser.id), getZones()]);
+      setJailZoneIds(assignments.map((assignment) => assignment.zoneId));
+      setJailAllZones(zones.map((zone) => ({ id: zone.id, domain: zone.domain })));
+    } catch (domainError) {
+      closeDomainDialog();
+      toast({
+        variant: "destructive",
+        title: "Failed to load domain access",
+        description:
+          domainError instanceof Error ? domainError.message : "Unable to load zone assignments.",
+      });
+      return;
+    }
+
+    setJailLoading(false);
+  };
+
+  const handleEditSave = () => {
+    if (!editTarget) {
+      return;
+    }
+
+    if (editPassword && editPassword.length < 8) {
+      toast({
+        variant: "destructive",
+        title: "Password too short",
+        description: "Minimum 8 characters required.",
+      });
+      return;
+    }
+
+    const patch: Parameters<typeof updateUser>[1] = {};
+
+    if (editRole !== editTarget.role) {
+      patch.role = editRole;
+    }
+
+    if (editPassword) {
+      patch.newPassword = editPassword;
+    }
+
+    if (editPassword || editMustChangePassword !== editTarget.mustChangePassword) {
+      patch.mustChangePassword = editMustChangePassword;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      toast({ title: "No changes to save" });
+      return;
+    }
+
+    updateMutation.mutate({ id: editTarget.id, data: patch });
+  };
+
+  const managedUsers = users ?? [];
+  const adminCount = managedUsers.filter((managedUser) => managedUser.role === "admin").length;
+  const operatorCount = managedUsers.filter((managedUser) => managedUser.role === "operator").length;
+  const viewerCount = managedUsers.filter((managedUser) => managedUser.role === "viewer").length;
+  const resetCount = managedUsers.filter((managedUser) => managedUser.mustChangePassword).length;
 
   if (!user || user.role !== "admin") {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-          <div className="text-center">
-            <ShieldAlert className="h-12 w-12 text-destructive mb-3" />
-            <h4 className="font-semibold">Access Denied</h4>
-            <p className="text-muted-foreground">You need admin role to access this page.</p>
-          </div>
-        </div>
+        <PageState
+          icon={ShieldAlert}
+          tone="danger"
+          title="Access denied"
+          description="This page is restricted to administrator accounts."
+          className="min-h-[60vh]"
+        />
       </DashboardLayout>
     );
   }
 
-  const roleBadge = (role: string) => {
-    if (role === "admin") return <Badge variant="destructive">{role}</Badge>;
-    if (role === "operator") return <Badge className="bg-green-600">{role}</Badge>;
-    return <Badge variant="secondary">{role}</Badge>;
-  };
-
   return (
     <DashboardLayout>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">User Management</h2>
-          <p className="text-muted-foreground">Create and manage admin panel users and roles.</p>
-        </div>
-      </div>
+      <div className="space-y-6">
+        <PageHeader
+          title="User Management"
+          description="Create admin panel accounts, rotate credentials and scope viewer access to specific zones."
+          icon={Users}
+          badge={<Badge variant="outline">Admin only</Badge>}
+          actions={
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              <RefreshCw className={["h-4 w-4", isFetching ? "animate-spin" : ""].join(" ")} />
+              {isFetching ? "Refreshing" : "Refresh"}
+            </Button>
+          }
+        />
 
-      <div className="grid gap-4 lg:grid-cols-12">
-        {/* Add User Form */}
-        <Card className="lg:col-span-4">
-          <CardHeader className="border-b flex items-center gap-2">
-            <UserPlus className="h-4 w-4 text-primary" />
-            <CardTitle>Add New User</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <form onSubmit={form.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  placeholder="john.doe"
-                  {...form.register("username")}
-                />
-                {form.formState.errors.username && (
-                  <p className="text-sm text-destructive">{form.formState.errors.username.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
-                  {...form.register("password")}
-                />
-                {form.formState.errors.password && (
-                  <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
-                <Select
-                  value={form.watch("role")}
-                  onValueChange={(v) => form.setValue("role", v as "admin" | "operator" | "viewer")}
-                >
-                  <SelectTrigger id="role">
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                    <SelectItem value="operator">Operator</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button type="submit" className="w-full gap-2" disabled={createMutation.isPending}>
-                {createMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</>
-                ) : (
-                  <><UserPlus className="h-4 w-4" /> Create User</>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Users Table */}
-        <Card className="lg:col-span-8">
-          <CardHeader className="border-b flex items-center gap-2">
-            <Users className="h-4 w-4 text-primary" />
-            <CardTitle>Users</CardTitle>
-            {users && (
-              <Badge variant="secondary" className="ml-auto">{users.length}</Badge>
-            )}
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Username</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Role</th>
-                    <th className="h-10 px-4 text-left font-medium text-muted-foreground">Created At</th>
-                    <th className="h-10 px-4 text-right font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={4} className="text-center text-muted-foreground py-8">
-                        <Loader2 className="h-5 w-5 animate-spin mx-auto" />
-                      </td>
-                    </tr>
-                  ) : users?.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="text-center text-muted-foreground py-8">No users found.</td>
-                    </tr>
-                  ) : (
-                    users?.map((u) => (
-                      <tr key={u.id} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-3 font-semibold">{u.username}</td>
-                        <td className="px-4 py-3">{roleBadge(u.role)}</td>
-                        <td className="px-4 py-3 text-muted-foreground text-sm">
-                          {new Date(u.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-4 py-3 text-right flex gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => { setEditTarget(u); setEditRole(u.role); setEditPassword(""); }}
-                            title="Edit user"
-                          >
-                            <Pencil className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                          {u.role === "viewer" && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={async () => {
-                                setJailTarget(u);
-                                setJailLoading(true);
-                                try {
-                                  const [assignments, allZones] = await Promise.all([
-                                    getUserDomains(u.id),
-                                    fetch("/api/zones").then(r => r.json()),
-                                  ]);
-                                  setJailZoneIds(assignments.map((a: any) => a.zoneId));
-                                  setJailAllZones(allZones.map((z: any) => ({ id: z.id, domain: z.domain })));
-                                } catch {}
-                                setJailLoading(false);
-                              }}
-                              title="Manage domain access"
-                            >
-                              <Globe className="h-4 w-4 text-muted-foreground" />
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => setDeleteTarget(u)}
-                            disabled={u.id === user?.id || deleteMutation.isPending}
-                            title="Delete user"
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Edit User Dialog */}
-      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit User: {editTarget?.username}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Role</Label>
-              <Select value={editRole} onValueChange={setEditRole}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="viewer">Viewer</SelectItem>
-                  <SelectItem value="operator">Operator</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>New Password <span className="text-muted-foreground font-normal">(leave blank to keep current)</span></Label>
-              <Input
-                type="password"
-                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
-                value={editPassword}
-                onChange={e => setEditPassword(e.target.value)}
+        {isPending ? (
+          <PageState
+            loading
+            title="Loading users"
+            description="Fetching accounts and access controls."
+            className="min-h-[45vh]"
+          />
+        ) : error ? (
+          <PageState
+            icon={ShieldAlert}
+            tone="danger"
+            title="Users unavailable"
+            description={error instanceof Error ? error.message : "Unable to load user accounts."}
+            action={<Button onClick={() => refetch()}>Retry</Button>}
+            className="min-h-[45vh]"
+          />
+        ) : (
+          <>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <MetricCard
+                label="Total accounts"
+                value={managedUsers.length}
+                description="Accounts available in the web console."
+                icon={Users}
+              />
+              <MetricCard
+                label="Privileged users"
+                value={adminCount + operatorCount}
+                description={`${adminCount} admin, ${operatorCount} operator`}
+                icon={Shield}
+                tone="success"
+              />
+              <MetricCard
+                label="Viewers"
+                value={viewerCount}
+                description="Accounts restricted to read-oriented workflows."
+                icon={Eye}
+              />
+              <MetricCard
+                label="Reset required"
+                value={resetCount}
+                description="Accounts forced to change password on next login."
+                icon={KeyRound}
+                tone={resetCount > 0 ? "warning" : "success"}
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
-            <Button
-              className="gap-2"
-              disabled={updateMutation.isPending}
-              onClick={() => {
-                if (!editTarget) return;
-                const data: { role?: string; password?: string } = {};
-                if (editRole !== editTarget.role) data.role = editRole;
-                if (editPassword) {
-                  if (editPassword.length < 8) {
-                    toast({ variant: "destructive", title: "Password too short", description: "Minimum 8 characters" });
-                    return;
-                  }
-                  data.password = editPassword;
-                }
-                if (Object.keys(data).length === 0) {
-                  toast({ title: "No changes" });
-                  return;
-                }
-                updateMutation.mutate({ id: editTarget.id, data });
-              }}
-            >
-              {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete User</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete user <strong>{deleteTarget?.username}</strong>? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => {
-              if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
-            }}>
-              Delete User
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Domain Jailing Dialog */}
-      <Dialog open={!!jailTarget} onOpenChange={(open) => { if (!open) setJailTarget(null); }}>
-        <DialogContent className="max-w-md max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5" /> Domain Access: {jailTarget?.username}
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Select which zones this viewer can access. Admins and operators always see all zones.
-          </p>
-          {jailLoading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
-          ) : jailAllZones.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">No zones available</p>
-          ) : (
-            <div className="space-y-2 max-h-60 overflow-y-auto py-2">
-              {jailAllZones.map(z => (
-                <label key={z.id} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50 cursor-pointer">
-                  <Checkbox
-                    checked={jailZoneIds.includes(z.id)}
-                    onCheckedChange={(checked) => {
-                      setJailZoneIds(prev =>
-                        checked ? [...prev, z.id] : prev.filter(id => id !== z.id)
-                      );
-                    }}
-                  />
-                  <span className="text-sm">{z.domain}</span>
-                </label>
-              ))}
+            <div className="grid gap-4 lg:grid-cols-12">
+              <UserCreateCard
+                form={form}
+                isPending={createMutation.isPending}
+                onSubmit={(data) => createMutation.mutate(data)}
+              />
+              <UsersTableCard
+                users={managedUsers}
+                isLoading={false}
+                currentUserId={user.id}
+                isDeleting={deleteMutation.isPending}
+                onEdit={openEditDialog}
+                onManageDomains={openDomainDialog}
+                onDelete={setDeleteTarget}
+              />
             </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setJailTarget(null)}>Cancel</Button>
-            <Button
-              className="gap-2"
-              disabled={jailLoading}
-              onClick={async () => {
-                if (!jailTarget) return;
-                try {
-                  await setUserDomains(jailTarget.id, jailZoneIds);
-                  toast({ title: "Domain access updated" });
-                  setJailTarget(null);
-                } catch (err: any) {
-                  toast({ variant: "destructive", title: "Failed", description: err.message });
-                }
-              }}
-            >
-              Save Access
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        )}
+
+        <EditUserDialog
+          user={editTarget}
+          role={editRole}
+          password={editPassword}
+          mustChangePassword={editMustChangePassword}
+          isPending={updateMutation.isPending}
+          onRoleChange={setEditRole}
+          onPasswordChange={setEditPassword}
+          onMustChangePasswordChange={setEditMustChangePassword}
+          onClose={() => setEditTarget(null)}
+          onSave={handleEditSave}
+        />
+
+        <DeleteUserDialog
+          user={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        />
+
+        <UserDomainAccessDialog
+          user={jailTarget}
+          zoneIds={jailZoneIds}
+          allZones={jailAllZones}
+          isLoading={jailLoading || domainAccessMutation.isPending}
+          onZoneIdsChange={setJailZoneIds}
+          onClose={closeDomainDialog}
+          onSave={() =>
+            jailTarget && domainAccessMutation.mutate({ id: jailTarget.id, zoneIds: jailZoneIds })
+          }
+        />
+      </div>
     </DashboardLayout>
   );
 }
-

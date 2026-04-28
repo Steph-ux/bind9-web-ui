@@ -19,7 +19,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     }
 }
 
-// â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Dashboard
 export interface DashboardData {
     zones: { total: number; active: number };
     records: number;
@@ -32,7 +32,7 @@ export interface DashboardData {
 
 export const getDashboard = () => request<DashboardData>("/dashboard");
 
-// â”€â”€ Zones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Zones
 export interface ZoneData {
     id: string;
     domain: string;
@@ -70,7 +70,7 @@ export const updateZone = (id: string, data: Partial<ZoneData>) =>
 export const deleteZone = (id: string) =>
     request<{ message: string }>(`/zones/${id}`, { method: "DELETE" });
 
-// â”€â”€ DNS Records â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// DNS Records
 export interface RecordData {
     id: string;
     zoneId: string;
@@ -89,7 +89,7 @@ export const updateRecord = (id: string, data: Partial<RecordData>) =>
 export const deleteRecord = (id: string) =>
     request<{ message: string }>(`/records/${id}`, { method: "DELETE" });
 
-// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Config
 export interface ConfigData {
     section: string;
     content: string;
@@ -99,7 +99,7 @@ export const getConfig = (section: string) => request<ConfigData>(`/config/${sec
 export const saveConfig = (section: string, content: string) =>
     request<any>(`/config/${section}`, { method: "PUT", body: JSON.stringify({ content }) });
 
-// â”€â”€ ACLs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ACLs
 export interface AclData {
     id: string;
     name: string;
@@ -116,7 +116,7 @@ export const updateAcl = (id: string, data: Partial<AclData>) =>
 export const deleteAcl = (id: string) =>
     request<{ message: string }>(`/acls/${id}`, { method: "DELETE" });
 
-// â”€â”€ TSIG Keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// TSIG Keys
 export interface KeyData {
     id: string;
     name: string;
@@ -131,7 +131,7 @@ export const createKey = (data: { name: string; algorithm: string; secret: strin
 export const deleteKey = (id: string) =>
     request<{ message: string }>(`/keys/${id}`, { method: "DELETE" });
 
-// â”€â”€ Logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Logs
 export interface LogData {
     id: string;
     timestamp: string;
@@ -151,7 +151,7 @@ export const getLogs = (params?: { level?: string; source?: string; search?: str
 };
 export const clearLogs = () => request<{ message: string }>("/logs", { method: "DELETE" });
 
-// â”€â”€ Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Status
 export interface StatusData {
     bind9: { running: boolean; version: string; uptime: string; zones: number; pid: number | null; threads: number };
     system: {
@@ -200,7 +200,7 @@ export interface StatusData {
 
 export const getStatus = () => request<StatusData>("/status");
 
-// â”€â”€ BIND9 Advanced Info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// BIND9 Advanced Info
 export interface BindInfoData {
     forwarders: string[];
     allowRecursion: string[];
@@ -214,11 +214,11 @@ export interface BindInfoData {
 
 export const getBindInfo = () => request<BindInfoData>("/server/bind-info");
 
-// â”€â”€ rndc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// RNDC
 export const executeRndc = (command: string) =>
     request<{ command: string; output: string }>(`/rndc/${command}`, { method: "POST" });
 
-// â”€â”€ SSH Connections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// SSH Connections
 export interface ConnectionData {
     id: string;
     name: string;
@@ -276,11 +276,11 @@ export const activateConnection = (id: string) =>
 export const deactivateConnections = () =>
     request<{ message: string }>("/connections/deactivate", { method: "PUT" });
 
-// â”€â”€ Zone Sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Zone Sync
 export const syncZones = () =>
     request<{ message: string; total: number; synced: number; skipped: number }>("/zones/sync", { method: "POST" });
 
-// â”€â”€ Firewall â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Firewall
 export type RuleDirection = "in" | "out";
 export type RuleType = "port" | "service" | "portRange" | "multiPort" | "icmp" | "raw";
 
@@ -339,7 +339,7 @@ export const addFirewallRule = (data: AddFirewallRuleData) =>
 export const deleteFirewallRule = (id: number) =>
     request<{ message: string }>(`/firewall/rules/${id}`, { method: "DELETE" });
 
-// â”€â”€ IP Blacklist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// IP Blacklist
 export interface IpBlacklistEntry {
     id: string;
     ip: string;
@@ -358,7 +358,7 @@ export const unbanIp = (ip: string) =>
 export const cleanupBlacklist = () =>
     request<{ message: string }>("/blacklist/cleanup", { method: "POST" });
 
-// â”€â”€ API Tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// API Tokens
 export interface ApiTokenEntry {
     id: string;
     name: string;
@@ -383,7 +383,37 @@ export const createApiToken = (name: string, permissions?: string, expiresAt?: s
 export const revokeApiToken = (id: string) =>
     request<{ message: string }>(`/tokens/${id}`, { method: "DELETE" });
 
-// â”€â”€ Domain Jailing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Users
+export interface ManagedUser {
+    id: string;
+    username: string;
+    role: "admin" | "operator" | "viewer";
+    mustChangePassword: boolean;
+    createdAt: string;
+}
+
+export interface CreateManagedUserInput {
+    username: string;
+    password: string;
+    role: "admin" | "operator" | "viewer";
+}
+
+export interface UpdateManagedUserInput {
+    username?: string;
+    role?: "admin" | "operator" | "viewer";
+    newPassword?: string;
+    mustChangePassword?: boolean;
+}
+
+export const getUsers = () => request<ManagedUser[]>("/users");
+export const createUser = (data: CreateManagedUserInput) =>
+    request<ManagedUser>("/users", { method: "POST", body: JSON.stringify(data) });
+export const updateUser = (id: string, data: UpdateManagedUserInput) =>
+    request<ManagedUser>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteUser = (id: string) =>
+    request<{ message: string }>(`/users/${id}`, { method: "DELETE" });
+
+// Domain Jailing
 export interface UserDomainAssignment {
     id: string;
     userId: string;
@@ -399,7 +429,7 @@ export const setUserDomains = (userId: string, zoneIds: string[]) =>
         body: JSON.stringify({ zoneIds }),
     });
 
-// â”€â”€ Replication Servers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Replication Servers
 export interface ReplicationServerEntry {
     id: string;
     name: string;
@@ -464,7 +494,7 @@ export const notifyZoneReplication = (domain: string) =>
         method: "POST",
     });
 
-// â”€â”€ Replication Conflicts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Replication Conflicts
 export interface ReplicationConflictEntry {
     id: string;
     serverId: string;
@@ -490,7 +520,7 @@ export const resolveReplicationConflict = (id: string) =>
 export const resolveAllReplicationConflicts = () =>
     request<{ message: string }>("/replication/conflicts/resolve-all", { method: "PUT" });
 
-// â”€â”€ Replication Zone Bindings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Replication Zone Bindings
 export interface ReplicationZoneBindingEntry {
     id: string;
     serverId: string;
@@ -510,7 +540,7 @@ export const setReplicationZoneBindings = (serverId: string, bindings: { zoneId:
         body: JSON.stringify({ bindings }),
     });
 
-// â”€â”€ Health Checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Health Checks
 export interface HealthCheckEntry {
     id: string;
     serverId: string;
@@ -525,7 +555,7 @@ export const getHealthChecks = (serverId?: string, limit?: number) =>
 export const runHealthChecks = () =>
     request<HealthCheckEntry[]>("/health-checks/run", { method: "POST" });
 
-// â”€â”€ Notification Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Notification Channels
 export interface NotificationChannelEntry {
     id: string;
     name: string;
@@ -551,7 +581,7 @@ export const updateNotificationChannel = (id: string, data: Partial<Notification
 export const deleteNotificationChannel = (id: string) =>
     request<{ message: string }>(`/notification-channels/${id}`, { method: "DELETE" });
 
-// â”€â”€ Sync History & Metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Sync History and Metrics
 export interface SyncHistoryEntry {
     id: string;
     serverId: string;
@@ -575,7 +605,7 @@ export const getSyncHistory = (serverId?: string, limit?: number) =>
 export const getSyncMetrics = (serverId?: string) =>
     request<SyncMetrics>(`/sync-metrics${serverId ? `?serverId=${serverId}` : ""}`);
 
-// â”€â”€ DNSSEC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// DNSSEC
 export interface DnssecKeyEntry {
     id: string;
     zoneId: string;
@@ -612,7 +642,7 @@ export const retireDnssecKey = (keyId: string) =>
 export const deleteDnssecKey = (keyId: string) =>
     request<{ success: boolean; message: string }>(`/dnssec/keys/${keyId}`, { method: "DELETE" });
 
-// â”€â”€ Backups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Backups
 export interface BackupEntry {
     id: string;
     type: "auto" | "manual" | "snapshot";
