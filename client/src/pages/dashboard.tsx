@@ -1,16 +1,36 @@
 ﻿import { useQuery } from "@tanstack/react-query";
 import { Download, RefreshCw, Server, WifiOff } from "lucide-react";
+import { lazy, Suspense } from "react";
 
 import { BindStatusCard } from "@/components/dashboard/BindStatusCard";
 import { DashboardMetricsGrid } from "@/components/dashboard/DashboardMetricsGrid";
 import { RecentLogsCard } from "@/components/dashboard/RecentLogsCard";
-import { RecordDistributionCard } from "@/components/dashboard/RecordDistributionCard";
 import { exportDashboardReport } from "@/components/dashboard/dashboard-utils";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { PageHeader, PageState } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboard } from "@/lib/api";
+
+const RecordDistributionCard = lazy(async () => {
+  const module = await import("@/components/dashboard/RecordDistributionCard");
+  return { default: module.RecordDistributionCard };
+});
+
+function RecordDistributionFallback() {
+  return (
+    <Card className="border-border/70 bg-card/85 shadow-sm">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Record distribution</CardTitle>
+        <Badge variant="secondary">Loading</Badge>
+      </CardHeader>
+      <CardContent className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">
+        Loading chart data...
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function Dashboard() {
   const {
@@ -92,7 +112,9 @@ export default function Dashboard() {
         <DashboardMetricsGrid data={data} />
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
-          <RecordDistributionCard data={data} />
+          <Suspense fallback={<RecordDistributionFallback />}>
+            <RecordDistributionCard data={data} />
+          </Suspense>
           <BindStatusCard data={data} />
         </div>
 

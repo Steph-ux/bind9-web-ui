@@ -1,13 +1,10 @@
 ﻿import { useEffect, useState } from "react";
+import { Suspense, lazy } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  AlertCircle,
-  AlertTriangle,
   Bell,
-  CheckCircle2,
   Copy,
   Globe,
-  Info,
   Key,
   LayoutDashboard,
   LogOut,
@@ -36,14 +33,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -53,7 +42,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 interface DashboardLayoutProps {
@@ -93,6 +81,16 @@ const adminSecurity: NavItem[] = [
   { label: "API Tokens", href: "/api-tokens", icon: Key },
 ];
 
+const LayoutCommandPalette = lazy(async () => {
+  const module = await import("./LayoutCommandPalette");
+  return { default: module.LayoutCommandPalette };
+});
+
+const LayoutNotificationsSheet = lazy(async () => {
+  const module = await import("./LayoutNotificationsSheet");
+  return { default: module.LayoutNotificationsSheet };
+});
+
 const routeLabels: Array<{ match: (path: string) => boolean; label: string }> = [
   { match: (path) => path === "/", label: "Overview" },
   { match: (path) => path === "/zones", label: "Zones" },
@@ -130,6 +128,10 @@ function isActiveRoute(currentPath: string, href: string) {
 
 function getCurrentRouteLabel(path: string) {
   return routeLabels.find((route) => route.match(path))?.label ?? "Control Panel";
+}
+
+function OverlayFallback() {
+  return null;
 }
 
 function NavButton({
@@ -252,19 +254,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     setUnreadCount(0);
     if (notifications[0]) {
       localStorage.setItem("lastSeenLogId", notifications[0].id);
-    }
-  };
-
-  const levelIcon = (level: string) => {
-    switch (level) {
-      case "ERROR":
-        return <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />;
-      case "WARN":
-        return <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />;
-      case "INFO":
-        return <Info className="h-4 w-4 shrink-0 text-blue-500" />;
-      default:
-        return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />;
     }
   };
 
@@ -528,73 +517,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </SheetContent>
       </Sheet>
 
-      <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-        <CommandInput placeholder="Search pages..." />
-        <CommandList>
-          <CommandEmpty>No result found.</CommandEmpty>
-          {navSections.map((section) => (
-            <CommandGroup key={section.title} heading={section.title}>
-              {section.items.map((item) => (
-                <CommandItem
-                  key={item.href}
-                  onSelect={() => {
-                    setCommandOpen(false);
-                    setLocation(item.href);
-                  }}
-                >
-                  <item.icon className="h-4 w-4" />
-                  <span>{item.label}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ))}
-        </CommandList>
-      </CommandDialog>
+      <Suspense fallback={<OverlayFallback />}>
+        <LayoutCommandPalette
+          open={commandOpen}
+          onOpenChange={setCommandOpen}
+          navSections={navSections}
+          onNavigate={setLocation}
+        />
+      </Suspense>
 
-      <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
-        <SheetContent side="right" className="flex w-96 max-w-full flex-col p-0">
-          <SheetHeader className="border-b px-4 py-4">
-            <SheetTitle className="flex items-center gap-2">
-              <Bell className="h-5 w-5" />
-              Notifications
-            </SheetTitle>
-          </SheetHeader>
-          <ScrollArea className="flex-1">
-            {notifications.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center text-muted-foreground">
-                <Bell className="h-10 w-10 opacity-40" />
-                <div>
-                  <p className="font-medium text-foreground">No notifications yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Recent log activity will appear here.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {notifications.map((log) => (
-                  <div key={log.id} className="flex items-start gap-3 px-4 py-4">
-                    {levelIcon(log.level)}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium leading-snug">{log.message}</p>
-                        <Badge variant="outline" className="shrink-0">
-                          {log.level}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span>{log.source}</span>
-                        <Separator orientation="vertical" className="h-3" />
-                        <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
+      <Suspense fallback={<OverlayFallback />}>
+        <LayoutNotificationsSheet
+          open={notifOpen}
+          onOpenChange={setNotifOpen}
+          notifications={notifications}
+        />
+      </Suspense>
     </div>
   );
 }
