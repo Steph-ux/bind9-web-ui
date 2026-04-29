@@ -31,8 +31,8 @@ export function PageState({
   return (
     <Empty
       className={cn(
-        "border bg-card/70 shadow-sm",
-        tone === "danger" ? "border-destructive/30" : "border-border/70",
+        "linear-panel bg-card/70 shadow-none",
+        tone === "danger" ? "border-destructive/25" : "border-border/60",
         className,
       )}
     >
@@ -41,10 +41,10 @@ export function PageState({
           variant="icon"
           className={cn(
             loading
-              ? "bg-primary/10 text-primary"
+              ? "bg-primary/12 text-primary ring-1 ring-primary/20"
               : tone === "danger"
-                ? "bg-destructive/10 text-destructive"
-                : "bg-primary/10 text-primary",
+                ? "bg-destructive/12 text-destructive ring-1 ring-destructive/20"
+                : "bg-primary/12 text-primary ring-1 ring-primary/20",
           )}
         >
           {loading ? <Spinner className="size-5" /> : Icon ? <Icon className="size-5" /> : null}

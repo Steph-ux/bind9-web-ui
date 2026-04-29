@@ -96,7 +96,15 @@ export default function Status() {
           description="Hardware utilization, BIND9 health and management capabilities."
           icon={Activity}
           badge={
-            <Badge variant={status.bind9.running ? "default" : "secondary"} className="gap-2">
+            <Badge
+              variant="outline"
+              className={[
+                "gap-2 border-border/70 bg-background/70",
+                status.bind9.running
+                  ? "text-emerald-400"
+                  : "text-amber-400",
+              ].join(" ")}
+            >
               {status.bind9.running ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-emerald-400" />
@@ -111,7 +119,12 @@ export default function Status() {
             </Badge>
           }
           actions={
-            <Button variant="outline" className="gap-2" onClick={() => refetch()} disabled={isFetching}>
+            <Button
+              variant="outline"
+              className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
               {isFetching ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -152,9 +165,9 @@ export default function Status() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.9fr)]">
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Network className="h-4 w-4 text-primary" />
                 Interface Statistics
               </CardTitle>
@@ -163,9 +176,9 @@ export default function Status() {
               {status.system.interfaces.length > 0 ? (
                 status.system.interfaces.map((iface) => (
                   <div key={iface.name} className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/45 px-3 py-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        <Badge variant="secondary" className="font-mono">
+                        <Badge variant="outline" className="border-border/70 bg-background/70 font-mono">
                           {iface.name}
                         </Badge>
                         <span className="truncate font-mono text-sm text-muted-foreground">
@@ -188,9 +201,9 @@ export default function Status() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Activity className="h-4 w-4 text-primary" />
                 BIND9 Process Information
               </CardTitle>
@@ -203,7 +216,7 @@ export default function Status() {
                   { label: "Threads", value: status.bind9.threads || "N/A" },
                   { label: "Version", value: status.bind9.version || "N/A" },
                 ].map(({ label, value }) => (
-                  <div key={label} className="rounded-xl border bg-muted/30 p-3">
+                  <div key={label} className="rounded-2xl border border-border/60 bg-background/45 p-3">
                     <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                       {label}
                     </div>
@@ -216,30 +229,30 @@ export default function Status() {
         </div>
 
         {status.management ? (
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Shield className="h-4 w-4 text-primary" />
                 Management Capabilities
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                   <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
                   <div className="font-mono font-semibold">{status.management.mode}</div>
                 </div>
-                <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                   <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Zone Layout</div>
                   <div className="font-mono font-semibold">{status.management.zoneLayout.strategy}</div>
                 </div>
-                <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                   <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Forward Dir</div>
                   <div className="break-all font-mono text-xs">
                     {status.management.zoneLayout.forwardDir || "Not detected"}
                   </div>
                 </div>
-                <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                   <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Reverse Dir</div>
                   <div className="break-all font-mono text-xs">
                     {status.management.zoneLayout.reverseDir || "Not detected"}
@@ -304,9 +317,9 @@ export default function Status() {
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Globe className="h-4 w-4 text-primary" />
                 Forwarders
               </CardTitle>
@@ -326,9 +339,9 @@ export default function Status() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Shield className="h-4 w-4 text-primary" />
                 Access Controls
               </CardTitle>
@@ -361,9 +374,9 @@ export default function Status() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Key className="h-4 w-4 text-primary" />
                 DNSSEC Signing Status
               </CardTitle>
@@ -374,7 +387,7 @@ export default function Status() {
                   {bindInfo.dnssec.map((zone) => (
                     <div
                       key={zone.zone}
-                      className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3"
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/45 p-3"
                     >
                       <div className="flex min-w-0 items-center gap-2">
                         <Badge variant={zone.signed ? "default" : "secondary"} className="text-xs">
@@ -400,20 +413,20 @@ export default function Status() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <ArrowRightLeft className="h-4 w-4 text-primary" />
                 Zone Transfers
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border bg-muted/30 p-3 text-center">
+                <div className="rounded-2xl border border-border/60 bg-background/45 p-3 text-center">
                   <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Incoming</div>
                   <div className="font-mono text-2xl font-semibold">{bindInfo.transfers.incoming}</div>
                 </div>
-                <div className="rounded-xl border bg-muted/30 p-3 text-center">
+                <div className="rounded-2xl border border-border/60 bg-background/45 p-3 text-center">
                   <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Outgoing</div>
                   <div className="font-mono text-2xl font-semibold">{bindInfo.transfers.outgoing}</div>
                 </div>
@@ -423,7 +436,7 @@ export default function Status() {
                   {bindInfo.transfers.details.map((detail, index) => (
                     <div
                       key={`${detail}-${index}`}
-                      className="truncate rounded bg-muted/20 px-2 py-1 font-mono text-xs text-muted-foreground"
+                      className="truncate rounded-xl border border-border/60 bg-background/45 px-2 py-1 font-mono text-xs text-muted-foreground"
                     >
                       {detail}
                     </div>
@@ -437,9 +450,9 @@ export default function Status() {
         </div>
 
         {bindInfo.slaveZones.length > 0 ? (
-          <Card className="border-border/70 bg-card/85 shadow-sm">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <FileText className="h-4 w-4 text-primary" />
                 Slave Zones Sync Status
               </CardTitle>

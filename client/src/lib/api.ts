@@ -81,6 +81,17 @@ export interface RecordData {
     priority: number | null;
 }
 
+export interface ZoneDnssecInfo {
+    enabled: boolean;
+    ds_record?: string;
+    keys: Array<{
+        id: string;
+        type: string;
+        algorithm: string;
+        file: string;
+    }>;
+}
+
 export const getRecords = (zoneId: string) => request<RecordData[]>(`/zones/${zoneId}/records`);
 export const createRecord = (zoneId: string, data: Omit<RecordData, "id" | "zoneId">) =>
     request<RecordData>(`/zones/${zoneId}/records`, { method: "POST", body: JSON.stringify(data) });
@@ -88,6 +99,8 @@ export const updateRecord = (id: string, data: Partial<RecordData>) =>
     request<RecordData>(`/records/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteRecord = (id: string) =>
     request<{ message: string }>(`/records/${id}`, { method: "DELETE" });
+export const getZoneDnssecInfo = (zoneId: string) =>
+    request<ZoneDnssecInfo>(`/zones/${zoneId}/dnssec`);
 
 // Config
 export interface ConfigData {
@@ -279,6 +292,78 @@ export const deactivateConnections = () =>
 // Zone Sync
 export const syncZones = () =>
     request<{ message: string; total: number; synced: number; skipped: number }>("/zones/sync", { method: "POST" });
+
+// DNS Firewall / RPZ
+export type RpzEntryType = "nxdomain" | "nodata" | "redirect";
+export type RpzTypeFilter = RpzEntryType | "all";
+
+export interface RpzEntry {
+    id: string;
+    name: string;
+    type: RpzEntryType;
+    target: string | null;
+    comment: string | null;
+    sourceName?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface CreateRpzEntryInput {
+    name: string;
+    type: RpzEntryType;
+    target?: string;
+    comment?: string;
+}
+
+export interface RpzEntriesResponse {
+    entries: RpzEntry[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+}
+
+export interface RpzStats {
+    total: number;
+    nxdomain: number;
+    nodata: number;
+    redirect: number;
+}
+
+export interface RpzImportResult {
+    imported: number;
+    duplicates: number;
+    message?: string;
+}
+
+export const getRpzEntries = (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    type?: RpzTypeFilter;
+}) => {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.search) query.set("search", params.search);
+    if (params?.type && params.type !== "all") query.set("type", params.type);
+    const qs = query.toString();
+    return request<RpzEntriesResponse>(`/rpz${qs ? `?${qs}` : ""}`);
+};
+
+export const getRpzStats = () => request<RpzStats>("/rpz/stats");
+export const createRpzEntry = (data: CreateRpzEntryInput) =>
+    request<RpzEntry>("/rpz", { method: "POST", body: JSON.stringify(data) });
+export const deleteRpzEntry = (id: string) =>
+    request<{ message: string }>(`/rpz/${id}`, { method: "DELETE" });
+export const clearRpzEntries = () =>
+    request<{ message: string }>("/rpz", { method: "DELETE" });
+export const syncRpzEntries = () =>
+    request<{ message: string }>("/rpz/sync", { method: "POST" });
+export const importRpzEntries = (data: { content: string; sourceName: string }) =>
+    request<RpzImportResult>("/rpz/import", { method: "POST", body: JSON.stringify(data) });
+export const importRpzEntriesFromUrl = (data: { url: string; sourceName: string }) =>
+    request<RpzImportResult>("/rpz/import-url", { method: "POST", body: JSON.stringify(data) });
 
 // Firewall
 export type RuleDirection = "in" | "out";

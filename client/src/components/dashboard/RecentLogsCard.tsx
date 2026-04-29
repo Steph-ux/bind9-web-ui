@@ -5,41 +5,48 @@ import type { DashboardData } from "@/lib/api";
 
 export function RecentLogsCard({ logs }: { logs: DashboardData["recentLogs"] }) {
   return (
-    <Card className="border-border/70 bg-card/85 shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Recent system logs</CardTitle>
-        <Badge variant="outline">Live feed</Badge>
+    <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div className="space-y-1">
+          <CardTitle className="tracking-[-0.04em]">Recent system logs</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Live service activity and recent platform events.
+          </p>
+        </div>
+        <Badge variant="outline" className="border-border/70 bg-background/70">
+          Live feed
+        </Badge>
       </CardHeader>
       <CardContent className="p-0">
         <ScrollArea className="h-[320px]">
-          <div className="bg-zinc-950 p-4 font-mono text-sm text-zinc-100">
+          <div className="space-y-2 p-4 font-mono text-[13px]">
             {logs.length > 0 ? (
               logs.map((log) => (
                 <div
                   key={log.id}
-                  className="mb-2 flex gap-3 border-b border-zinc-800 pb-2"
+                  className="grid grid-cols-[84px_68px_minmax(0,120px)_1fr] gap-3 rounded-2xl border border-border/60 bg-background/50 px-3 py-3 text-foreground"
                 >
-                  <span className="shrink-0 text-zinc-500">
+                  <span className="shrink-0 text-muted-foreground">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
                   <span
                     className={[
-                      "w-12 shrink-0 text-center font-bold",
+                      "inline-flex h-6 items-center justify-center rounded-full px-2 text-[11px] font-semibold",
                       log.level === "INFO"
-                        ? "text-blue-400"
+                        ? "bg-primary/12 text-primary"
                         : log.level === "WARN"
-                          ? "text-yellow-400"
-                          : "text-red-400",
+                          ? "bg-amber-500/12 text-amber-400"
+                          : "bg-destructive/12 text-destructive",
                     ].join(" ")}
                   >
                     {log.level}
                   </span>
-                  <span className="w-20 shrink-0 truncate text-cyan-400">{log.source}</span>
-                  <span className="break-all text-zinc-200">{log.message}</span>
+                  <span className="truncate text-foreground/80">{log.source}</span>
+                  <span className="break-all text-foreground/92">{log.message}</span>
                 </div>
               ))
             ) : (
-              <div className="py-8 text-center text-zinc-500">
+              <div className="rounded-2xl border border-dashed border-border/60 bg-background/45 py-10 text-center text-muted-foreground">
                 No log entries yet. Activity will appear here.
               </div>
             )}

@@ -1,17 +1,28 @@
-﻿import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FileJson,
+  Loader2,
+  Network,
+  Save,
+  ServerCog,
+  ShieldCheck,
+} from "lucide-react";
+
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Save, AlertTriangle, ShieldCheck, Network, Loader2, CheckCircle2, FileJson, ServerCog } from "lucide-react";
+import { PageHeader, PageState } from "@/components/layout";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { getConfig, saveConfig } from "@/lib/api";
-import { useAuth } from "@/lib/auth-provider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-provider";
+import { getConfig, saveConfig } from "@/lib/api";
 
 export default function Config() {
   const [optionsContent, setOptionsContent] = useState("");
@@ -80,7 +91,11 @@ export default function Config() {
 
     // Forwarding
     forwarders {
-        ${forwarders.split("\n").map((line) => line.trim()).filter(Boolean).join("\n        ")}
+        ${forwarders
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .join("\n        ")}
     };
     forward ${forwardOnly ? "only" : "first"};
 
@@ -143,9 +158,17 @@ export default function Config() {
 
     nextContent = upsertBraceDirective(nextContent, "listen-on", listenV4);
     nextContent = upsertBraceDirective(nextContent, "listen-on-v6", listenV6);
-    nextContent = upsertMultilineBlock(nextContent, "forwarders", formattedForwarders || "        8.8.8.8;");
+    nextContent = upsertMultilineBlock(
+      nextContent,
+      "forwarders",
+      formattedForwarders || "        8.8.8.8;",
+    );
     nextContent = upsertSimpleDirective(nextContent, "forward", forwardOnly ? "only" : "first");
-    nextContent = upsertSimpleDirective(nextContent, "dnssec-validation", dnssecEnabled ? "auto" : "no");
+    nextContent = upsertSimpleDirective(
+      nextContent,
+      "dnssec-validation",
+      dnssecEnabled ? "auto" : "no",
+    );
     nextContent = upsertSimpleDirective(nextContent, "auth-nxdomain", "no");
     nextContent = upsertBraceDirective(nextContent, "allow-query", allowQuery);
     nextContent = upsertBraceDirective(nextContent, "allow-transfer", allowTransfer);
@@ -158,9 +181,10 @@ export default function Config() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const content = activeTab === "advanced"
-        ? optionsContent
-        : mergeFormIntoOptionsContent(optionsContent);
+      const content =
+        activeTab === "advanced"
+          ? optionsContent
+          : mergeFormIntoOptionsContent(optionsContent);
       await saveConfig("options", content);
       setOptionsContent(content);
       parseConfigForForm(content);
@@ -183,177 +207,311 @@ export default function Config() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center" style={{ minHeight: "60vh" }}>
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <PageState
+          loading
+          title="Loading configuration"
+          description="Reading the current named.conf.options content and parsing editable settings."
+          className="min-h-[60vh]"
+        />
       </DashboardLayout>
     );
   }
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
-        <div className="flex items-center gap-3">
-          <ServerCog className="h-8 w-8 text-primary" />
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">Server Configuration</h2>
-            <p className="text-muted-foreground">Manage global BIND9 options and behavior.</p>
-          </div>
-        </div>
-        {isAdmin && (
-          <Button onClick={handleSave} disabled={saving} variant={saved ? "outline" : "default"} className={saved ? "border-green-500 text-green-600" : ""}>
-            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : saved ? <CheckCircle2 className="h-4 w-4 mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-            {saved ? "Configuration Saved" : "Save Changes"}
-          </Button>
-        )}
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6">
-          <TabsTrigger value="general" className="gap-2"><Network className="h-4 w-4" /> General</TabsTrigger>
-          <TabsTrigger value="security" className="gap-2"><ShieldCheck className="h-4 w-4" /> Security</TabsTrigger>
-          <TabsTrigger value="advanced" className="gap-2"><FileJson className="h-4 w-4" /> Raw Config</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="general">
-          <div className="grid gap-4 lg:grid-cols-2 mb-4">
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Network className="h-5 w-5 text-primary" /> Listening Interfaces
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">Configure the network interfaces BIND9 should listen on.</p>
-              </CardHeader>
-              <CardContent className="pt-4 space-y-4">
-                <div className="space-y-2">
-                  <Label className="uppercase font-semibold text-muted-foreground text-xs">IPv4 Interfaces</Label>
-                  <Input className="font-mono" value={listenV4} onChange={e => setListenV4(e.target.value)} placeholder="any;" />
-                  <p className="text-xs text-muted-foreground">Example: <code className="rounded bg-muted px-1">192.168.1.5; 127.0.0.1;</code> or <code className="rounded bg-muted px-1">any;</code></p>
-                </div>
-                <div className="space-y-2">
-                  <Label className="uppercase font-semibold text-muted-foreground text-xs">IPv6 Interfaces</Label>
-                  <Input className="font-mono" value={listenV6} onChange={e => setListenV6(e.target.value)} placeholder="any;" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ServerCog className="h-5 w-5 text-green-600" /> Forwarding
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">Upstream DNS servers for recursive lookups.</p>
-              </CardHeader>
-              <CardContent className="pt-4 space-y-4">
-                <div className="space-y-2">
-                  <Label className="uppercase font-semibold text-muted-foreground text-xs">Forwarder IPs</Label>
-                  <textarea
-                    className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    value={forwarders}
-                    onChange={e => setForwarders(e.target.value)}
-                    placeholder="8.8.8.8;"
-                    rows={3}
-                  />
-                  <p className="text-xs text-muted-foreground">Enter one IP per line (or semicolon separated).</p>
-                </div>
-
-                <div className="flex items-center justify-between rounded-md border bg-muted/30 p-3">
-                  <div>
-                    <Label htmlFor="forwardOnlySwitch" className="font-medium cursor-pointer">Forward Only</Label>
-                    <p className="text-xs text-muted-foreground">Disable recursion if forwarders fail</p>
-                  </div>
-                  <Switch id="forwardOnlySwitch" checked={forwardOnly} onCheckedChange={setForwardOnly} />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-          <div className="text-end">
-            <Button variant="outline" size="sm" onClick={() => { buildConfigFromForm(); setActiveTab("advanced"); }}>Generate & Preview Config</Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="security">
-          <div className="grid gap-4 lg:grid-cols-2 mb-4">
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldCheck className="h-5 w-5 text-red-600" /> Access Control Lists (ACLs)
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">Restrict who can query or transfer zones.</p>
-              </CardHeader>
-              <CardContent className="pt-4 space-y-4">
-                <div className="space-y-2">
-                  <Label className="uppercase font-semibold text-muted-foreground text-xs">Allow Query</Label>
-                  <Input className="font-mono" value={allowQuery} onChange={e => setAllowQuery(e.target.value)} placeholder="any;" />
-                  <p className="text-xs text-muted-foreground">Who can ask this server to resolve names.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label className="uppercase font-semibold text-muted-foreground text-xs">Allow Recursion</Label>
-                  <Input className="font-mono" value={allowRecursion} onChange={e => setAllowRecursion(e.target.value)} placeholder="trusted;" />
-                  <p className="text-xs text-muted-foreground">Who can use this server to find names it doesn't own.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label className="uppercase font-semibold text-muted-foreground text-xs">Allow Transfer</Label>
-                  <Input className="font-mono" value={allowTransfer} onChange={e => setAllowTransfer(e.target.value)} placeholder="none;" />
-                  <p className="text-xs text-muted-foreground">Secondary servers allowed to copy zone data.</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldCheck className="h-5 w-5 text-blue-600" /> DNSSEC Validation
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">Enhance security by validating DNS signatures.</p>
-              </CardHeader>
-              <CardContent className="pt-4 space-y-4">
-                <div className="flex items-center justify-between rounded-md border bg-muted/30 p-3">
-                  <div>
-                    <Label htmlFor="dnssecSwitch" className="font-medium cursor-pointer">Enable Validation</Label>
-                    <p className="text-xs text-muted-foreground">Prevents connection to spoofed/poisoned domains</p>
-                  </div>
-                  <Switch id="dnssecSwitch" checked={dnssecEnabled} onCheckedChange={setDnssecEnabled} />
-                </div>
-
-                {!dnssecEnabled && (
-                  <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle>Security Warning</AlertTitle>
-                    <AlertDescription>Disabling DNSSEC removes protection against cache poisoning attacks. This is generally not recommended for production servers.</AlertDescription>
-                  </Alert>
+      <div className="space-y-6">
+        <PageHeader
+          title="Server Configuration"
+          description="Manage global BIND9 options, forwarders, ACL defaults, and raw options content."
+          icon={ServerCog}
+          badge={
+            <Badge variant="outline" className="border-border/70 bg-background/70">
+              named.conf.options
+            </Badge>
+          }
+          actions={
+            isAdmin ? (
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                variant={saved ? "outline" : "default"}
+                className={
+                  saved
+                    ? "h-10 rounded-xl border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-none"
+                    : "h-10 rounded-xl bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-primary-foreground shadow-[0_16px_40px_hsl(var(--primary)/0.22)]"
+                }
+              >
+                {saving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : saved ? (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
                 )}
+                {saved ? "Configuration Saved" : "Save Changes"}
+              </Button>
+            ) : null
+          }
+        />
+
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-6 h-auto rounded-2xl border border-border/60 bg-card/70 p-1">
+            <TabsTrigger value="general" className="gap-2 rounded-xl">
+              <Network className="h-4 w-4" />
+              General
+            </TabsTrigger>
+            <TabsTrigger value="security" className="gap-2 rounded-xl">
+              <ShieldCheck className="h-4 w-4" />
+              Security
+            </TabsTrigger>
+            <TabsTrigger value="advanced" className="gap-2 rounded-xl">
+              <FileJson className="h-4 w-4" />
+              Raw Config
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="general">
+            <div className="mb-4 grid gap-4 lg:grid-cols-2">
+              <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Network className="h-5 w-5 text-primary" />
+                    Listening Interfaces
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Configure the network interfaces BIND9 should listen on.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                      IPv4 Interfaces
+                    </Label>
+                    <Input
+                      className="font-mono"
+                      value={listenV4}
+                      onChange={(e) => setListenV4(e.target.value)}
+                      placeholder="any;"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Example: <code className="rounded bg-muted px-1">192.168.1.5; 127.0.0.1;</code> or{" "}
+                      <code className="rounded bg-muted px-1">any;</code>
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                      IPv6 Interfaces
+                    </Label>
+                    <Input
+                      className="font-mono"
+                      value={listenV6}
+                      onChange={(e) => setListenV6(e.target.value)}
+                      placeholder="any;"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ServerCog className="h-5 w-5 text-green-600" />
+                    Forwarding
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Upstream DNS servers for recursive lookups.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                      Forwarder IPs
+                    </Label>
+                    <textarea
+                      className="flex min-h-[60px] w-full rounded-xl border border-input bg-background/60 px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={forwarders}
+                      onChange={(e) => setForwarders(e.target.value)}
+                      placeholder="8.8.8.8;"
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter one IP per line or semicolon separated.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-background/45 p-3">
+                    <div>
+                      <Label htmlFor="forwardOnlySwitch" className="cursor-pointer font-medium">
+                        Forward Only
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Disable recursion if forwarders fail
+                      </p>
+                    </div>
+                    <Switch
+                      id="forwardOnlySwitch"
+                      checked={forwardOnly}
+                      onCheckedChange={setForwardOnly}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            <div className="text-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl border-border/70 bg-background/70 shadow-none"
+                onClick={() => {
+                  buildConfigFromForm();
+                  setActiveTab("advanced");
+                }}
+              >
+                Generate & Preview Config
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="security">
+            <div className="mb-4 grid gap-4 lg:grid-cols-2">
+              <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ShieldCheck className="h-5 w-5 text-red-600" />
+                    Access Control Lists (ACLs)
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Restrict who can query or transfer zones.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                      Allow Query
+                    </Label>
+                    <Input
+                      className="font-mono"
+                      value={allowQuery}
+                      onChange={(e) => setAllowQuery(e.target.value)}
+                      placeholder="any;"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Who can ask this server to resolve names.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                      Allow Recursion
+                    </Label>
+                    <Input
+                      className="font-mono"
+                      value={allowRecursion}
+                      onChange={(e) => setAllowRecursion(e.target.value)}
+                      placeholder="trusted;"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Who can use this server to find names it does not own.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                      Allow Transfer
+                    </Label>
+                    <Input
+                      className="font-mono"
+                      value={allowTransfer}
+                      onChange={(e) => setAllowTransfer(e.target.value)}
+                      placeholder="none;"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Secondary servers allowed to copy zone data.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ShieldCheck className="h-5 w-5 text-blue-600" />
+                    DNSSEC Validation
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Enhance security by validating DNS signatures.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-background/45 p-3">
+                    <div>
+                      <Label htmlFor="dnssecSwitch" className="cursor-pointer font-medium">
+                        Enable Validation
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Prevents connection to spoofed or poisoned domains
+                      </p>
+                    </div>
+                    <Switch
+                      id="dnssecSwitch"
+                      checked={dnssecEnabled}
+                      onCheckedChange={setDnssecEnabled}
+                    />
+                  </div>
+
+                  {!dnssecEnabled ? (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Security Warning</AlertTitle>
+                      <AlertDescription>
+                        Disabling DNSSEC removes protection against cache poisoning attacks. This is
+                        generally not recommended for production servers.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+            <div className="text-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl border-border/70 bg-background/70 shadow-none"
+                onClick={() => {
+                  buildConfigFromForm();
+                  setActiveTab("advanced");
+                }}
+              >
+                Generate & Preview Config
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="advanced">
+            <Card className="linear-panel overflow-hidden border-border/60 bg-card/78 text-foreground shadow-none">
+              <CardHeader className="flex flex-row items-center justify-between border-b border-border/60">
+                <div>
+                  <CardTitle className="tracking-[-0.04em]">Raw Configuration</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Directly edit{" "}
+                    <code className="rounded bg-background/80 px-1">named.conf.options</code>.
+                  </p>
+                </div>
+                <Badge variant="outline" className="border-border/70 bg-background/70 font-mono">
+                  options block
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-0">
+                <textarea
+                  className="w-full resize-y rounded-none border-0 bg-transparent p-4 font-mono text-sm text-foreground shadow-none focus:outline-none focus:ring-0"
+                  value={optionsContent}
+                  onChange={(e) => setOptionsContent(e.target.value)}
+                  spellCheck={false}
+                  rows={20}
+                />
               </CardContent>
             </Card>
-          </div>
-          <div className="text-end">
-            <Button variant="outline" size="sm" onClick={() => { buildConfigFromForm(); setActiveTab("advanced"); }}>Generate & Preview Config</Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="advanced">
-          <Card className="bg-zinc-950 dark:bg-zinc-950 text-zinc-100 dark:text-zinc-100 overflow-hidden">
-            <CardHeader className="border-b border-zinc-800 dark:border-zinc-800 flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-zinc-100 dark:text-zinc-100">Raw Configuration</CardTitle>
-                <p className="text-sm text-zinc-500 dark:text-zinc-500">Directly edit <code className="rounded bg-zinc-800 dark:bg-zinc-800 px-1">named.conf.options</code>.</p>
-              </div>
-              <Badge variant="secondary" className="font-mono">options block</Badge>
-            </CardHeader>
-            <CardContent className="p-0">
-              <textarea
-                className="w-full bg-zinc-950 dark:bg-zinc-950 text-zinc-100 dark:text-zinc-100 border-0 p-4 font-mono text-sm focus:outline-none focus:ring-0 shadow-none rounded-none"
-                value={optionsContent}
-                onChange={e => setOptionsContent(e.target.value)}
-                spellCheck={false}
-                rows={20}
-                style={{ resize: "vertical" }}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+        </Tabs>
+      </div>
     </DashboardLayout>
   );
 }
-

@@ -30,8 +30,8 @@ const Zones = lazy(() => import("@/pages/zones"));
 
 function RouteFallback() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.08),_transparent_55%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
-      <div className="rounded-xl border border-slate-200 bg-white/85 px-5 py-4 text-sm text-slate-600 shadow-sm backdrop-blur">
+    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.14),transparent_26%),radial-gradient(circle_at_top_right,hsl(var(--accent)/0.1),transparent_20%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--background)))]">
+      <div className="linear-panel rounded-2xl px-5 py-4 text-sm text-muted-foreground">
         Loading page...
       </div>
     </div>

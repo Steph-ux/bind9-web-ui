@@ -1,13 +1,14 @@
-﻿import { createContext, type ComponentType, ReactNode, useContext, useEffect, useState } from "react";
-import { useLocation, Route } from "wouter";
-import { User, InsertUser } from "@shared/schema";
+import { createContext, type ComponentType, type ReactNode, useContext, useEffect, useState } from "react";
+import { Route, useLocation } from "wouter";
+
 import { useToast } from "@/hooks/use-toast";
+import { type CreateManagedUserInput, type ManagedUser } from "@/lib/api";
 
 type AuthContextType = {
-    user: User | null;
+    user: ManagedUser | null;
     isLoading: boolean;
     error: Error | null;
-    login: (data: Pick<InsertUser, "username" | "password">) => Promise<void>;
+    login: (data: Pick<CreateManagedUserInput, "username" | "password">) => Promise<void>;
     logout: () => Promise<void>;
     isAdmin: boolean;
     canManageDNS: boolean;
@@ -19,7 +20,7 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<ManagedUser | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     const { toast } = useToast();
@@ -39,16 +40,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 } else {
                     setUser(null);
                 }
-            } catch (e) {
+            } catch {
                 setUser(null);
             } finally {
                 setIsLoading(false);
             }
         };
+
         fetchUser();
     }, []);
 
-    const login = async (data: Pick<InsertUser, "username" | "password">) => {
+    const login = async (data: Pick<CreateManagedUserInput, "username" | "password">) => {
         try {
             const res = await fetch("/api/auth/login", {
                 method: "POST",
@@ -62,31 +64,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 try {
                     const err = await res.json();
                     message = err.message || message;
-                } catch {}
+                } catch {
+                    // ignore JSON parsing issues and keep the fallback message
+                }
                 throw new Error(message);
             }
 
-            let user;
+            let nextUser: ManagedUser;
             try {
-                user = await res.json();
+                nextUser = await res.json();
             } catch {
                 throw new Error("Server returned an invalid response. Please ensure the backend is running.");
             }
-            setUser(user);
-            if (user.mustChangePassword) {
-                toast({ title: "Password change required", description: "You must change your default password before continuing.", variant: "destructive" });
+
+            setUser(nextUser);
+            if (nextUser.mustChangePassword) {
+                toast({
+                    title: "Password change required",
+                    description: "You must change your default password before continuing.",
+                    variant: "destructive",
+                });
                 setLocation("/change-password");
             } else {
-                toast({ title: "Welcome back!", description: `Logged in as ${user.username}` });
+                toast({ title: "Welcome back!", description: `Logged in as ${nextUser.username}` });
                 setLocation("/");
             }
-        } catch (e: any) {
+        } catch (loginError) {
+            const err = loginError instanceof Error ? loginError : new Error("Login failed");
+            setError(err);
             toast({
                 variant: "destructive",
                 title: "Login failed",
-                description: e.message,
+                description: err.message,
             });
-            throw e;
+            throw err;
         }
     };
 
@@ -96,11 +107,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(null);
             setLocation("/auth");
             toast({ title: "Logged out", description: "See you soon!" });
-        } catch (e: any) {
+        } catch (logoutError) {
+            const err = logoutError instanceof Error ? logoutError : new Error("Logout failed");
             toast({
                 variant: "destructive",
                 title: "Logout failed",
-                description: e.message,
+                description: err.message,
             });
         }
     };
@@ -116,24 +128,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const err = await res.json().catch(() => ({ message: "Failed to change password" }));
             throw new Error(err.message);
         }
-        setUser({ ...user!, mustChangePassword: false });
+        setUser((currentUser) => (currentUser ? { ...currentUser, mustChangePassword: false } : currentUser));
         setLocation("/");
         toast({ title: "Password changed", description: "Your password has been updated successfully." });
     };
 
     return (
-        <AuthContext.Provider value={{
-            user,
-            isLoading,
-            error,
-            login,
-            logout,
-            isAdmin: user?.role === "admin",
-            canManageDNS: user?.role === "admin" || user?.role === "operator",
-            isReadOnly: user?.role === "viewer",
-            mustChangePassword: !!user?.mustChangePassword,
-            changeOwnPassword,
-        }}>
+        <AuthContext.Provider
+            value={{
+                user,
+                isLoading,
+                error,
+                login,
+                logout,
+                isAdmin: user?.role === "admin",
+                canManageDNS: user?.role === "admin" || user?.role === "operator",
+                isReadOnly: user?.role === "viewer",
+                mustChangePassword: !!user?.mustChangePassword,
+                changeOwnPassword,
+            }}
+        >
             {children}
         </AuthContext.Provider>
     );
@@ -148,8 +162,12 @@ export function useAuth() {
 }
 
 function Redirect({ to }: { to: string }) {
-    const [_, setLocation] = useLocation();
-    useEffect(() => { setLocation(to); }, [to, setLocation]);
+    const [, setLocation] = useLocation();
+
+    useEffect(() => {
+        setLocation(to);
+    }, [to, setLocation]);
+
     return null;
 }
 
@@ -165,7 +183,7 @@ export function ProtectedRoute({
     const { user, isLoading } = useAuth();
 
     if (isLoading) {
-        return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+        return <div className="flex min-h-screen items-center justify-center">Loading...</div>;
     }
 
     if (!user) {
@@ -182,5 +200,3 @@ export function ProtectedRoute({
 
     return <Route path={path} component={Component} />;
 }
-
-

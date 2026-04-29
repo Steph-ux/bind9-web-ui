@@ -15,10 +15,10 @@ interface MetricCardProps {
 }
 
 const toneStyles: Record<MetricTone, string> = {
-  default: "bg-primary/10 text-primary",
-  success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  danger: "bg-destructive/10 text-destructive",
+  default: "bg-primary/12 text-primary ring-1 ring-primary/20",
+  success: "bg-emerald-500/12 text-emerald-400 ring-1 ring-emerald-500/20",
+  warning: "bg-amber-500/12 text-amber-400 ring-1 ring-amber-500/20",
+  danger: "bg-destructive/12 text-destructive ring-1 ring-destructive/20",
 };
 
 export function MetricCard({
@@ -30,14 +30,17 @@ export function MetricCard({
   className,
 }: MetricCardProps) {
   return (
-    <Card className={cn("border-border/70 bg-card/85 shadow-sm", className)}>
-      <CardContent className="p-5">
+    <Card className={cn("linear-panel overflow-hidden border-border/60 bg-card/78 shadow-none", className)}>
+      <CardContent className="relative p-5">
+        <div className="linear-hairline absolute inset-x-0 top-0" />
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">{label}</p>
-            <div className="text-3xl font-semibold tracking-tight">{value}</div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+              {label}
+            </p>
+            <div className="text-3xl font-semibold tracking-[-0.06em]">{value}</div>
             {description ? (
-              <div className="text-sm text-muted-foreground">{description}</div>
+              <div className="text-sm leading-6 text-muted-foreground">{description}</div>
             ) : null}
           </div>
           {Icon ? (

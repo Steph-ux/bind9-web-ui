@@ -20,10 +20,17 @@ const RecordDistributionCard = lazy(async () => {
 
 function RecordDistributionFallback() {
   return (
-    <Card className="border-border/70 bg-card/85 shadow-sm">
+    <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Record distribution</CardTitle>
-        <Badge variant="secondary">Loading</Badge>
+        <div className="space-y-1">
+          <CardTitle className="tracking-[-0.04em]">Record distribution</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Loading zone composition and record mix.
+          </p>
+        </div>
+        <Badge variant="outline" className="border-border/70 bg-background/70">
+          Loading
+        </Badge>
       </CardHeader>
       <CardContent className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">
         Loading chart data...
@@ -78,10 +85,10 @@ export default function Dashboard() {
       <div className="space-y-6">
         <PageHeader
           title="System Overview"
-          description="Real-time DNS metrics, service health and recent server activity."
+          description="Real-time DNS metrics, service health, and recent server activity across the current control plane."
           icon={Server}
           badge={
-            <Badge variant="outline" className="gap-2">
+            <Badge variant="outline" className="gap-2 border-border/70 bg-background/70">
               <span
                 className={[
                   "h-2 w-2 rounded-full",
@@ -95,13 +102,17 @@ export default function Dashboard() {
             <>
               <Button
                 variant="outline"
-                className="gap-2"
+                className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
                 onClick={() => exportDashboardReport(data)}
               >
                 <Download className="h-4 w-4" />
                 Export report
               </Button>
-              <Button className="gap-2" onClick={() => refetch()} disabled={isFetching}>
+              <Button
+                className="h-10 gap-2 rounded-xl bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-primary-foreground shadow-[0_16px_40px_hsl(var(--primary)/0.22)]"
+                onClick={() => refetch()}
+                disabled={isFetching}
+              >
                 <RefreshCw className={["h-4 w-4", isFetching ? "animate-spin" : ""].join(" ")} />
                 {isFetching ? "Refreshing" : "Refresh"}
               </Button>

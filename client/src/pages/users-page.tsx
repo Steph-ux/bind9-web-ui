@@ -27,7 +27,7 @@ import {
   type CreateManagedUserInput,
   updateUser,
 } from "@/lib/api";
-import { insertUserSchema } from "@shared/schema";
+import { managedUserCreateSchema } from "@/lib/client-schemas";
 
 export default function UsersPage() {
   const { user } = useAuth();
@@ -45,7 +45,7 @@ export default function UsersPage() {
   const [editMustChangePassword, setEditMustChangePassword] = useState(false);
 
   const form = useForm<CreateManagedUserInput>({
-    resolver: zodResolver(insertUserSchema),
+    resolver: zodResolver(managedUserCreateSchema),
     defaultValues: { username: "", password: "", role: "viewer" },
   });
 

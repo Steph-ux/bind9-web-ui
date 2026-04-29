@@ -22,26 +22,26 @@ export function PageHeader({
   return (
     <section
       className={cn(
-        "flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between",
+        "flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between",
         className,
       )}
     >
-      <div className="min-w-0 space-y-2">
+      <div className="min-w-0 space-y-3">
         <div className="flex items-center gap-3">
           {Icon ? (
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border bg-card text-primary shadow-sm">
+            <div className="linear-panel flex h-11 w-11 items-center justify-center rounded-2xl text-primary">
               <Icon className="h-5 w-5" />
             </div>
           ) : null}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              <h1 className="text-2xl font-semibold tracking-[-0.05em] sm:text-3xl">
                 {title}
               </h1>
               {badge}
             </div>
             {description ? (
-              <p className="max-w-3xl text-sm text-muted-foreground sm:text-base">
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
                 {description}
               </p>
             ) : null}
@@ -50,7 +50,7 @@ export function PageHeader({
       </div>
 
       {actions ? (
-        <div className="flex flex-wrap items-center gap-2">{actions}</div>
+        <div className="flex flex-wrap items-center gap-2.5">{actions}</div>
       ) : null}
     </section>
   );
