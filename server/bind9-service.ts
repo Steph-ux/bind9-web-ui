@@ -769,10 +769,15 @@ zone "${safeDomain}" {
 
     /** Get system metrics â€” local uses Node.js os, SSH uses remote commands */
     async getSystemMetrics(): Promise<SystemMetrics> {
-        if (this.mode === "ssh" && sshManager.isConfigured()) {
-            return this.getRemoteSystemMetrics();
+        try {
+            if (this.mode === "ssh" && sshManager.isConfigured()) {
+                return await this.getRemoteSystemMetrics();
+            }
+            return this.getLocalSystemMetrics();
+        } catch (error) {
+            console.warn("[bind9] Falling back to empty system metrics:", error);
+            return this.getEmptySystemMetrics();
         }
-        return this.getLocalSystemMetrics();
     }
 
     /** Local system metrics via Node.js os module */
@@ -880,13 +885,17 @@ zone "${safeDomain}" {
             };
         } catch (error: any) {
             console.error("[bind9] Remote metrics failed:", error.message);
-            return {
-                cpu: { user: 0, system: 0, total: 0 },
-                memory: { used: 0, total: 0, cached: 0 },
-                openFiles: 0,
-                interfaces: [],
-            };
+            return this.getEmptySystemMetrics();
         }
+    }
+
+    private getEmptySystemMetrics(): SystemMetrics {
+        return {
+            cpu: { user: 0, system: 0, total: 0 },
+            memory: { used: 0, total: 0, cached: 0 },
+            openFiles: 0,
+            interfaces: [],
+        };
     }
 
     private formatBytes(bytes: number): string {
