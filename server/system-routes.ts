@@ -60,6 +60,7 @@ export function registerSystemRoutes({
         sshState: sshManager.getState(),
       });
     } catch (error: any) {
+      console.error("[system-routes] dashboard failed", error);
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
@@ -107,6 +108,7 @@ export function registerSystemRoutes({
 
       res.json(allLogs);
     } catch (error: any) {
+      console.error("[system-routes] status failed", error);
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
