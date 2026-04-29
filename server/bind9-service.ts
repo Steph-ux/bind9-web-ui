@@ -82,6 +82,7 @@ class Bind9Service {
     private mode: ExecutionMode = "local";
     private sudoAllowedCommands: Set<string> | null = null;
     private managementSummaryCache: Bind9ManagementSummary | null = null;
+    private networkMetricsWarningLogged = false;
 
     /** Set execution mode and paths */
     configure(config: {
@@ -808,7 +809,11 @@ zone "${safeDomain}" {
                 }
             }
         } catch (error) {
-            console.warn("[bind9] Local network interface metrics unavailable:", error);
+            if (!this.networkMetricsWarningLogged) {
+                this.networkMetricsWarningLogged = true;
+                const reason = error instanceof Error ? error.message : String(error);
+                console.warn(`[bind9] Local network interface metrics unavailable; continuing without interface data (${reason})`);
+            }
         }
 
         return {
