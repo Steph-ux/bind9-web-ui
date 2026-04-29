@@ -275,6 +275,44 @@ class Bind9Service {
             return this.managementSummaryCache;
         }
 
+        const available = await this.isAvailable();
+        if (!available) {
+            const summary: Bind9ManagementSummary = {
+                mode: this.mode,
+                available: false,
+                includes: {
+                    namedConfLocalIncluded: false,
+                    namedConfAclsIncluded: false,
+                    namedConfKeysIncluded: false,
+                },
+                zoneLayout: {
+                    strategy: "flat",
+                    forwardDir: null,
+                    reverseDir: null,
+                },
+                writablePaths: {
+                    namedConfLocal: false,
+                    namedConfOptions: false,
+                    namedConfAcls: false,
+                    namedConfKeys: false,
+                },
+                rpz: {
+                    configured: false,
+                    zoneName: null,
+                    filePath: null,
+                    writable: false,
+                },
+                features: {
+                    zones: false,
+                    acls: false,
+                    keys: false,
+                    rpz: false,
+                },
+            };
+            this.managementSummaryCache = summary;
+            return summary;
+        }
+
         const includes = await this.getConfigIncludes();
         const zoneLayout = await this.detectZoneLayout();
         const rpz = await this.discoverRpzZone();
@@ -294,7 +332,7 @@ class Bind9Service {
 
         const summary: Bind9ManagementSummary = {
             mode: this.mode,
-            available: await this.isAvailable(),
+            available,
             includes,
             zoneLayout,
             writablePaths,

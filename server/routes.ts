@@ -617,19 +617,21 @@ export async function registerRoutes(
   // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  BIND9 LOG MONITORING
   // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-  bind9Service.monitorLogFile(async (line) => {
-    // Basic parsing to extract level if possible, else default to INFO
-    let level: "INFO" | "WARN" | "ERROR" = "INFO";
-    if (/error|fail/i.test(line)) level = "ERROR";
-    else if (/warning/i.test(line)) level = "WARN";
+  if (await bind9Service.isAvailable()) {
+    bind9Service.monitorLogFile(async (line) => {
+      // Basic parsing to extract level if possible, else default to INFO
+      let level: "INFO" | "WARN" | "ERROR" = "INFO";
+      if (/error|fail/i.test(line)) level = "ERROR";
+      else if (/warning/i.test(line)) level = "WARN";
 
-    // Insert into storage (which broadcasts via WS)
-    await storage.insertLog({
-      level,
-      source: "bind9",
-      message: line.substring(0, 500),
+      // Insert into storage (which broadcasts via WS)
+      await storage.insertLog({
+        level,
+        source: "bind9",
+        message: line.substring(0, 500),
+      });
     });
-  });
+  }
 
   // Start periodic health checks (every 60s)
   healthService.start(60_000);
