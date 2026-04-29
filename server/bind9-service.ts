@@ -792,14 +792,18 @@ zone "${safeDomain}" {
         const userPct = totalCpu > 0 ? (totalUser / totalCpu) * 100 : 0;
         const sysPct = totalCpu > 0 ? (totalSys / totalCpu) * 100 : 0;
 
-        const netInterfaces = os.networkInterfaces();
         const interfaces: SystemMetrics["interfaces"] = [];
-        for (const [name, addrs] of Object.entries(netInterfaces)) {
-            if (!addrs) continue;
-            const ipv4 = addrs.find((a) => a.family === "IPv4");
-            if (ipv4) {
-                interfaces.push({ name, ip: ipv4.address, rx: "N/A", tx: "N/A" });
+        try {
+            const netInterfaces = os.networkInterfaces();
+            for (const [name, addrs] of Object.entries(netInterfaces)) {
+                if (!addrs) continue;
+                const ipv4 = addrs.find((a) => a.family === "IPv4");
+                if (ipv4) {
+                    interfaces.push({ name, ip: ipv4.address, rx: "N/A", tx: "N/A" });
+                }
             }
+        } catch (error) {
+            console.warn("[bind9] Local network interface metrics unavailable:", error);
         }
 
         return {
