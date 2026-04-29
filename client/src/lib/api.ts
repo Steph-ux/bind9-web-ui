@@ -238,7 +238,7 @@ export interface ConnectionData {
     host: string;
     port: number;
     username: string;
-    authType: string;
+    authType: "password" | "key";
     password: string;
     privateKey: string;
     bind9ConfDir: string;
@@ -262,14 +262,41 @@ export interface TestConnectionResult {
     };
 }
 
-export const getConnections = () => request<ConnectionData[]>("/connections");
-export const createConnection = (data: {
-    name: string; host: string; port?: number; username: string;
-    authType?: "password" | "key"; password?: string; privateKey?: string;
-    bind9ConfDir?: string; bind9ZoneDir?: string; rndcBin?: string;
-}) => request<ConnectionData>("/connections", { method: "POST", body: JSON.stringify(data) });
+export interface ConnectionPayload {
+    name: string;
+    host: string;
+    port?: number;
+    username: string;
+    authType: "password" | "key";
+    password?: string;
+    privateKey?: string;
+    bind9ConfDir?: string;
+    bind9ZoneDir?: string;
+    rndcBin?: string;
+}
 
-export const updateConnection = (id: string, data: Partial<ConnectionData>) =>
+export interface ConnectionPoolStatusEntry {
+    id: string;
+    name: string;
+    host: string;
+    isActive: boolean;
+    isConnected: boolean;
+    lastStatus: string;
+}
+
+export interface ConnectionPoolStatusResponse {
+    activeId: string | null;
+    connections: ConnectionPoolStatusEntry[];
+}
+
+export const getConnections = () => request<ConnectionData[]>("/connections");
+export const getConnectionPoolStatus = () =>
+    request<ConnectionPoolStatusResponse>("/connections/pool/status");
+
+export const createConnection = (data: ConnectionPayload) =>
+    request<ConnectionData>("/connections", { method: "POST", body: JSON.stringify(data) });
+
+export const updateConnection = (id: string, data: Partial<ConnectionPayload>) =>
     request<ConnectionData>(`/connections/${id}`, { method: "PUT", body: JSON.stringify(data) });
 
 export const deleteConnection = (id: string) =>
@@ -279,8 +306,12 @@ export const testConnection = (id: string) =>
     request<TestConnectionResult>(`/connections/${id}/test`, { method: "POST" });
 
 export const testConnectionInline = (data: {
-    host: string; port?: number; username: string;
-    authType?: string; password?: string;
+    host: string;
+    port?: number;
+    username: string;
+    authType: "password" | "key";
+    password?: string;
+    privateKey?: string;
 }) => request<TestConnectionResult>("/connections/test", { method: "POST", body: JSON.stringify(data) });
 
 export const activateConnection = (id: string) =>

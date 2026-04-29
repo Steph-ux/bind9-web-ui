@@ -233,6 +233,29 @@ export const updateConnectionSchema = connectionPayloadSchema.partial().superRef
     });
   }
 });
+export const testConnectionSchema = z.object({
+  host: hostSchema,
+  port: portSchema.default(22),
+  username: usernameSchema,
+  authType: authTypeSchema.default("password"),
+  password: secretSchema,
+  privateKey: privateKeySchema,
+}).superRefine((value, ctx) => {
+  if (value.authType === "password" && !value.password) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "Password is required when authType is password",
+    });
+  }
+  if (value.authType === "key" && !value.privateKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["privateKey"],
+      message: "Private key is required when authType is key",
+    });
+  }
+});
 export type InsertConnection = z.infer<typeof insertConnectionSchema>;
 export type Connection = typeof connections.$inferSelect;
 

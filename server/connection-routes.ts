@@ -1,7 +1,7 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 
-import { insertConnectionSchema, updateConnectionSchema } from "@shared/schema";
+import { insertConnectionSchema, testConnectionSchema, updateConnectionSchema } from "@shared/schema";
 
 import { bind9Service } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
@@ -63,7 +63,13 @@ export function registerConnectionRoutes({
         return res.status(400).json({ message: authError });
       }
 
-      const connection = await storage.createConnection(data);
+      const normalized = {
+        ...data,
+        password: data.authType === "password" ? data.password : "",
+        privateKey: data.authType === "key" ? data.privateKey : "",
+      };
+
+      const connection = await storage.createConnection(normalized);
 
       await storage.insertLog({
         level: "INFO",
@@ -109,6 +115,12 @@ export function registerConnectionRoutes({
       const authError = getMissingAuthSecretMessage(nextAuthType, hasPassword ? "set" : "", hasPrivateKey ? "set" : "");
       if (authError) {
         return res.status(400).json({ message: authError });
+      }
+
+      if (nextAuthType === "password") {
+        allowed.privateKey = "";
+      } else if (nextAuthType === "key") {
+        allowed.password = "";
       }
 
       const updated = await storage.updateConnection(id, allowed);
@@ -208,42 +220,22 @@ export function registerConnectionRoutes({
 
   app.post("/api/connections/test", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { host, port, username, authType, password, privateKey } = req.body;
-      if (!host || !username) {
-        return res.status(400).json({ message: "host and username are required" });
-      }
-
-      const safeHost = String(host).trim();
-      if (!/^[a-zA-Z0-9.:-]+$/.test(safeHost)) {
-        return res.status(400).json({ message: "Invalid host format" });
-      }
-
-      const safePort = parseInt(port, 10) || 22;
-      if (safePort < 1 || safePort > 65535) {
-        return res.status(400).json({ message: "Invalid port number" });
-      }
-
-      const safeAuthType = authType === "key" ? "key" : "password";
-      const authError = getMissingAuthSecretMessage(
-        safeAuthType,
-        password ? String(password) : "",
-        privateKey ? String(privateKey) : "",
-      );
-      if (authError) {
-        return res.status(400).json({ message: authError });
-      }
+      const data = testConnectionSchema.parse(req.body);
 
       const result = await sshManager.testConnection({
-        host: safeHost,
-        port: safePort,
-        username: String(username),
-        authType: safeAuthType,
-        password: password ? String(password) : undefined,
-        privateKey: privateKey ? String(privateKey) : undefined,
+        host: data.host,
+        port: data.port,
+        username: data.username,
+        authType: data.authType,
+        password: data.authType === "password" ? data.password : undefined,
+        privateKey: data.authType === "key" ? data.privateKey : undefined,
       });
 
       res.json(result);
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
       res.status(500).json({ message: safeError(500, error.message) });
     }
   });
