@@ -22,10 +22,11 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-provider";
-import { getConfig, saveConfig } from "@/lib/api";
+import { getConfig, getStatus, saveConfig, type StatusData } from "@/lib/api";
 
 export default function Config() {
   const [optionsContent, setOptionsContent] = useState("");
+  const [statusSnapshot, setStatusSnapshot] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -46,11 +47,21 @@ export default function Config() {
   useEffect(() => {
     (async () => {
       try {
-        const data = await getConfig("options");
-        setOptionsContent(data.content);
-        parseConfigForForm(data.content);
-      } catch (e: any) {
-        toast({ title: "Info", description: "Using default configuration" });
+        const [configResult, statusResult] = await Promise.allSettled([
+          getConfig("options"),
+          getStatus(),
+        ]);
+
+        if (configResult.status === "fulfilled") {
+          setOptionsContent(configResult.value.content);
+          parseConfigForForm(configResult.value.content);
+        } else {
+          toast({ title: "Info", description: "Using default configuration" });
+        }
+
+        if (statusResult.status === "fulfilled") {
+          setStatusSnapshot(statusResult.value);
+        }
       } finally {
         setLoading(false);
       }
@@ -179,6 +190,15 @@ export default function Config() {
   };
 
   const handleSave = async () => {
+    if (!canWriteOptions) {
+      toast({
+        title: "Read-only target",
+        description: readOnlyReason,
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setSaving(true);
       const content =
@@ -203,6 +223,27 @@ export default function Config() {
     setOptionsContent(content);
     return content;
   };
+
+  const management = statusSnapshot?.management;
+  const targetLabel =
+    statusSnapshot?.connectionMode === "ssh" && statusSnapshot?.sshState?.host
+      ? statusSnapshot.sshState.host
+      : statusSnapshot?.hostname || "current server";
+  const canWriteOptions = Boolean(
+    isAdmin &&
+      management?.available &&
+      management?.writablePaths.namedConfOptions,
+  );
+  const editorDisabled = !canWriteOptions;
+  const readOnlyReason = !isAdmin
+    ? "Only administrators can change named.conf.options."
+    : !management
+      ? "Management capability data is unavailable for this target."
+      : !management.available
+        ? "BIND9 is not available on the current target."
+        : !management.writablePaths.namedConfOptions
+          ? "named.conf.options is not writable on the current target."
+          : "";
 
   if (loading) {
     return (
@@ -233,7 +274,7 @@ export default function Config() {
             isAdmin ? (
               <Button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || editorDisabled}
                 variant={saved ? "outline" : "default"}
                 className={
                   saved
@@ -253,6 +294,58 @@ export default function Config() {
             ) : null
           }
         />
+
+        <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+          <CardHeader className="border-b border-border/60">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ServerCog className="h-5 w-5 text-primary" />
+              Control Target
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              These settings apply to <span className="font-mono text-foreground">{targetLabel}</span>.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
+              <div className="font-mono font-semibold">{statusSnapshot?.connectionMode?.toUpperCase() || "LOCAL"}</div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">SSH Link</div>
+              <div className="font-mono font-semibold">
+                {statusSnapshot?.sshState?.connected ? "Connected" : statusSnapshot?.sshState?.configured ? "Configured" : "Local only"}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">BIND Access</div>
+              <div className="font-mono font-semibold">
+                {management?.available ? "Available" : "Unavailable"}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Options File</div>
+              <div className="font-mono font-semibold">
+                {management?.writablePaths.namedConfOptions ? "Writable" : "Read-only"}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {editorDisabled ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Read-only configuration</AlertTitle>
+            <AlertDescription>{readOnlyReason}</AlertDescription>
+          </Alert>
+        ) : (
+          <Alert>
+            <CheckCircle2 className="h-4 w-4" />
+            <AlertTitle>Writable target confirmed</AlertTitle>
+            <AlertDescription>
+              Saving from this screen writes directly to <code className="rounded bg-background/80 px-1">named.conf.options</code> on <span className="font-mono">{targetLabel}</span>.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6 h-auto rounded-2xl border border-border/60 bg-card/70 p-1">
@@ -292,6 +385,7 @@ export default function Config() {
                       value={listenV4}
                       onChange={(e) => setListenV4(e.target.value)}
                       placeholder="any;"
+                      disabled={editorDisabled}
                     />
                     <p className="text-xs text-muted-foreground">
                       Example: <code className="rounded bg-muted px-1">192.168.1.5; 127.0.0.1;</code> or{" "}
@@ -307,6 +401,7 @@ export default function Config() {
                       value={listenV6}
                       onChange={(e) => setListenV6(e.target.value)}
                       placeholder="any;"
+                      disabled={editorDisabled}
                     />
                   </div>
                 </CardContent>
@@ -333,6 +428,7 @@ export default function Config() {
                       onChange={(e) => setForwarders(e.target.value)}
                       placeholder="8.8.8.8;"
                       rows={3}
+                      disabled={editorDisabled}
                     />
                     <p className="text-xs text-muted-foreground">
                       Enter one IP per line or semicolon separated.
@@ -352,6 +448,7 @@ export default function Config() {
                       id="forwardOnlySwitch"
                       checked={forwardOnly}
                       onCheckedChange={setForwardOnly}
+                      disabled={editorDisabled}
                     />
                   </div>
                 </CardContent>
@@ -366,6 +463,7 @@ export default function Config() {
                   buildConfigFromForm();
                   setActiveTab("advanced");
                 }}
+                disabled={editorDisabled}
               >
                 Generate & Preview Config
               </Button>
@@ -394,6 +492,7 @@ export default function Config() {
                       value={allowQuery}
                       onChange={(e) => setAllowQuery(e.target.value)}
                       placeholder="any;"
+                      disabled={editorDisabled}
                     />
                     <p className="text-xs text-muted-foreground">
                       Who can ask this server to resolve names.
@@ -408,6 +507,7 @@ export default function Config() {
                       value={allowRecursion}
                       onChange={(e) => setAllowRecursion(e.target.value)}
                       placeholder="trusted;"
+                      disabled={editorDisabled}
                     />
                     <p className="text-xs text-muted-foreground">
                       Who can use this server to find names it does not own.
@@ -422,6 +522,7 @@ export default function Config() {
                       value={allowTransfer}
                       onChange={(e) => setAllowTransfer(e.target.value)}
                       placeholder="none;"
+                      disabled={editorDisabled}
                     />
                     <p className="text-xs text-muted-foreground">
                       Secondary servers allowed to copy zone data.
@@ -454,6 +555,7 @@ export default function Config() {
                       id="dnssecSwitch"
                       checked={dnssecEnabled}
                       onCheckedChange={setDnssecEnabled}
+                      disabled={editorDisabled}
                     />
                   </div>
 
@@ -479,6 +581,7 @@ export default function Config() {
                   buildConfigFromForm();
                   setActiveTab("advanced");
                 }}
+                disabled={editorDisabled}
               >
                 Generate & Preview Config
               </Button>
@@ -506,6 +609,7 @@ export default function Config() {
                   onChange={(e) => setOptionsContent(e.target.value)}
                   spellCheck={false}
                   rows={20}
+                  readOnly={editorDisabled}
                 />
               </CardContent>
             </Card>

@@ -87,6 +87,19 @@ export default function Status() {
 
   const { status, bindInfo } = data;
   const memUsedPct = Math.round((status.system.memory.used / status.system.memory.total) * 100);
+  const targetLabel =
+    status.connectionMode === "ssh" && status.sshState?.host
+      ? status.sshState.host
+      : status.hostname || "current server";
+  const writableSummary = status.management
+    ? [
+        ["Options", status.management.writablePaths.namedConfOptions],
+        ["Zones", status.management.features.zones],
+        ["ACLs", status.management.features.acls],
+        ["Keys", status.management.features.keys],
+        ["RPZ", status.management.features.rpz],
+      ]
+    : [];
 
   return (
     <DashboardLayout>
@@ -162,6 +175,82 @@ export default function Status() {
             description={status.bind9.running ? `BIND9 ${status.bind9.version}` : "Daemon not detected"}
             icon={FileText}
           />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
+                <ArrowRightLeft className="h-4 w-4 text-primary" />
+                Control Plane
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 pt-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
+                <div className="font-mono font-semibold">{status.connectionMode?.toUpperCase() || "LOCAL"}</div>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Target</div>
+                <div className="truncate font-mono font-semibold">{targetLabel}</div>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">SSH State</div>
+                <div className="font-mono font-semibold">
+                  {status.sshState?.connected
+                    ? "Connected"
+                    : status.sshState?.configured
+                      ? "Configured"
+                      : "Local only"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">BIND Access</div>
+                <div className="font-mono font-semibold">
+                  {status.management?.available ? "Available" : "Unavailable"}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
+                <Shield className="h-4 w-4 text-primary" />
+                Writable Surface
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              {status.management ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {writableSummary.map(([label, enabled]) => (
+                      <Badge key={String(label)} variant={enabled ? "default" : "secondary"}>
+                        {label} {enabled ? "Writable" : "Read-only"}
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+                      <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Layout</div>
+                      <div className="font-mono font-semibold">{status.management.zoneLayout.strategy}</div>
+                    </div>
+                    <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+                      <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">RPZ</div>
+                      <div className="font-mono font-semibold">
+                        {status.management.rpz.configured ? status.management.rpz.zoneName || "Configured" : "Not configured"}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <PageState
+                  title="No management capability data"
+                  description="This target did not return writable-surface metadata."
+                />
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.9fr)]">
