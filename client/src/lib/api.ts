@@ -682,14 +682,22 @@ export interface NotificationChannelEntry {
     createdAt: string;
 }
 
+export interface NotificationChannelPayload {
+    name: string;
+    type: "email" | "webhook" | "slack";
+    config?: Record<string, string>;
+    enabled?: boolean;
+    events?: string;
+}
+
 export const getNotificationChannels = () =>
     request<NotificationChannelEntry[]>("/notification-channels");
-export const createNotificationChannel = (data: { name: string; type: "email" | "webhook" | "slack"; config: Record<string, string>; enabled?: boolean; events?: string }) =>
+export const createNotificationChannel = (data: NotificationChannelPayload) =>
     request<NotificationChannelEntry>("/notification-channels", {
         method: "POST",
         body: JSON.stringify(data),
     });
-export const updateNotificationChannel = (id: string, data: Partial<NotificationChannelEntry>) =>
+export const updateNotificationChannel = (id: string, data: NotificationChannelPayload) =>
     request<NotificationChannelEntry>(`/notification-channels/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),

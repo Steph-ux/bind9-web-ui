@@ -23,7 +23,15 @@ export interface NotificationChannelFormState {
   type: "email" | "webhook" | "slack";
   url: string;
   email: string;
+  enabled: boolean;
+  events: Array<"server_down" | "conflict_detected" | "health_degraded">;
 }
+
+export const NOTIFICATION_EVENT_OPTIONS = [
+  { value: "server_down", label: "Server down" },
+  { value: "conflict_detected", label: "Conflict detected" },
+  { value: "health_degraded", label: "Health degraded" },
+] as const;
 
 export const DEFAULT_REPLICATION_SERVER_FORM: ReplicationServerFormState = {
   name: "",
@@ -43,4 +51,6 @@ export const DEFAULT_NOTIFICATION_CHANNEL_FORM: NotificationChannelFormState = {
   type: "webhook",
   url: "",
   email: "",
+  enabled: true,
+  events: ["server_down", "conflict_detected", "health_degraded"],
 };

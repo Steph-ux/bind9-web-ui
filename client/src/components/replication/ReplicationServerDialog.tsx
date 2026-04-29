@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type { ReplicationServerEntry } from "@/lib/api";
@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 import type { ReplicationServerFormState } from "./constants";
 
@@ -21,6 +22,8 @@ interface ReplicationServerDialogProps {
   title: string;
   submitLabel: string;
   saving: boolean;
+  canSubmit: boolean;
+  validationMessage?: string | null;
   form: ReplicationServerFormState;
   setForm: Dispatch<SetStateAction<ReplicationServerFormState>>;
   editTarget?: ReplicationServerEntry | null;
@@ -33,6 +36,8 @@ export function ReplicationServerDialog({
   title,
   submitLabel,
   saving,
+  canSubmit,
+  validationMessage,
   form,
   setForm,
   editTarget,
@@ -46,13 +51,20 @@ export function ReplicationServerDialog({
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const authChanged = !!editTarget && form.authType !== editTarget.authType;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="flex max-h-[90vh] max-w-lg flex-col">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <div className="grid max-h-[60vh] gap-3 overflow-y-auto py-2">
+        <p className="text-sm text-muted-foreground">
+          {editTarget
+            ? "Update the remote replication target. Old credentials are removed automatically when you switch auth mode."
+            : "Create a slave or secondary BIND9 node with explicit SSH and path settings."}
+        </p>
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto py-2">
           <div className="grid gap-2">
             <Label>Name</Label>
             <Input
@@ -118,14 +130,30 @@ export function ReplicationServerDialog({
           ) : (
             <div className="grid gap-2">
               <Label>{editTarget ? "New Private Key (optional)" : "Private Key"}</Label>
-              <Input
-                type="password"
+              <Textarea
+                className="min-h-[140px] font-mono"
                 value={form.privateKey}
                 onChange={(event) => setField("privateKey", event.target.value)}
-                placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                placeholder={
+                  editTarget
+                    ? "Leave blank to keep the current private key"
+                    : "Paste the private key content"
+                }
               />
             </div>
           )}
+
+          {editTarget ? (
+            <div className="rounded-lg border border-border/70 bg-muted/40 p-3 text-xs text-muted-foreground">
+              <p>Leave the credential field blank if you want to keep the stored secret.</p>
+              {authChanged ? (
+                <p className="mt-2 flex items-start gap-2 text-foreground">
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                  Switching auth mode removes the previous credential type.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
@@ -160,13 +188,16 @@ export function ReplicationServerDialog({
             </Select>
           </div>
         </div>
+        <p className={`text-xs ${validationMessage ? "text-destructive" : "text-muted-foreground"}`}>
+          {validationMessage || "SSH path overrides are optional. Keep the defaults unless discovery fails on the remote node."}
+        </p>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
             className="gap-2"
-            disabled={saving || !form.name || !form.host}
+            disabled={saving || !canSubmit}
             onClick={onSubmit}
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

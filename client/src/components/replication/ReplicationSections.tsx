@@ -3,6 +3,7 @@ import {
   Archive,
   Bell,
   CheckCircle,
+  Pencil,
   Globe,
   Mail,
   MessageSquare,
@@ -202,12 +203,14 @@ export function ReplicationHistorySection({ history }: ReplicationHistorySection
 interface ReplicationNotificationSectionProps {
   channels?: NotificationChannelEntry[];
   onOpenCreate: () => void;
+  onEdit: (channel: NotificationChannelEntry) => void;
   onDelete: (channelId: string) => void;
 }
 
 export function ReplicationNotificationSection({
   channels,
   onOpenCreate,
+  onEdit,
   onDelete,
 }: ReplicationNotificationSectionProps) {
   return (
@@ -261,6 +264,9 @@ export function ReplicationNotificationSection({
                   </div>
                   <div className="text-xs text-muted-foreground">Events: {channel.events}</div>
                   <div className="flex gap-2 pt-1">
+                    <Button variant="ghost" size="sm" className="h-7" onClick={() => onEdit(channel)}>
+                      <Pencil className="h-3 w-3" />
+                    </Button>
                     <Button variant="ghost" size="sm" className="h-7" onClick={() => onDelete(channel.id)}>
                       <Trash2 className="h-3 w-3 text-destructive" />
                     </Button>

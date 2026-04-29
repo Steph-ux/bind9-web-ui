@@ -58,6 +58,7 @@ import {
   syncAllReplication,
   testReplicationServer,
   updateReplicationServer,
+  updateNotificationChannel,
   type BackupEntry,
   type HealthCheckEntry,
   type NotificationChannelEntry,
@@ -70,6 +71,10 @@ import {
   type ZoneData,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-provider";
+import {
+  validateNotificationChannelForm,
+  validateReplicationServerForm,
+} from "@/lib/client-schemas";
 import { useToast } from "@/hooks/use-toast";
 import { useReplicationWs } from "@/hooks/use-repl-ws";
 
@@ -97,6 +102,7 @@ export default function ReplicationPage() {
   const [bindingLoading, setBindingLoading] = useState(false);
   const [serverForm, setServerForm] = useState<ReplicationServerFormState>(createServerForm);
   const [addChannelOpen, setAddChannelOpen] = useState(false);
+  const [editChannelTarget, setEditChannelTarget] = useState<NotificationChannelEntry | null>(null);
   const [channelForm, setChannelForm] = useState<NotificationChannelFormState>(createChannelForm);
 
   const { data: servers, isLoading } = useQuery<ReplicationServerEntry[]>({
@@ -179,6 +185,46 @@ export default function ReplicationPage() {
     },
   });
 
+  const createChannelMutation = useMutation({
+    mutationFn: createNotificationChannel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
+      setAddChannelOpen(false);
+      setEditChannelTarget(null);
+      setChannelForm(createChannelForm());
+      toast({ title: "Channel created" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to create channel", description: error.message });
+    },
+  });
+
+  const updateChannelMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof updateNotificationChannel>[1] }) =>
+      updateNotificationChannel(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
+      setAddChannelOpen(false);
+      setEditChannelTarget(null);
+      setChannelForm(createChannelForm());
+      toast({ title: "Channel updated" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to update channel", description: error.message });
+    },
+  });
+
+  const deleteChannelMutation = useMutation({
+    mutationFn: deleteNotificationChannel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
+      toast({ title: "Channel deleted" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to delete channel", description: error.message });
+    },
+  });
+
   const syncMutation = useMutation({
     mutationFn: syncAllReplication,
     onSuccess: (result) => {
@@ -244,6 +290,18 @@ export default function ReplicationPage() {
     },
   });
 
+  const serverValidation = validateReplicationServerForm(serverForm, {
+    editing: !!editTarget,
+    previousAuthType: editTarget?.authType,
+  });
+  const serverValidationMessage = serverValidation.success ? null : serverValidation.error.issues[0]?.message ?? "Invalid replication server configuration";
+
+  const channelValidation = validateNotificationChannelForm(channelForm, {
+    editing: !!editChannelTarget,
+    previousType: editChannelTarget?.type,
+  });
+  const channelValidationMessage = channelValidation.success ? null : channelValidation.error.issues[0]?.message ?? "Invalid notification channel";
+
   if (!user || user.role !== "admin") {
     return (
       <DashboardLayout>
@@ -266,6 +324,12 @@ export default function ReplicationPage() {
     setAddOpen(true);
   };
 
+  const openAddChannelDialog = () => {
+    resetChannelForm();
+    setEditChannelTarget(null);
+    setAddChannelOpen(true);
+  };
+
   const openEditDialog = (server: ReplicationServerEntry) => {
     setServerForm({
       name: server.name,
@@ -282,18 +346,44 @@ export default function ReplicationPage() {
     setEditTarget(server);
   };
 
+  const openEditChannelDialog = (channel: NotificationChannelEntry) => {
+    const parsedEvents = channel.events
+      .split(",")
+      .map((event) => event.trim())
+      .filter((event): event is NotificationChannelFormState["events"][number] =>
+        ["server_down", "conflict_detected", "health_degraded"].includes(event),
+      );
+
+    setChannelForm({
+      name: channel.name,
+      type: channel.type,
+      url: "",
+      email: "",
+      enabled: channel.enabled,
+      events: parsedEvents.length > 0 ? parsedEvents : ["server_down", "conflict_detected", "health_degraded"],
+    });
+    setAddChannelOpen(false);
+    setEditChannelTarget(channel);
+  };
+
   const handleCreateServer = () => {
+    if (!serverValidation.success) {
+      toast({ variant: "destructive", title: "Invalid server", description: serverValidationMessage || "Check the form values." });
+      return;
+    }
+
+    const parsed = serverValidation.data;
     createMutation.mutate({
-      name: serverForm.name,
-      host: serverForm.host,
-      port: parseInt(serverForm.port, 10) || 22,
-      username: serverForm.username,
-      authType: serverForm.authType,
-      password: serverForm.password,
-      privateKey: serverForm.privateKey,
-      bind9ConfDir: serverForm.bind9ConfDir,
-      bind9ZoneDir: serverForm.bind9ZoneDir,
-      role: serverForm.role,
+      name: parsed.name,
+      host: parsed.host,
+      port: Number.parseInt(parsed.port, 10) || 22,
+      username: parsed.username,
+      authType: parsed.authType,
+      password: parsed.authType === "password" ? parsed.password : "",
+      privateKey: parsed.authType === "key" ? parsed.privateKey : "",
+      bind9ConfDir: parsed.bind9ConfDir,
+      bind9ZoneDir: parsed.bind9ZoneDir,
+      role: parsed.role,
     });
   };
 
@@ -302,17 +392,24 @@ export default function ReplicationPage() {
       return;
     }
 
+    if (!serverValidation.success) {
+      toast({ variant: "destructive", title: "Invalid server", description: serverValidationMessage || "Check the form values." });
+      return;
+    }
+
+    const parsed = serverValidation.data;
     const data: Partial<ReplicationServerEntry> = {};
-    if (serverForm.name !== editTarget.name) data.name = serverForm.name;
-    if (serverForm.host !== editTarget.host) data.host = serverForm.host;
-    if ((parseInt(serverForm.port, 10) || 22) !== editTarget.port) data.port = parseInt(serverForm.port, 10) || 22;
-    if (serverForm.username !== editTarget.username) data.username = serverForm.username;
-    if (serverForm.authType !== editTarget.authType) data.authType = serverForm.authType;
-    if (serverForm.password) data.password = serverForm.password;
-    if (serverForm.privateKey) data.privateKey = serverForm.privateKey;
-    if (serverForm.bind9ConfDir !== (editTarget.bind9ConfDir || "/etc/bind")) data.bind9ConfDir = serverForm.bind9ConfDir;
-    if (serverForm.bind9ZoneDir !== (editTarget.bind9ZoneDir || "")) data.bind9ZoneDir = serverForm.bind9ZoneDir;
-    if (serverForm.role !== editTarget.role) data.role = serverForm.role;
+    const parsedPort = Number.parseInt(parsed.port, 10) || 22;
+    if (parsed.name !== editTarget.name) data.name = parsed.name;
+    if (parsed.host !== editTarget.host) data.host = parsed.host;
+    if (parsedPort !== editTarget.port) data.port = parsedPort;
+    if (parsed.username !== editTarget.username) data.username = parsed.username;
+    if (parsed.authType !== editTarget.authType) data.authType = parsed.authType;
+    if (parsed.authType === "password" && parsed.password.trim()) data.password = parsed.password;
+    if (parsed.authType === "key" && parsed.privateKey.trim()) data.privateKey = parsed.privateKey;
+    if (parsed.bind9ConfDir !== (editTarget.bind9ConfDir || "/etc/bind")) data.bind9ConfDir = parsed.bind9ConfDir;
+    if (parsed.bind9ZoneDir !== (editTarget.bind9ZoneDir || "")) data.bind9ZoneDir = parsed.bind9ZoneDir;
+    if (parsed.role !== editTarget.role) data.role = parsed.role;
 
     updateMutation.mutate({ id: editTarget.id, data });
   };
@@ -385,35 +482,58 @@ export default function ReplicationPage() {
     }
   };
 
-  const handleCreateChannel = async () => {
-    try {
-      const config: Record<string, string> = {};
-      if (channelForm.type === "webhook") config.url = channelForm.url;
-      if (channelForm.type === "slack") config.webhookUrl = channelForm.url;
-      if (channelForm.type === "email") config.email = channelForm.email;
-
-      await createNotificationChannel({
-        name: channelForm.name,
-        type: channelForm.type,
-        config,
-      });
-      toast({ title: "Channel created" });
-      setAddChannelOpen(false);
-      resetChannelForm();
-      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Failed", description: error.message });
+  const handleCreateChannel = () => {
+    if (!channelValidation.success) {
+      toast({ variant: "destructive", title: "Invalid channel", description: channelValidationMessage || "Check the channel settings." });
+      return;
     }
+
+    const parsed = channelValidation.data;
+    const config: Record<string, string> = {};
+    if (parsed.type === "webhook") config.url = parsed.url.trim();
+    if (parsed.type === "slack") config.webhookUrl = parsed.url.trim();
+    if (parsed.type === "email") config.email = parsed.email.trim();
+
+    createChannelMutation.mutate({
+      name: parsed.name,
+      type: parsed.type,
+      config,
+      enabled: parsed.enabled,
+      events: parsed.events.join(","),
+    });
   };
 
-  const handleDeleteChannel = async (channelId: string) => {
-    try {
-      await deleteNotificationChannel(channelId);
-      queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
-      toast({ title: "Channel deleted" });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Failed", description: error.message });
+  const handleUpdateChannel = () => {
+    if (!editChannelTarget) {
+      return;
     }
+
+    if (!channelValidation.success) {
+      toast({ variant: "destructive", title: "Invalid channel", description: channelValidationMessage || "Check the channel settings." });
+      return;
+    }
+
+    const parsed = channelValidation.data;
+    const data: Parameters<typeof updateNotificationChannel>[1] = {
+      name: parsed.name,
+      type: parsed.type,
+      enabled: parsed.enabled,
+      events: parsed.events.join(","),
+    };
+
+    if (parsed.type === "webhook" && parsed.url.trim()) {
+      data.config = { url: parsed.url.trim() };
+    } else if (parsed.type === "slack" && parsed.url.trim()) {
+      data.config = { webhookUrl: parsed.url.trim() };
+    } else if (parsed.type === "email" && parsed.email.trim()) {
+      data.config = { email: parsed.email.trim() };
+    }
+
+    updateChannelMutation.mutate({ id: editChannelTarget.id, data });
+  };
+
+  const handleDeleteChannel = (channelId: string) => {
+    deleteChannelMutation.mutate(channelId);
   };
 
   const handleCreateBackup = async (scope: "full" | "zones") => {
@@ -571,7 +691,8 @@ export default function ReplicationPage() {
 
         <ReplicationNotificationSection
           channels={channels}
-          onOpenCreate={() => setAddChannelOpen(true)}
+          onOpenCreate={openAddChannelDialog}
+          onEdit={openEditChannelDialog}
           onDelete={handleDeleteChannel}
         />
 
@@ -588,6 +709,8 @@ export default function ReplicationPage() {
         title="Add Replication Server"
         submitLabel="Add Server"
         saving={createMutation.isPending}
+        canSubmit={serverValidation.success}
+        validationMessage={serverValidationMessage}
         form={serverForm}
         setForm={setServerForm}
         onOpenChange={(open) => {
@@ -604,6 +727,8 @@ export default function ReplicationPage() {
         title={`Edit: ${editTarget?.name || ""}`}
         submitLabel="Save Changes"
         saving={updateMutation.isPending}
+        canSubmit={serverValidation.success}
+        validationMessage={serverValidationMessage}
         form={serverForm}
         setForm={setServerForm}
         editTarget={editTarget}
@@ -631,16 +756,23 @@ export default function ReplicationPage() {
       />
 
       <NotificationChannelDialog
-        open={addChannelOpen}
+        open={addChannelOpen || !!editChannelTarget}
+        title={editChannelTarget ? `Edit: ${editChannelTarget.name}` : "Add Notification Channel"}
+        submitLabel={editChannelTarget ? "Save Changes" : "Create Channel"}
+        saving={createChannelMutation.isPending || updateChannelMutation.isPending}
+        canSubmit={channelValidation.success}
+        validationMessage={channelValidationMessage}
+        editing={!!editChannelTarget}
         form={channelForm}
         setForm={setChannelForm}
         onOpenChange={(open) => {
-          setAddChannelOpen(open);
+          setAddChannelOpen(open && !editChannelTarget);
           if (!open) {
+            setEditChannelTarget(null);
             resetChannelForm();
           }
         }}
-        onSubmit={handleCreateChannel}
+        onSubmit={editChannelTarget ? handleUpdateChannel : handleCreateChannel}
       />
 
       <AlertDialog

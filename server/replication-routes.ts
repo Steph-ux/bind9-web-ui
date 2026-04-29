@@ -101,8 +101,8 @@ export function registerReplicationRoutes({
         port: data.port,
         username: data.username,
         authType: data.authType,
-        password: data.password,
-        privateKey: data.privateKey,
+        password: data.authType === "password" ? data.password : "",
+        privateKey: data.authType === "key" ? data.privateKey : "",
         bind9ConfDir: data.bind9ConfDir || "/etc/bind",
         bind9ZoneDir: data.bind9ZoneDir || "",
         role: data.role || "slave",
@@ -154,6 +154,12 @@ export function registerReplicationRoutes({
       const authError = getMissingAuthSecretMessage(nextAuthType, hasPassword ? "set" : "", hasPrivateKey ? "set" : "");
       if (authError) {
         return res.status(400).json({ message: authError });
+      }
+
+      if (nextAuthType === "password") {
+        allowed.privateKey = "";
+      } else if (nextAuthType === "key") {
+        allowed.password = "";
       }
 
       const updated = await storage.updateReplicationServer(id, allowed);
