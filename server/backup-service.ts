@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
 import type { Backup } from "@shared/schema";
 
-const BACKUP_DIR = path.join(process.cwd(), "backups");
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(process.cwd(), "data", "backups");
 
 class BackupService {
   private intervalId: ReturnType<typeof setInterval> | null = null;
