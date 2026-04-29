@@ -83,6 +83,7 @@ class Bind9Service {
     private sudoAllowedCommands: Set<string> | null = null;
     private managementSummaryCache: Bind9ManagementSummary | null = null;
     private networkMetricsWarningLogged = false;
+    private remoteBinaryPathCache: Map<string, string> = new Map();
 
     /** Set execution mode and paths */
     configure(config: {
@@ -114,6 +115,7 @@ class Bind9Service {
         this.available = null;
         this.sudoAllowedCommands = null;
         this.managementSummaryCache = null;
+        this.remoteBinaryPathCache.clear();
         console.log(`[bind9] Mode: ${this.mode}, confDir: ${BIND9_CONF_DIR}, zoneDir: ${BIND9_ZONE_DIR}`);
     }
 
@@ -164,6 +166,64 @@ class Bind9Service {
         const allowed = await this.getSudoAllowedCommands();
         const candidates = ["/bin/cp", "/usr/bin/cp"];
         return candidates.find((cmd) => allowed.has(cmd)) || null;
+    }
+
+    private async getRemoteBinaryPath(binary: string, candidates: string[]): Promise<string> {
+        if (this.mode !== "ssh" || !sshManager.isConfigured()) {
+            return binary;
+        }
+
+        const cached = this.remoteBinaryPathCache.get(binary);
+        if (cached) {
+            return cached;
+        }
+
+        for (const candidate of candidates) {
+            try {
+                const result = await sshManager.exec(`[ -x ${this.quoteShellArg(candidate)} ] && printf %s ${this.quoteShellArg(candidate)}`);
+                const resolved = result.stdout.trim();
+                if (resolved) {
+                    this.remoteBinaryPathCache.set(binary, resolved);
+                    return resolved;
+                }
+            } catch {
+                // Ignore and try next candidate.
+            }
+        }
+
+        try {
+            const result = await sshManager.exec(`command -v ${binary} 2>/dev/null || true`);
+            const resolved = result.stdout.trim();
+            if (resolved) {
+                this.remoteBinaryPathCache.set(binary, resolved);
+                return resolved;
+            }
+        } catch {
+            // Ignore fallback failure.
+        }
+
+        return binary;
+    }
+
+    private async resolveRemoteCommand(command: string): Promise<string> {
+        if (this.mode !== "ssh" || !sshManager.isConfigured()) {
+            return command;
+        }
+
+        const replacements: Array<[string, string]> = [
+            ["named-checkzone", await this.getRemoteBinaryPath("named-checkzone", ["/usr/bin/named-checkzone", "/usr/sbin/named-checkzone"])],
+            ["named-checkconf", await this.getRemoteBinaryPath("named-checkconf", ["/usr/bin/named-checkconf", "/usr/sbin/named-checkconf"])],
+            ["rndc", await this.getRemoteBinaryPath("rndc", ["/usr/sbin/rndc", "/usr/bin/rndc"])],
+            ["named", await this.getRemoteBinaryPath("named", ["/usr/sbin/named", "/usr/bin/named"])],
+        ];
+
+        let resolvedCommand = command;
+        for (const [binary, resolvedPath] of replacements) {
+            const escaped = binary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            resolvedCommand = resolvedCommand.replace(new RegExp(`\\b${escaped}\\b`, "g"), resolvedPath);
+        }
+
+        return resolvedCommand;
     }
 
     async canWritePath(filePath: string): Promise<boolean> {
@@ -357,11 +417,7 @@ class Bind9Service {
     /** Execute a shell command (locally or via SSH) */
     private async execCommand(command: string, useSudo = false): Promise<{ stdout: string; stderr: string }> {
         if (this.mode === "ssh" && sshManager.isConfigured()) {
-            // Resolve rndc/named-checkconf to full paths for SSH (sudo blocks PATH env)
-            let resolvedCommand = command
-                .replace(/\brndc\b/g, "/usr/sbin/rndc")
-                .replace(/\bnamed-checkconf\b/g, "/usr/sbin/named-checkconf")
-                .replace(/\bnamed\b/g, "/usr/sbin/named");
+            let resolvedCommand = await this.resolveRemoteCommand(command);
             if (useSudo) resolvedCommand = `sudo -n ${resolvedCommand}`;
             const result = await sshManager.exec(resolvedCommand);
             return { stdout: result.stdout, stderr: result.stderr };
@@ -371,10 +427,7 @@ class Bind9Service {
 
     /** Execute a command on a specific SSH connection by ID */
     async execOnConnection(connectionId: string, command: string, useSudo = false): Promise<{ stdout: string; stderr: string }> {
-        let resolvedCommand = command
-            .replace(/\brndc\b/g, "/usr/sbin/rndc")
-            .replace(/\bnamed-checkconf\b/g, "/usr/sbin/named-checkconf")
-            .replace(/\bnamed\b/g, "/usr/sbin/named");
+        let resolvedCommand = await this.resolveRemoteCommand(command);
         if (useSudo) resolvedCommand = `sudo -n ${resolvedCommand}`;
         const result = await sshManager.execById(connectionId, resolvedCommand);
         return { stdout: result.stdout, stderr: result.stderr };
