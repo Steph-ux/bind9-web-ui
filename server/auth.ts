@@ -27,34 +27,73 @@ async function comparePasswords(supplied: string, stored: string) {
     return match;
 }
 
-function parseHeaderHost(value?: string): string | null {
+type ParsedOrigin = {
+    protocol: string;
+    hostname: string;
+    port: string | null;
+};
+
+function parseHeaderOrigin(value?: string): ParsedOrigin | null {
     if (!value) return null;
     try {
-        return new URL(value).host.toLowerCase();
+        const url = new URL(value);
+        return {
+            protocol: url.protocol.toLowerCase(),
+            hostname: url.hostname.toLowerCase(),
+            port: url.port || null,
+        };
     } catch {
         return null;
     }
 }
 
-function getRequestHost(req: Request): string {
-    return (req.get("x-forwarded-host") || req.get("host") || "")
+function getRequestOrigin(req: Request): ParsedOrigin | null {
+    const host = (req.get("x-forwarded-host") || req.get("host") || "")
         .split(",")[0]
         .trim()
         .toLowerCase();
+    if (!host) return null;
+
+    const protocol = `${(req.get("x-forwarded-proto") || req.protocol || "http")
+        .split(",")[0]
+        .trim()
+        .toLowerCase()}:`;
+
+    try {
+        const url = new URL(`${protocol}//${host}`);
+        return {
+            protocol: url.protocol.toLowerCase(),
+            hostname: url.hostname.toLowerCase(),
+            port: url.port || req.get("x-forwarded-port") || null,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function originsMatch(left: ParsedOrigin, right: ParsedOrigin): boolean {
+    if (left.protocol !== right.protocol) return false;
+    if (left.hostname !== right.hostname) return false;
+
+    // Reverse proxies commonly drop the external port from Host/X-Forwarded-Host.
+    // When one side lacks explicit port information, fall back to host+scheme match.
+    if (!left.port || !right.port) return true;
+
+    return left.port === right.port;
 }
 
 function hasTrustedBrowserOrigin(req: Request): boolean {
-    const requestHost = getRequestHost(req);
-    if (!requestHost) return false;
+    const requestOrigin = getRequestOrigin(req);
+    if (!requestOrigin) return false;
 
-    const originHost = parseHeaderHost(req.get("origin") || undefined);
-    if (originHost) {
-        return originHost === requestHost;
+    const origin = parseHeaderOrigin(req.get("origin") || undefined);
+    if (origin) {
+        return originsMatch(origin, requestOrigin);
     }
 
-    const refererHost = parseHeaderHost(req.get("referer") || undefined);
-    if (refererHost) {
-        return refererHost === requestHost;
+    const referer = parseHeaderOrigin(req.get("referer") || undefined);
+    if (referer) {
+        return originsMatch(referer, requestOrigin);
     }
 
     return false;
