@@ -307,6 +307,10 @@ export default function Logs() {
   );
   const viewModeLabel =
     logScope === "bind" ? "BIND exact" : logScope === "app" ? "App only" : "Combined";
+  const emptyStateMessage =
+    logScope === "bind"
+      ? "No exact BIND log lines matched the current filters or were readable from the active target."
+      : "No log entries match the current filters.";
 
   return (
     <DashboardLayout>
@@ -358,6 +362,16 @@ export default function Logs() {
           <AlertTitle>{scopeDetails.title}</AlertTitle>
           <AlertDescription>{scopeDetails.description}</AlertDescription>
         </Alert>
+
+        {logScope !== "app" && !loading && bindEntryCount === 0 ? (
+          <Alert>
+            <Terminal className="h-4 w-4" />
+            <AlertTitle>No exact BIND lines available</AlertTitle>
+            <AlertDescription>
+              The active target did not return readable BIND log lines for the current filters from known file tails or service journals.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
@@ -465,7 +479,7 @@ export default function Logs() {
                 />
               ) : logs.length === 0 ? (
                 <div className="m-4 rounded-2xl border border-dashed border-border/60 bg-background/45 p-8 text-center text-muted-foreground">
-                  No log entries match the current filters.
+                  {emptyStateMessage}
                 </div>
               ) : (
                 logs.map((log) => (
