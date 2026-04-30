@@ -85,6 +85,13 @@ export interface Bind9LogEntry {
     transport: "file" | "journal";
 }
 
+export interface Bind9LogReadOptions {
+    limit?: number;
+    level?: Bind9LogEntry["level"] | string;
+    source?: string;
+    search?: string;
+}
+
 class Bind9Service {
     private available: boolean | null = null;
     private mode: ExecutionMode = "local";
@@ -1675,10 +1682,14 @@ zone "${safeDomain}" {
      * Read exact BIND log lines from readable log files and/or service journals.
      * File tails and journald entries are deduplicated and tagged with their transport.
      */
-    async readBind9Logs(limit: number = 200): Promise<Bind9LogEntry[]> {
+    async readBind9Logs(options: Bind9LogReadOptions | number = 200): Promise<Bind9LogEntry[]> {
+        const normalizedOptions = typeof options === "number" ? { limit: options } : options;
+        const limit = Math.min(Math.max(normalizedOptions.limit ?? 200, 1), 1000);
         const logs: Bind9LogEntry[] = [];
         const seen = new Set<string>();
-        const linesPerSource = Math.max(50, limit);
+        const linesPerSource = normalizedOptions.source || normalizedOptions.search
+            ? Math.max(500, limit)
+            : Math.max(50, limit);
 
         const commandWithOptionalSudo = (command: string) => {
             if (this.mode === "ssh" && sshManager.isConfigured()) {
@@ -1833,7 +1844,24 @@ zone "${safeDomain}" {
         }
 
         logs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-        return logs.slice(0, limit);
+        const filteredLogs = logs.filter((entry) => {
+            if (normalizedOptions.level && entry.level !== normalizedOptions.level) {
+                return false;
+            }
+
+            if (normalizedOptions.source && entry.source !== normalizedOptions.source) {
+                return false;
+            }
+
+            if (normalizedOptions.search) {
+                const query = normalizedOptions.search.toLowerCase();
+                return `${entry.source} ${entry.message}`.toLowerCase().includes(query);
+            }
+
+            return true;
+        });
+
+        return filteredLogs.slice(0, limit);
     }
 
     /** Monitor BIND9 log file and trigger callback on new lines */

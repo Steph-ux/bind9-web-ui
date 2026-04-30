@@ -133,7 +133,6 @@ export function registerSystemRoutes({
         limit: req.query.limit ? Math.min(parseInt(req.query.limit as string, 10) || 200, 1000) : 200,
       };
       const limit = filter.limit || 200;
-      const bindReadLimit = filter.source || filter.search ? Math.max(limit, 500) : limit;
 
       const appLogs = scope === "bind"
         ? []
@@ -143,9 +142,8 @@ export function registerSystemRoutes({
       if (scope !== "app") {
         try {
           if (await bind9Service.isAvailable()) {
-            bind9Logs = (await bind9Service.readBind9Logs(bindReadLimit))
-              .map(toBindLogEntry)
-              .filter((log) => matchesLogFilter(log, filter));
+            bind9Logs = (await bind9Service.readBind9Logs({ ...filter, limit }))
+              .map(toBindLogEntry);
           }
         } catch {
           bind9Logs = [];
@@ -171,11 +169,9 @@ export function registerSystemRoutes({
         source: req.query.source as string | undefined,
         search: req.query.search as string | undefined,
       };
-      const bindReadLimit = filter.source || filter.search ? Math.max(limit, 500) : limit;
-      const logs = (await bind9Service.readBind9Logs(bindReadLimit))
-        .map(toBindLogEntry)
-        .filter((log) => matchesLogFilter(log, filter));
-      res.json(logs.slice(0, limit));
+      const logs = (await bind9Service.readBind9Logs({ ...filter, limit }))
+        .map(toBindLogEntry);
+      res.json(logs);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
