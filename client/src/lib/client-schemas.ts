@@ -479,3 +479,111 @@ export type RecordFormValues = z.infer<typeof recordFormSchema>;
 export function validateRecordForm(values: RecordFormValues) {
     return recordFormSchema.safeParse(values);
 }
+
+const apiTokenPermissionsSchema = z
+    .string()
+    .trim()
+    .min(1, "Permission scope is required")
+    .max(1024, "Permission scope is too long")
+    .refine(
+        (value) => value === "*" || /^[a-zA-Z0-9:/*,._-]+(?:\s*,\s*[a-zA-Z0-9:/*,._-]+)*$/.test(value),
+        "Use * or comma-separated API scopes",
+    );
+
+export const apiTokenFormSchema = z.object({
+    name: z
+        .string()
+        .trim()
+        .min(1, "Token name is required")
+        .max(64, "Token name is too long"),
+    permissions: apiTokenPermissionsSchema,
+    expiresAt: z.string().trim().max(64, "Expiry value is too long"),
+}).superRefine((form, ctx) => {
+    if (!form.expiresAt.trim()) {
+        return;
+    }
+
+    const timestamp = Date.parse(form.expiresAt);
+    if (Number.isNaN(timestamp)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["expiresAt"],
+            message: "Expiry must be a valid date and time",
+        });
+        return;
+    }
+
+    if (timestamp <= Date.now()) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["expiresAt"],
+            message: "Expiry must be in the future",
+        });
+    }
+});
+
+export type ApiTokenFormValues = z.infer<typeof apiTokenFormSchema>;
+
+export function validateApiTokenForm(values: ApiTokenFormValues) {
+    return apiTokenFormSchema.safeParse(values);
+}
+
+export const blacklistBanFormSchema = z.object({
+    ip: z
+        .string()
+        .trim()
+        .min(1, "IP address is required")
+        .max(64, "IP address is too long")
+        .regex(/^[0-9a-f.:]+$/i, "Use a valid IPv4 or IPv6 address"),
+    reason: z.enum(["manual", "api_abuse", "brute_force"]),
+    durationMinutes: z
+        .string()
+        .trim()
+        .max(16, "Duration is too long")
+        .refine((value) => value === "" || /^\d+$/.test(value), "Duration must be a whole number")
+        .refine((value) => value === "" || Number.parseInt(value, 10) > 0, "Duration must be greater than 0")
+        .refine((value) => value === "" || Number.parseInt(value, 10) <= 525600, "Duration cannot exceed 525600 minutes"),
+});
+
+export type BlacklistBanFormValues = z.infer<typeof blacklistBanFormSchema>;
+
+export function validateBlacklistBanForm(values: BlacklistBanFormValues) {
+    return blacklistBanFormSchema.safeParse(values);
+}
+
+export const ownPasswordChangeSchema = z.object({
+    currentPassword: z.string().max(4096, "Current password is too long"),
+    newPassword: z
+        .string()
+        .min(8, "New password must be at least 8 characters")
+        .max(4096, "New password is too long"),
+    confirmPassword: z
+        .string()
+        .min(1, "Confirm password is required")
+        .max(4096, "Confirmation is too long"),
+}).superRefine((form, ctx) => {
+    if (form.newPassword !== form.confirmPassword) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["confirmPassword"],
+            message: "Passwords do not match",
+        });
+    }
+});
+
+export type OwnPasswordChangeValues = z.infer<typeof ownPasswordChangeSchema>;
+
+export function validateOwnPasswordChange(
+    values: OwnPasswordChangeValues,
+    options: { requireCurrentPassword?: boolean } = {},
+) {
+    return ownPasswordChangeSchema.superRefine((form, ctx) => {
+        if (options.requireCurrentPassword && !form.currentPassword.trim()) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["currentPassword"],
+                message: "Current password is required",
+            });
+        }
+    }).safeParse(values);
+}
