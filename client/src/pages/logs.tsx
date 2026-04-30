@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Search, Terminal, Trash2 } from "lucide-react";
+import { Download, RefreshCw, Search, Terminal, Trash2 } from "lucide-react";
 
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { PageHeader, PageState } from "@/components/layout";
+import { MetricCard, PageHeader, PageState } from "@/components/layout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,13 +13,71 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { clearLogs, getLogs, type LogData } from "@/lib/api";
+
+type StreamMode = "connecting" | "live" | "polling";
+
+type LogFilterState = {
+  level: string | null;
+  search: string;
+};
+
+function matchesFilters(log: LogData, filters: LogFilterState) {
+  if (filters.level && log.level !== filters.level) {
+    return false;
+  }
+
+  const query = filters.search.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+
+  const haystack = `${log.timestamp} ${log.level} ${log.source} ${log.message}`.toLowerCase();
+  return haystack.includes(query);
+}
+
+function mergeLogs(existing: LogData[], incoming: LogData[], filters: LogFilterState) {
+  const allowed = incoming.filter((entry) => matchesFilters(entry, filters));
+  if (allowed.length === 0) {
+    return existing;
+  }
+
+  const byId = new Map<string, LogData>();
+  for (const entry of [...allowed, ...existing]) {
+    if (!byId.has(entry.id)) {
+      byId.set(entry.id, entry);
+    }
+  }
+
+  return Array.from(byId.values()).slice(0, 200);
+}
+
+function describeStreamMode(mode: StreamMode) {
+  switch (mode) {
+    case "live":
+      return {
+        badge: "Live stream",
+        footer: "Connected - tailing logs in real time.",
+      };
+    case "polling":
+      return {
+        badge: "Polling fallback",
+        footer: "WebSocket unavailable - polling every 10 seconds.",
+      };
+    default:
+      return {
+        badge: "Connecting",
+        footer: "Connecting to the live log stream.",
+      };
+  }
+}
 
 export default function Logs() {
   const [logs, setLogs] = useState<LogData[]>([]);
@@ -27,75 +85,131 @@ export default function Logs() {
   const [filter, setFilter] = useState("");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [activeLevel, setActiveLevel] = useState<string | null>(null);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const [streamMode, setStreamMode] = useState<StreamMode>("connecting");
+  const [clearing, setClearing] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const filtersRef = useRef<LogFilterState>({ level: null, search: "" });
   const { toast } = useToast();
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (options: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
+      if (!options.silent) {
+        setLoading(true);
+      }
+
       const data = await getLogs({
         level: activeLevel || undefined,
         search: filter || undefined,
         limit: 200,
       });
       setLogs(data);
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } catch (error: any) {
+      toast({ title: "Log fetch failed", description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      if (!options.silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchLogs();
+    filtersRef.current = { level: activeLevel, search: filter };
+  }, [activeLevel, filter]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      void fetchLogs();
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [filter, activeLevel]);
+
+  useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs`);
+    let closedByCleanup = false;
+
     wsRef.current = ws;
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "log") {
-        setLogs((prev) => [msg.data, ...prev].slice(0, 200));
-      } else if (msg.type === "history") {
-        setLogs((prev) => {
-          const ids = new Set(prev.map((l) => l.id));
-          const newLogs = msg.data.filter((l: LogData) => !ids.has(l.id));
-          return [...newLogs, ...prev].slice(0, 200);
-        });
+    setStreamMode("connecting");
+
+    ws.onopen = () => {
+      if (!closedByCleanup) {
+        setStreamMode("live");
       }
     };
-    ws.onerror = () => console.log("[ws] Connection error, falling back to polling");
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        const currentFilters = filtersRef.current;
+
+        if (message.type === "log") {
+          setLogs((current) => mergeLogs(current, [message.data], currentFilters));
+          return;
+        }
+
+        if (message.type === "history" && Array.isArray(message.data)) {
+          setLogs((current) => mergeLogs(current, message.data, currentFilters));
+        }
+      } catch {
+        setStreamMode("polling");
+      }
+    };
+
+    ws.onerror = () => {
+      if (!closedByCleanup) {
+        setStreamMode("polling");
+      }
+    };
+
+    ws.onclose = () => {
+      if (!closedByCleanup) {
+        setStreamMode("polling");
+      }
+    };
+
     return () => {
+      closedByCleanup = true;
       ws.close();
+      wsRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const timeout = setTimeout(fetchLogs, 300);
-    return () => clearTimeout(timeout);
-  }, [filter, activeLevel]);
+    if (streamMode === "live") {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      void fetchLogs({ silent: true });
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [streamMode, filter, activeLevel]);
 
   const handleClear = async () => {
     try {
+      setClearing(true);
       await clearLogs();
       setLogs([]);
       setShowClearConfirm(false);
-      toast({ title: "Cleared", description: "All logs have been cleared" });
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      toast({ title: "Logs cleared", description: "All stored log entries have been removed." });
+    } catch (error: any) {
+      toast({ title: "Clear failed", description: error.message, variant: "destructive" });
+    } finally {
+      setClearing(false);
     }
   };
 
   const handleDownload = () => {
     const content = logs
-      .map((l) => `${l.timestamp}\t${l.level}\t${l.source}\t${l.message}`)
+      .map((entry) => `${entry.timestamp}\t${entry.level}\t${entry.source}\t${entry.message}`)
       .join("\n");
     const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `bind9-logs-${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `bind9-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    anchor.click();
     URL.revokeObjectURL(url);
   };
 
@@ -120,16 +234,20 @@ export default function Logs() {
     }
   };
 
+  const streamState = describeStreamMode(streamMode);
+  const filteredLabel = activeLevel ?? "ALL";
+  const errorCount = logs.filter((entry) => entry.level === "ERROR").length;
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
           title="System Logs"
-          description="Real-time event stream from services, API actions, and BIND9 activity."
+          description="Inspect application, API, and BIND activity with live updates and fallback polling."
           icon={Terminal}
           badge={
             <Badge variant="outline" className="border-border/70 bg-background/70">
-              {wsRef.current?.readyState === WebSocket.OPEN ? "Live stream" : "Polling"}
+              {streamState.badge}
             </Badge>
           }
           actions={
@@ -137,7 +255,17 @@ export default function Logs() {
               <Button
                 variant="outline"
                 className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
+                onClick={() => void fetchLogs()}
+                disabled={loading}
+              >
+                <RefreshCw className={["h-4 w-4", loading ? "animate-spin" : ""].join(" ")} />
+                Refresh
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
                 onClick={handleDownload}
+                disabled={logs.length === 0}
               >
                 <Download className="h-4 w-4" />
                 Download
@@ -146,6 +274,7 @@ export default function Logs() {
                 variant="outline"
                 className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 text-destructive shadow-none hover:text-destructive"
                 onClick={() => setShowClearConfirm(true)}
+                disabled={logs.length === 0}
               >
                 <Trash2 className="h-4 w-4" />
                 Clear
@@ -154,6 +283,45 @@ export default function Logs() {
           }
         />
 
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Visible logs"
+            value={logs.length}
+            description="Current result set after filtering"
+            icon={Terminal}
+            tone="success"
+          />
+          <MetricCard
+            label="Error entries"
+            value={errorCount}
+            description="Errors in the visible set"
+            icon={Terminal}
+            tone={errorCount > 0 ? "warning" : "success"}
+          />
+          <MetricCard
+            label="Level filter"
+            value={filteredLabel}
+            description="Current level selector"
+            icon={Search}
+          />
+          <MetricCard
+            label="Search filter"
+            value={filter.trim() ? `"${filter.trim()}"` : "None"}
+            description="Current text filter"
+            icon={Search}
+          />
+        </div>
+
+        {streamMode !== "live" ? (
+          <Alert>
+            <RefreshCw className="h-4 w-4" />
+            <AlertTitle>Live stream unavailable</AlertTitle>
+            <AlertDescription>
+              The WebSocket stream is not currently active. The page is falling back to periodic polling so log visibility remains available.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <Card className="linear-panel overflow-hidden border-border/60 bg-card/78 shadow-none">
           <CardHeader className="flex flex-col items-start justify-between gap-3 border-b border-border/60 p-4 md:flex-row md:items-center">
             <div className="relative flex-1" style={{ maxWidth: "400px" }}>
@@ -161,25 +329,25 @@ export default function Logs() {
               <Input
                 type="search"
                 className="pl-9"
-                placeholder="Filter logs..."
+                placeholder="Filter logs by source, level, or message"
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={(event) => setFilter(event.target.value)}
               />
             </div>
             <div className="flex gap-2 overflow-auto pb-1 md:pb-0">
-              {levels.map((l) => (
+              {levels.map((levelOption) => (
                 <Button
-                  key={l.label}
-                  variant={activeLevel === l.value ? "default" : "outline"}
+                  key={levelOption.label}
+                  variant={activeLevel === levelOption.value ? "default" : "outline"}
                   size="sm"
                   className={
-                    activeLevel === l.value
+                    activeLevel === levelOption.value
                       ? "rounded-full"
                       : "rounded-full border-border/70 bg-background/70 shadow-none"
                   }
-                  onClick={() => setActiveLevel(l.value)}
+                  onClick={() => setActiveLevel(levelOption.value)}
                 >
-                  {l.label}
+                  {levelOption.label}
                 </Button>
               ))}
             </div>
@@ -205,7 +373,7 @@ export default function Logs() {
                 />
               ) : logs.length === 0 ? (
                 <div className="m-4 rounded-2xl border border-dashed border-border/60 bg-background/45 p-8 text-center text-muted-foreground">
-                  No log entries. Activity will appear here in real-time.
+                  No log entries match the current filters.
                 </div>
               ) : (
                 logs.map((log) => (
@@ -227,14 +395,10 @@ export default function Logs() {
                 ))
               )}
 
-              <div ref={logEndRef} className="px-4 py-3">
+              <div className="px-4 py-3">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Terminal className="h-3 w-3" />
-                  <span>
-                    {wsRef.current?.readyState === WebSocket.OPEN
-                      ? "connected - tailing logs..."
-                      : "connecting..."}
-                  </span>
+                  <span>{streamState.footer}</span>
                 </div>
               </div>
             </div>
@@ -245,18 +409,19 @@ export default function Logs() {
       <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear All Logs</AlertDialogTitle>
+            <AlertDialogTitle>Clear all logs</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to clear all logs? This action cannot be undone.
+              Remove all stored log entries from the application database? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={clearing}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleClear}
+              disabled={clearing}
             >
-              Clear Logs
+              {clearing ? "Clearing..." : "Clear Logs"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
