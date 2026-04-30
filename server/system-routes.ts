@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 
-import { bind9Service } from "./bind9-service";
+import { bind9Service, type Bind9LogEntry } from "./bind9-service";
 import { sshManager } from "./ssh-manager";
 import { storage } from "./storage";
 
@@ -19,6 +19,64 @@ export function registerSystemRoutes({
   requireAdmin,
   safeError,
 }: RegisterSystemRoutesOptions) {
+  type LogScope = "app" | "bind" | "combined";
+  type ApiLogEntry = {
+    id: string;
+    timestamp: string;
+    level: "INFO" | "WARN" | "ERROR" | "DEBUG";
+    source: string;
+    message: string;
+    origin: "app" | "bind";
+    transport: "database" | "journal" | "file";
+  };
+
+  const parseLogScope = (value: unknown): LogScope =>
+    value === "app" || value === "bind" || value === "combined" ? value : "combined";
+
+  const normalizeLevel = (value: string): ApiLogEntry["level"] => {
+    if (value === "ERROR" || value === "WARN" || value === "INFO" || value === "DEBUG") {
+      return value;
+    }
+    return "INFO";
+  };
+
+  const matchesLogFilter = (
+    log: Pick<ApiLogEntry, "level" | "source" | "message">,
+    filter: { level?: string; source?: string; search?: string },
+  ) => {
+    if (filter.level && log.level !== filter.level) {
+      return false;
+    }
+
+    if (filter.source && log.source !== filter.source) {
+      return false;
+    }
+
+    if (filter.search) {
+      const query = filter.search.toLowerCase();
+      return `${log.source} ${log.message}`.toLowerCase().includes(query);
+    }
+
+    return true;
+  };
+
+  const toAppLogEntry = (log: Awaited<ReturnType<typeof storage.getLogs>>[number]): ApiLogEntry => ({
+    ...log,
+    level: normalizeLevel(log.level),
+    origin: "app",
+    transport: "database",
+  });
+
+  const toBindLogEntry = (log: Bind9LogEntry, index: number): ApiLogEntry => ({
+    id: `bind-${log.transport}-${log.timestamp}-${index}`,
+    timestamp: log.timestamp,
+    level: normalizeLevel(log.level),
+    source: log.source,
+    message: log.message,
+    origin: "bind",
+    transport: log.transport,
+  });
+
   app.get("/api/dashboard", requireViewer, async (_req: Request, res: Response) => {
     try {
       const allZones = await storage.getZones();
@@ -67,44 +125,35 @@ export function registerSystemRoutes({
 
   app.get("/api/logs", requireViewer, async (req: Request, res: Response) => {
     try {
+      const scope = parseLogScope(req.query.scope);
       const filter = {
         level: req.query.level as string | undefined,
         source: req.query.source as string | undefined,
         search: req.query.search as string | undefined,
         limit: req.query.limit ? Math.min(parseInt(req.query.limit as string, 10) || 200, 1000) : 200,
       };
-      const appLogs = await storage.getLogs(filter);
+      const limit = filter.limit || 200;
 
-      let bind9Logs: typeof appLogs = [];
-      try {
-        if (await bind9Service.isAvailable()) {
-          const raw = await bind9Service.readBind9Logs(filter.limit || 200);
-          bind9Logs = raw.map((log) => ({
-            id: `bind9-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            ...log,
-            level: log.level as "INFO" | "WARN" | "ERROR" | "DEBUG",
-          }));
+      const appLogs = scope === "bind"
+        ? []
+        : (await storage.getLogs(filter)).map(toAppLogEntry);
 
-          if (filter.level) {
-            bind9Logs = bind9Logs.filter((log) => log.level === filter.level);
+      let bind9Logs: ApiLogEntry[] = [];
+      if (scope !== "app") {
+        try {
+          if (await bind9Service.isAvailable()) {
+            bind9Logs = (await bind9Service.readBind9Logs(limit))
+              .map(toBindLogEntry)
+              .filter((log) => matchesLogFilter(log, filter));
           }
-          if (filter.source && filter.source !== "app") {
-            bind9Logs = bind9Logs.filter((log) => log.source === filter.source);
-          }
-          if (filter.search) {
-            const query = filter.search.toLowerCase();
-            bind9Logs = bind9Logs.filter((log) => log.message.toLowerCase().includes(query));
-          }
+        } catch {
+          bind9Logs = [];
         }
-      } catch {}
-
-      if (filter.source === "app") {
-        return res.json(appLogs);
       }
 
       const allLogs = [...appLogs, ...bind9Logs]
         .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
-        .slice(0, filter.limit || 200);
+        .slice(0, limit);
 
       res.json(allLogs);
     } catch (error: any) {
@@ -116,7 +165,14 @@ export function registerSystemRoutes({
   app.get("/api/logs/bind9", requireViewer, async (req: Request, res: Response) => {
     try {
       const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string, 10) || 200, 1000) : 200;
-      const logs = await bind9Service.readBind9Logs(limit);
+      const filter = {
+        level: req.query.level as string | undefined,
+        source: req.query.source as string | undefined,
+        search: req.query.search as string | undefined,
+      };
+      const logs = (await bind9Service.readBind9Logs(limit))
+        .map(toBindLogEntry)
+        .filter((log) => matchesLogFilter(log, filter));
       res.json(logs);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });

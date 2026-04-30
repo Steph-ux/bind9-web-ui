@@ -239,7 +239,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }, []);
 
   useEffect(() => {
-    getLogs({ limit: 5 })
+    getLogs({ limit: 5, scope: "app" })
       .then((logs) => {
         setNotifications(logs);
         const lastSeenId = localStorage.getItem("lastSeenLogId");

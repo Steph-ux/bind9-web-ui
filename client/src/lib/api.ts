@@ -145,20 +145,25 @@ export const deleteKey = (id: string) =>
     request<{ message: string }>(`/keys/${id}`, { method: "DELETE" });
 
 // Logs
+export type LogScope = "app" | "bind" | "combined";
+
 export interface LogData {
     id: string;
     timestamp: string;
     level: string;
     source: string;
     message: string;
+    origin?: "app" | "bind";
+    transport?: "database" | "journal" | "file";
 }
 
-export const getLogs = (params?: { level?: string; source?: string; search?: string; limit?: number }) => {
+export const getLogs = (params?: { level?: string; source?: string; search?: string; limit?: number; scope?: LogScope }) => {
     const query = new URLSearchParams();
     if (params?.level) query.set("level", params.level);
     if (params?.source) query.set("source", params.source);
     if (params?.search) query.set("search", params.search);
     if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.scope) query.set("scope", params.scope);
     const qs = query.toString();
     return request<LogData[]>(`/logs${qs ? `?${qs}` : ""}`);
 };

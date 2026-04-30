@@ -77,6 +77,14 @@ export interface Bind9ManagementSummary {
     };
 }
 
+export interface Bind9LogEntry {
+    timestamp: string;
+    level: "INFO" | "WARN" | "ERROR" | "DEBUG";
+    source: string;
+    message: string;
+    transport: "file" | "journal";
+}
+
 class Bind9Service {
     private available: boolean | null = null;
     private mode: ExecutionMode = "local";
@@ -1625,12 +1633,13 @@ zone "${safeDomain}" {
     // â”€â”€ BIND9 Log Reading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
-     * Read real BIND9 log files and return parsed entries.
-     * Tries common log paths: /var/log/named/data/, /var/log/named/, /var/log/syslog
+     * Read exact BIND log lines from readable log files and/or service journals.
+     * File tails and journald entries are deduplicated and tagged with their transport.
      */
-    async readBind9Logs(limit: number = 200): Promise<Array<{ timestamp: string; level: string; source: string; message: string }>> {
-        const logs: Array<{ timestamp: string; level: string; source: string; message: string }> = [];
-        const linesPerSource = Math.max(20, Math.ceil(limit / 5));
+    async readBind9Logs(limit: number = 200): Promise<Bind9LogEntry[]> {
+        const logs: Bind9LogEntry[] = [];
+        const seen = new Set<string>();
+        const linesPerSource = Math.max(50, limit);
 
         const commandWithOptionalSudo = (command: string) => {
             if (this.mode === "ssh" && sshManager.isConfigured()) {
@@ -1639,106 +1648,147 @@ zone "${safeDomain}" {
             return `${command} 2>/dev/null`;
         };
 
-        const appendParsedLogs = (rawOutput: string, source: string) => {
+        const inferLevel = (message: string, priority?: number): Bind9LogEntry["level"] => {
+            if (typeof priority === "number" && Number.isFinite(priority)) {
+                if (priority <= 3) return "ERROR";
+                if (priority === 4) return "WARN";
+                if (priority >= 7) return "DEBUG";
+                return "INFO";
+            }
+
+            if (/error|fail|fatal|denied/i.test(message)) return "ERROR";
+            if (/warn/i.test(message)) return "WARN";
+            if (/debug/i.test(message)) return "DEBUG";
+            return "INFO";
+        };
+
+        const pushLog = (entry: Bind9LogEntry) => {
+            const trimmedMessage = entry.message.trim();
+            if (!trimmedMessage) return;
+            if (/^-- No entries --$/i.test(trimmedMessage)) return;
+            if (/^No journal files were found/i.test(trimmedMessage)) return;
+
+            const key = `${entry.timestamp}|${entry.source}|${trimmedMessage}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            logs.push({ ...entry, message: trimmedMessage.substring(0, 500) });
+        };
+
+        const appendParsedTextLogs = (rawOutput: string, source: string, transport: Bind9LogEntry["transport"]) => {
             if (!rawOutput.trim()) return;
 
             const lines = rawOutput.trim().split("\n");
             for (const line of lines) {
-                if (!line.trim()) continue;
+                const trimmed = line.trim();
+                if (!trimmed) continue;
 
-                const bindTsMatch = line.match(/^(\d{1,2}-\w+-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.*)/);
+                const bindTsMatch = trimmed.match(/^(\d{1,2}-\w+-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.*)$/);
                 if (bindTsMatch) {
-                    let timestamp: string;
-                    try {
-                        timestamp = new Date(bindTsMatch[1]).toISOString();
-                    } catch {
-                        timestamp = new Date().toISOString();
-                    }
-
-                    const rest = bindTsMatch[2];
-                    let level = "INFO";
-                    if (/error|fail/i.test(rest)) level = "ERROR";
-                    else if (/warn/i.test(rest)) level = "WARN";
-                    else if (/debug/i.test(rest)) level = "DEBUG";
-
-                    logs.push({ timestamp, level, source, message: rest.substring(0, 500) });
+                    const timestamp = new Date(bindTsMatch[1]).toString() === "Invalid Date"
+                        ? new Date().toISOString()
+                        : new Date(bindTsMatch[1]).toISOString();
+                    const message = bindTsMatch[2];
+                    pushLog({
+                        timestamp,
+                        level: inferLevel(message),
+                        source,
+                        message,
+                        transport,
+                    });
                     continue;
                 }
 
-                const journalTsMatch = line.match(/^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+\S+\s+(.*)$/);
+                const journalTsMatch = trimmed.match(/^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+\S+\s+(.*)$/);
                 if (journalTsMatch) {
-                    let timestamp: string;
-                    try {
-                        timestamp = new Date(`${journalTsMatch[1]} ${new Date().getFullYear()}`).toISOString();
-                    } catch {
-                        timestamp = new Date().toISOString();
-                    }
-
-                    const rest = journalTsMatch[2];
-                    let level = "INFO";
-                    if (/error|fail/i.test(rest)) level = "ERROR";
-                    else if (/warn/i.test(rest)) level = "WARN";
-                    else if (/debug/i.test(rest)) level = "DEBUG";
-
-                    logs.push({ timestamp, level, source, message: rest.substring(0, 500) });
+                    const guessedTimestamp = new Date(`${journalTsMatch[1]} ${new Date().getFullYear()}`);
+                    const message = journalTsMatch[2];
+                    pushLog({
+                        timestamp: guessedTimestamp.toString() === "Invalid Date" ? new Date().toISOString() : guessedTimestamp.toISOString(),
+                        level: inferLevel(message),
+                        source,
+                        message,
+                        transport,
+                    });
                     continue;
                 }
 
-                logs.push({
+                pushLog({
                     timestamp: new Date().toISOString(),
-                    level: /error|fail/i.test(line) ? "ERROR" : /warn/i.test(line) ? "WARN" : /debug/i.test(line) ? "DEBUG" : "INFO",
+                    level: inferLevel(trimmed),
                     source,
-                    message: line.substring(0, 500),
+                    message: trimmed,
+                    transport,
                 });
             }
         };
 
-        // Log files to check, ordered by priority
+        const appendParsedJournalLogs = (rawOutput: string) => {
+            if (!rawOutput.trim()) return;
+
+            const lines = rawOutput.trim().split("\n");
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                let parsed: Record<string, unknown> | null = null;
+                try {
+                    parsed = JSON.parse(trimmed) as Record<string, unknown>;
+                } catch {
+                    appendParsedTextLogs(trimmed, "named-service", "journal");
+                    continue;
+                }
+
+                const message = typeof parsed.MESSAGE === "string" ? parsed.MESSAGE : "";
+                if (!message) continue;
+
+                const realtime = typeof parsed.__REALTIME_TIMESTAMP === "string" ? Number(parsed.__REALTIME_TIMESTAMP) : NaN;
+                const timestamp = Number.isFinite(realtime) && realtime > 0
+                    ? new Date(realtime / 1000).toISOString()
+                    : new Date().toISOString();
+                const source = typeof parsed._SYSTEMD_UNIT === "string"
+                    ? parsed._SYSTEMD_UNIT.replace(/\.service$/i, "-service")
+                    : typeof parsed.SYSLOG_IDENTIFIER === "string"
+                        ? parsed.SYSLOG_IDENTIFIER
+                        : "journal";
+                const priority = typeof parsed.PRIORITY === "string" ? Number(parsed.PRIORITY) : NaN;
+
+                pushLog({
+                    timestamp,
+                    level: inferLevel(message, Number.isFinite(priority) ? priority : undefined),
+                    source,
+                    message,
+                    transport: "journal",
+                });
+            }
+        };
+
         const logFiles = [
             { path: "/var/log/named/data/query.log", source: "query" },
             { path: "/var/log/named/data/error.log", source: "error" },
             { path: "/var/log/named/data/security.log", source: "security" },
             { path: "/var/log/named/data/notification.log", source: "notify" },
             { path: "/var/log/named/data/rate_limiting.log", source: "rate-limit" },
+            { path: path.posix.join(BIND9_ZONE_DIR, "named.run"), source: "named.run" },
         ];
 
         for (const logFile of logFiles) {
             try {
                 const command = commandWithOptionalSudo(`tail -n ${linesPerSource} ${this.quoteShellArg(logFile.path)}`);
                 const { stdout } = await this.execCommand(command);
-                appendParsedLogs(stdout, logFile.source);
+                appendParsedTextLogs(stdout, logFile.source, "file");
             } catch {
-                // Log file doesn't exist or not readable, skip
+                // Skip unreadable file sources.
             }
         }
 
-        if (logs.length === 0) {
-            const fallbackSources = [
-                {
-                    source: "named.run",
-                    command: commandWithOptionalSudo(`tail -n ${limit} ${this.quoteShellArg(path.posix.join(BIND9_ZONE_DIR, "named.run"))}`),
-                },
-                {
-                    source: "bind9-service",
-                    command: commandWithOptionalSudo(`journalctl -u bind9 -n ${limit} --no-pager`),
-                },
-                {
-                    source: "named-service",
-                    command: commandWithOptionalSudo(`journalctl -u named -n ${limit} --no-pager`),
-                },
-            ];
-
-            for (const fallbackSource of fallbackSources) {
-                try {
-                    const { stdout } = await this.execCommand(fallbackSource.command);
-                    appendParsedLogs(stdout, fallbackSource.source);
-                } catch {
-                    // Skip unavailable fallbacks.
-                }
-            }
+        try {
+            const journalCommand = commandWithOptionalSudo(`journalctl -u bind9 -u named -n ${linesPerSource} --no-pager -o json`);
+            const { stdout } = await this.execCommand(journalCommand);
+            appendParsedJournalLogs(stdout);
+        } catch {
+            // Skip unavailable journal sources.
         }
 
-        // Sort by timestamp desc and limit
         logs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
         return logs.slice(0, limit);
     }

@@ -19,8 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { clearLogs, getLogs, type LogData } from "@/lib/api";
+import { clearLogs, getLogs, type LogData, type LogScope } from "@/lib/api";
 
 type StreamMode = "connecting" | "live" | "polling";
 
@@ -59,7 +60,38 @@ function mergeLogs(existing: LogData[], incoming: LogData[], filters: LogFilterS
   return Array.from(byId.values()).slice(0, 200);
 }
 
-function describeStreamMode(mode: StreamMode) {
+function tagAppStreamLog(log: LogData): LogData {
+  return { ...log, origin: "app", transport: "database" };
+}
+
+function describeStreamMode(mode: StreamMode, scope: LogScope) {
+  if (scope === "bind") {
+    return {
+      badge: "Exact BIND polling",
+      footer: "Reading exact remote BIND files and service journals. Results refresh every 10 seconds.",
+    };
+  }
+
+  if (scope === "combined") {
+    switch (mode) {
+      case "live":
+        return {
+          badge: "Combined live",
+          footer: "Application events stream live. Exact BIND entries refresh when the page reloads or polls.",
+        };
+      case "polling":
+        return {
+          badge: "Combined polling",
+          footer: "Live application streaming is unavailable. App and BIND entries refresh every 10 seconds.",
+        };
+      default:
+        return {
+          badge: "Connecting",
+          footer: "Connecting to the application log stream while keeping exact BIND snapshots available.",
+        };
+    }
+  }
+
   switch (mode) {
     case "live":
       return {
@@ -79,12 +111,36 @@ function describeStreamMode(mode: StreamMode) {
   }
 }
 
+function describeScope(scope: LogScope) {
+  switch (scope) {
+    case "bind":
+      return {
+        title: "Exact BIND view",
+        description:
+          "This view reads exact remote BIND log tails from readable files and service journals on the active target. It does not mix in application events.",
+      };
+    case "app":
+      return {
+        title: "Application view",
+        description:
+          "This view shows only the web UI application log store. It supports WebSocket live streaming and can be cleared from this page.",
+      };
+    default:
+      return {
+        title: "Combined view",
+        description:
+          "This view merges exact readable BIND logs with application events. Only the application portion streams live; BIND entries refresh on reload or polling.",
+      };
+  }
+}
+
 export default function Logs() {
   const [logs, setLogs] = useState<LogData[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [activeLevel, setActiveLevel] = useState<string | null>(null);
+  const [logScope, setLogScope] = useState<LogScope>("combined");
   const [streamMode, setStreamMode] = useState<StreamMode>("connecting");
   const [clearing, setClearing] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -101,6 +157,7 @@ export default function Logs() {
         level: activeLevel || undefined,
         search: filter || undefined,
         limit: 200,
+        scope: logScope,
       });
       setLogs(data);
     } catch (error: any) {
@@ -121,9 +178,16 @@ export default function Logs() {
       void fetchLogs();
     }, 300);
     return () => clearTimeout(timeout);
-  }, [filter, activeLevel]);
+  }, [filter, activeLevel, logScope]);
 
   useEffect(() => {
+    if (logScope === "bind") {
+      setStreamMode("polling");
+      wsRef.current?.close();
+      wsRef.current = null;
+      return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs`);
     let closedByCleanup = false;
@@ -143,12 +207,12 @@ export default function Logs() {
         const currentFilters = filtersRef.current;
 
         if (message.type === "log") {
-          setLogs((current) => mergeLogs(current, [message.data], currentFilters));
+          setLogs((current) => mergeLogs(current, [tagAppStreamLog(message.data)], currentFilters));
           return;
         }
 
         if (message.type === "history" && Array.isArray(message.data)) {
-          setLogs((current) => mergeLogs(current, message.data, currentFilters));
+          setLogs((current) => mergeLogs(current, message.data.map(tagAppStreamLog), currentFilters));
         }
       } catch {
         setStreamMode("polling");
@@ -172,7 +236,7 @@ export default function Logs() {
       ws.close();
       wsRef.current = null;
     };
-  }, []);
+  }, [logScope]);
 
   useEffect(() => {
     if (streamMode === "live") {
@@ -184,15 +248,15 @@ export default function Logs() {
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [streamMode, filter, activeLevel]);
+  }, [streamMode, filter, activeLevel, logScope]);
 
   const handleClear = async () => {
     try {
       setClearing(true);
       await clearLogs();
-      setLogs([]);
+      await fetchLogs({ silent: true });
       setShowClearConfirm(false);
-      toast({ title: "Logs cleared", description: "All stored log entries have been removed." });
+      toast({ title: "Logs cleared", description: "Stored application log entries have been removed." });
     } catch (error: any) {
       toast({ title: "Clear failed", description: error.message, variant: "destructive" });
     } finally {
@@ -208,7 +272,7 @@ export default function Logs() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `bind9-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    anchor.download = `bind9-logs-${logScope}-${new Date().toISOString().slice(0, 10)}.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -234,16 +298,22 @@ export default function Logs() {
     }
   };
 
-  const streamState = describeStreamMode(streamMode);
-  const filteredLabel = activeLevel ?? "ALL";
-  const errorCount = logs.filter((entry) => entry.level === "ERROR").length;
+  const streamState = describeStreamMode(streamMode, logScope);
+  const scopeDetails = describeScope(logScope);
+  const bindEntryCount = logs.filter((entry) => entry.origin === "bind").length;
+  const appEntryCount = logs.length - bindEntryCount;
+  const bindSources = Array.from(
+    new Set(logs.filter((entry) => entry.origin === "bind").map((entry) => entry.source)),
+  );
+  const viewModeLabel =
+    logScope === "bind" ? "BIND exact" : logScope === "app" ? "App only" : "Combined";
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
           title="System Logs"
-          description="Inspect application events and readable BIND log tails from the active target."
+          description="Inspect exact readable BIND logs, application events, or a combined operational view from the active target."
           icon={Terminal}
           badge={
             <Badge variant="outline" className="border-border/70 bg-background/70">
@@ -274,7 +344,7 @@ export default function Logs() {
                 variant="outline"
                 className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 text-destructive shadow-none hover:text-destructive"
                 onClick={() => setShowClearConfirm(true)}
-                disabled={logs.length === 0}
+                disabled={logScope === "bind"}
               >
                 <Trash2 className="h-4 w-4" />
                 Clear
@@ -285,12 +355,8 @@ export default function Logs() {
 
         <Alert>
           <Terminal className="h-4 w-4" />
-          <AlertTitle>Log scope</AlertTitle>
-          <AlertDescription>
-            The live WebSocket stream shows application events. Each refresh also merges readable BIND
-            log tails from the active server when those files or service journals are accessible. Clearing
-            logs here only clears the application log store, not the remote BIND log files themselves.
-          </AlertDescription>
+          <AlertTitle>{scopeDetails.title}</AlertTitle>
+          <AlertDescription>{scopeDetails.description}</AlertDescription>
         </Alert>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -302,47 +368,63 @@ export default function Logs() {
             tone="success"
           />
           <MetricCard
-            label="Error entries"
-            value={errorCount}
-            description="Errors in the visible set"
+            label="Application entries"
+            value={appEntryCount}
+            description="Visible web UI log records"
             icon={Terminal}
-            tone={errorCount > 0 ? "warning" : "success"}
+            tone="success"
           />
           <MetricCard
-            label="Level filter"
-            value={filteredLabel}
-            description="Current level selector"
+            label="BIND entries"
+            value={bindEntryCount}
+            description="Visible exact remote BIND lines"
             icon={Search}
+            tone={bindEntryCount > 0 ? "success" : "default"}
           />
           <MetricCard
-            label="Search filter"
-            value={filter.trim() ? `"${filter.trim()}"` : "None"}
-            description="Current text filter"
+            label="View mode"
+            value={viewModeLabel}
+            description={bindSources.length > 0 ? bindSources.join(", ") : "No BIND sources in the current result"}
             icon={Search}
           />
         </div>
 
-        {streamMode !== "live" ? (
+        {streamMode !== "live" && logScope !== "bind" ? (
           <Alert>
             <RefreshCw className="h-4 w-4" />
             <AlertTitle>Live stream unavailable</AlertTitle>
             <AlertDescription>
-              The WebSocket stream is not currently active. The page is falling back to periodic polling so log visibility remains available.
+              The application WebSocket stream is not currently active. The page is falling back to periodic polling so visibility remains available.
             </AlertDescription>
           </Alert>
         ) : null}
 
         <Card className="linear-panel overflow-hidden border-border/60 bg-card/78 shadow-none">
           <CardHeader className="flex flex-col items-start justify-between gap-3 border-b border-border/60 p-4 md:flex-row md:items-center">
-            <div className="relative flex-1" style={{ maxWidth: "400px" }}>
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                className="pl-9"
-                placeholder="Filter logs by source, level, or message"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-              />
+            <div className="flex w-full flex-col gap-3 md:max-w-[520px]">
+              <Tabs value={logScope} onValueChange={(value) => setLogScope(value as LogScope)}>
+                <TabsList className="h-auto rounded-2xl border border-border/60 bg-card/70 p-1">
+                  <TabsTrigger value="combined" className="rounded-xl">
+                    Combined
+                  </TabsTrigger>
+                  <TabsTrigger value="bind" className="rounded-xl">
+                    BIND Exact
+                  </TabsTrigger>
+                  <TabsTrigger value="app" className="rounded-xl">
+                    App Only
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <div className="relative flex-1" style={{ maxWidth: "400px" }}>
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  className="pl-9"
+                  placeholder="Filter logs by source, level, or message"
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value)}
+                />
+              </div>
             </div>
             <div className="flex gap-2 overflow-auto pb-1 md:pb-0">
               {levels.map((levelOption) => (
@@ -369,7 +451,7 @@ export default function Logs() {
                 <div className="flex text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                   <div className="w-[200px] px-4 py-3">Timestamp</div>
                   <div className="w-[100px] px-4 py-3">Level</div>
-                  <div className="w-[150px] px-4 py-3">Source</div>
+                  <div className="w-[190px] px-4 py-3">Source</div>
                   <div className="flex-1 px-4 py-3">Message</div>
                 </div>
               </div>
@@ -390,17 +472,25 @@ export default function Logs() {
                   <div
                     key={log.id}
                     className="mx-3 my-2 flex rounded-2xl border border-border/60 bg-background/45 transition-colors hover:bg-background/60"
-                  >
-                    <div className="w-[200px] shrink-0 whitespace-nowrap px-4 py-3 text-muted-foreground">
-                      {new Date(log.timestamp).toLocaleString()}
-                    </div>
-                    <div className="w-[100px] shrink-0 px-4 py-2">{levelBadge(log.level)}</div>
-                    <div className="w-[150px] shrink-0 truncate px-4 py-3 text-foreground/80">
-                      {log.source}
-                    </div>
-                    <div className="flex-1 break-all px-4 py-3 text-foreground/92">
-                      {log.message}
-                    </div>
+                    >
+                      <div className="w-[200px] shrink-0 whitespace-nowrap px-4 py-3 text-muted-foreground">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </div>
+                      <div className="w-[100px] shrink-0 px-4 py-2">{levelBadge(log.level)}</div>
+                      <div className="w-[190px] shrink-0 px-4 py-3 text-foreground/80">
+                        <div className="truncate">{log.source}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          <Badge variant="outline" className="border-border/60 bg-background/50 text-[10px] uppercase tracking-[0.14em]">
+                            {log.origin === "bind" ? "BIND" : "APP"}
+                          </Badge>
+                          <Badge variant="outline" className="border-border/60 bg-background/50 text-[10px] uppercase tracking-[0.14em]">
+                            {log.transport ?? "database"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex-1 break-all px-4 py-3 text-foreground/92">
+                        {log.message}
+                      </div>
                   </div>
                 ))
               )}
@@ -421,7 +511,7 @@ export default function Logs() {
           <AlertDialogHeader>
             <AlertDialogTitle>Clear all logs</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove all stored log entries from the application database? This action cannot be undone.
+              Remove all stored application log entries from the web UI database? Exact remote BIND log files are not deleted by this action.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
