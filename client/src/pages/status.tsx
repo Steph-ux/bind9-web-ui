@@ -17,6 +17,7 @@ import {
 
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { MetricCard, PageHeader, PageState } from "@/components/layout";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +27,18 @@ import { getBindInfo, getStatus, type BindInfoData, type StatusData } from "@/li
 interface StatusSnapshot {
   status: StatusData;
   bindInfo: BindInfoData;
+  bindInfoError: string | null;
 }
+
+const EMPTY_BIND_INFO: BindInfoData = {
+  forwarders: [],
+  allowRecursion: [],
+  allowQuery: [],
+  allowTransfer: [],
+  dnssec: [],
+  transfers: { incoming: 0, outgoing: 0, details: [] },
+  slaveZones: [],
+};
 
 function formatBytes(bytes: number) {
   if (bytes >= 1024 ** 3) {
@@ -48,8 +60,24 @@ export default function Status() {
   } = useQuery<StatusSnapshot>({
     queryKey: ["status-page"],
     queryFn: async () => {
-      const [status, bindInfo] = await Promise.all([getStatus(), getBindInfo()]);
-      return { status, bindInfo };
+      const [statusResult, bindInfoResult] = await Promise.allSettled([getStatus(), getBindInfo()]);
+
+      if (statusResult.status !== "fulfilled") {
+        throw statusResult.reason instanceof Error
+          ? statusResult.reason
+          : new Error("Unable to load server status.");
+      }
+
+      return {
+        status: statusResult.value,
+        bindInfo: bindInfoResult.status === "fulfilled" ? bindInfoResult.value : EMPTY_BIND_INFO,
+        bindInfoError:
+          bindInfoResult.status === "rejected"
+            ? bindInfoResult.reason instanceof Error
+              ? bindInfoResult.reason.message
+              : "Advanced BIND details are temporarily unavailable."
+            : null,
+      };
     },
     refetchInterval: 10_000,
   });
@@ -86,6 +114,7 @@ export default function Status() {
   }
 
   const { status, bindInfo } = data;
+  const { bindInfoError } = data;
   const memUsedPct = Math.round((status.system.memory.used / status.system.memory.total) * 100);
   const targetLabel =
     status.connectionMode === "ssh" && status.sshState?.host
@@ -147,6 +176,16 @@ export default function Status() {
             </Button>
           }
         />
+
+        {bindInfoError ? (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Partial status only</AlertTitle>
+            <AlertDescription>
+              Core server status is available, but advanced BIND details could not be loaded: {bindInfoError}
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
