@@ -246,7 +246,7 @@ export default function BlacklistPage() {
             <div className="space-y-6">
                 <PageHeader
                     title="IP Blacklist"
-                    description="Review auto-banned clients and control manual access blocks for the web UI."
+                    description="Review auto-banned clients and control manual access blocks for the web UI and API only."
                     icon={ShieldBan}
                     badge={
                         <Badge variant="outline" className="border-border/70 bg-background/70">
@@ -374,6 +374,15 @@ export default function BlacklistPage() {
                         </div>
                     }
                 />
+
+                <Alert>
+                    <Shield className="h-4 w-4" />
+                    <AlertTitle>Blacklist scope</AlertTitle>
+                    <AlertDescription>
+                        Entries here only block authentication and API access to this application. They do not
+                        create RPZ rules, block DNS clients, or enforce network firewall bans on the BIND server.
+                    </AlertDescription>
+                </Alert>
 
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <MetricCard

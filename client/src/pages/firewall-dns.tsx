@@ -18,12 +18,14 @@ import {
     clearRpzEntries,
     createRpzEntry,
     deleteRpzEntry,
+    getStatus,
     getRpzEntries,
     getRpzStats,
     importRpzEntries,
     importRpzEntriesFromUrl,
     type RpzEntriesResponse,
     type RpzStats,
+    type StatusData,
     syncRpzEntries,
 } from "@/lib/api";
 
@@ -72,9 +74,17 @@ export default function FirewallDNS() {
         queryFn: getRpzStats,
     });
 
+    const { data: statusData } = useQuery<StatusData>({
+        queryKey: ["/api/status", "rpz-scope"],
+        queryFn: getStatus,
+        staleTime: 10_000,
+    });
+
     const entries = pagedData?.entries ?? [];
     const totalEntries = pagedData?.total ?? 0;
     const totalPages = pagedData?.totalPages ?? 1;
+    const rpzSummary = statusData?.management?.rpz;
+    const multipleRpzZones = Boolean(rpzSummary?.zoneName?.includes(","));
 
     const invalidateRpzQueries = () => {
         queryClient.invalidateQueries({ queryKey: ["/api/rpz"] });
@@ -356,6 +366,21 @@ export default function FirewallDNS() {
                         <span className="font-semibold">REDIRECT</span> sends traffic to a different IP or domain.
                     </AlertDescription>
                 </Alert>
+
+                {rpzSummary?.configured ? (
+                    <Alert>
+                        <Shield className="h-4 w-4" />
+                        <AlertTitle>Server-side RPZ detected</AlertTitle>
+                        <AlertDescription>
+                            The active server already exposes the following response-policy zone set:
+                            <span className="mx-1 font-mono">{rpzSummary.zoneName}</span>.
+                            This screen edits the application-synchronized RPZ inventory, so use
+                            <span className="mx-1 font-semibold">Sync from BIND9</span>
+                            before expecting pre-existing server rules to appear here.
+                            {multipleRpzZones ? " When several RPZ zones exist, the table does not merge every zone into one editable dataset." : ""}
+                        </AlertDescription>
+                    </Alert>
+                ) : null}
 
                 <RpzStatsCards stats={stats} />
 

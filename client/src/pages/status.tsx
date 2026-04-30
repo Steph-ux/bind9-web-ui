@@ -116,6 +116,9 @@ export default function Status() {
   const { status, bindInfo } = data;
   const { bindInfoError } = data;
   const memUsedPct = Math.round((status.system.memory.used / status.system.memory.total) * 100);
+  const rpzZoneNames = status.management?.rpz.zoneName
+    ? status.management.rpz.zoneName.split(",").map((name) => name.trim()).filter(Boolean)
+    : [];
   const targetLabel =
     status.connectionMode === "ssh" && status.sshState?.host
       ? status.sshState.host
@@ -186,6 +189,17 @@ export default function Status() {
             </AlertDescription>
           </Alert>
         ) : null}
+
+        <Alert>
+          <Shield className="h-4 w-4" />
+          <AlertTitle>What this page reflects</AlertTitle>
+          <AlertDescription>
+            Forwarders and the allow-* controls below are parsed from the active server&apos;s
+            <span className="mx-1 font-mono">named.conf.options</span>
+            file. Named ACL objects themselves are managed separately in
+            <span className="mx-1 font-mono">Security &gt; ACLs</span>.
+          </AlertDescription>
+        </Alert>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
@@ -279,6 +293,11 @@ export default function Status() {
                       <div className="font-mono font-semibold">
                         {status.management.rpz.configured ? status.management.rpz.zoneName || "Configured" : "Not configured"}
                       </div>
+                      {rpzZoneNames.length > 1 ? (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          Multiple response-policy zones are active on this target.
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </>
@@ -452,7 +471,10 @@ export default function Status() {
                 Forwarders
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-4">
+            <CardContent className="space-y-3 pt-4">
+              <p className="text-xs text-muted-foreground">
+                Global forwarders explicitly declared in <span className="font-mono">named.conf.options</span>.
+              </p>
               {bindInfo.forwarders.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {bindInfo.forwarders.map((ip) => (
@@ -462,7 +484,9 @@ export default function Status() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No forwarders configured.</p>
+                <p className="text-sm text-muted-foreground">
+                  No global forwarders are explicitly configured in <span className="font-mono">named.conf.options</span>.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -471,15 +495,32 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Shield className="h-4 w-4 text-primary" />
-                Access Controls
+                Global Access Controls
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
+              <p className="text-xs text-muted-foreground">
+                These values come from the global <span className="font-mono">allow-recursion</span>,
+                <span className="mx-1 font-mono">allow-query</span> and
+                <span className="font-mono">allow-transfer</span> directives, not from the ACL object list itself.
+              </p>
               {[
-                { label: "Allow-Recursion", items: bindInfo.allowRecursion },
-                { label: "Allow-Query", items: bindInfo.allowQuery },
-                { label: "Allow-Transfer", items: bindInfo.allowTransfer },
-              ].map(({ label, items }) => (
+                {
+                  label: "Allow-Recursion",
+                  items: bindInfo.allowRecursion,
+                  emptyLabel: "No global allow-recursion directive found.",
+                },
+                {
+                  label: "Allow-Query",
+                  items: bindInfo.allowQuery,
+                  emptyLabel: "No global allow-query directive found.",
+                },
+                {
+                  label: "Allow-Transfer",
+                  items: bindInfo.allowTransfer,
+                  emptyLabel: "No global allow-transfer directive found.",
+                },
+              ].map(({ label, items, emptyLabel }) => (
                 <div key={label}>
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
                     {label}
@@ -493,7 +534,7 @@ export default function Status() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-xs italic text-muted-foreground">Not configured</div>
+                    <div className="text-xs italic text-muted-foreground">{emptyLabel}</div>
                   )}
                 </div>
               ))}

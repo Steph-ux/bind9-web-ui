@@ -243,7 +243,7 @@ export default function Logs() {
       <div className="space-y-6">
         <PageHeader
           title="System Logs"
-          description="Inspect application, API, and BIND activity with live updates and fallback polling."
+          description="Inspect application events and readable BIND log tails from the active target."
           icon={Terminal}
           badge={
             <Badge variant="outline" className="border-border/70 bg-background/70">
@@ -282,6 +282,16 @@ export default function Logs() {
             </div>
           }
         />
+
+        <Alert>
+          <Terminal className="h-4 w-4" />
+          <AlertTitle>Log scope</AlertTitle>
+          <AlertDescription>
+            The live WebSocket stream shows application events. Each refresh also merges readable BIND
+            log tails from the active server when those files or service journals are accessible. Clearing
+            logs here only clears the application log store, not the remote BIND log files themselves.
+          </AlertDescription>
+        </Alert>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

@@ -137,6 +137,153 @@ class Bind9Service {
         return `'${value.replace(/'/g, `'\\''`)}'`;
     }
 
+    private escapeRegExp(value: string): string {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    private stripBindConfigComments(content: string): string {
+        return content
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/\/\/.*$/gm, "")
+            .replace(/#.*$/gm, "");
+    }
+
+    private uniqueEntries(entries: string[]): string[] {
+        const seen = new Set<string>();
+        const result: string[] = [];
+        for (const entry of entries) {
+            const normalized = entry.trim().replace(/\s+/g, " ");
+            if (!normalized || seen.has(normalized)) continue;
+            seen.add(normalized);
+            result.push(normalized);
+        }
+        return result;
+    }
+
+    private extractBraceDirectiveBodies(content: string, directive: string): string[] {
+        const cleaned = this.stripBindConfigComments(content);
+        const escapedDirective = this.escapeRegExp(directive);
+        const pattern = new RegExp(`\\b${escapedDirective}\\b\\s*\\{`, "gi");
+        const bodies: string[] = [];
+        let match: RegExpExecArray | null;
+
+        while ((match = pattern.exec(cleaned)) !== null) {
+            let cursor = pattern.lastIndex;
+            let depth = 1;
+            let body = "";
+
+            while (cursor < cleaned.length && depth > 0) {
+                const char = cleaned[cursor++];
+                if (char === "{") {
+                    depth += 1;
+                    body += char;
+                    continue;
+                }
+                if (char === "}") {
+                    depth -= 1;
+                    if (depth > 0) {
+                        body += char;
+                    }
+                    continue;
+                }
+                body += char;
+            }
+
+            if (depth === 0) {
+                bodies.push(body.trim());
+            }
+
+            pattern.lastIndex = cursor;
+        }
+
+        return bodies;
+    }
+
+    private parseDirectiveList(content: string, directive: string): string[] {
+        const entries = this.extractBraceDirectiveBodies(content, directive)
+            .flatMap((body) => body.split(";"))
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+        return this.uniqueEntries(entries);
+    }
+
+    private parseAclDirectiveEntries(content: string, directive: string): string[] {
+        const entries = [...this.parseDirectiveList(content, directive)];
+        const cleaned = this.stripBindConfigComments(content);
+        const escapedDirective = this.escapeRegExp(directive);
+        const singleRegex = new RegExp(`\\b${escapedDirective}\\b\\s+([^;{}]+);`, "gi");
+        let match: RegExpExecArray | null;
+
+        while ((match = singleRegex.exec(cleaned)) !== null) {
+            const value = match[1].trim().replace(/\s+/g, " ");
+            if (value) {
+                entries.push(value);
+            }
+        }
+
+        return this.uniqueEntries(entries);
+    }
+
+    private parseResponsePolicyZones(content: string): string[] {
+        const zoneNames: string[] = [];
+        for (const body of this.extractBraceDirectiveBodies(content, "response-policy")) {
+            let quotedMatch: RegExpExecArray | null;
+            const quotedRegex = /\bzone\b\s+"([^"]+)"/gi;
+            while ((quotedMatch = quotedRegex.exec(body)) !== null) {
+                zoneNames.push(quotedMatch[1].trim());
+            }
+
+            let bareMatch: RegExpExecArray | null;
+            const bareRegex = /\bzone\b\s+([A-Za-z0-9._-]+)/gi;
+            while ((bareMatch = bareRegex.exec(body)) !== null) {
+                zoneNames.push(bareMatch[1].trim());
+            }
+        }
+
+        return this.uniqueEntries(zoneNames);
+    }
+
+    private async discoverRpzZones(): Promise<Array<{ zoneName: string; filePath: string }>> {
+        let zoneNames: string[] = [];
+
+        try {
+            const optionsContent = await this.readNamedConfOptions();
+            zoneNames = this.parseResponsePolicyZones(optionsContent);
+        } catch {
+            zoneNames = [];
+        }
+
+        if (zoneNames.length === 0) {
+            try {
+                const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
+                zoneNames = this.parseResponsePolicyZones(result.stdout);
+            } catch {
+                zoneNames = [];
+            }
+        }
+
+        if (zoneNames.length === 0) {
+            return [];
+        }
+
+        let configuredZones: Array<{ domain: string; type: string; filePath: string }> = [];
+        try {
+            configuredZones = await this.syncZonesFromConfig();
+        } catch {
+            configuredZones = [];
+        }
+
+        return zoneNames.map((zoneName) => {
+            const zoneConfig = configuredZones.find((zone) => zone.domain === zoneName);
+            const configuredPath = zoneConfig?.filePath?.trim();
+            const filePath = configuredPath
+                ? (configuredPath.startsWith("/") ? configuredPath : path.posix.join(BIND9_ZONE_DIR, configuredPath))
+                : path.posix.join(BIND9_ZONE_DIR, `db.${zoneName}`);
+
+            return { zoneName, filePath };
+        });
+    }
+
     private async getSudoAllowedCommands(): Promise<Set<string>> {
         if (this.mode !== "ssh" || !sshManager.isConfigured()) {
             return new Set();
@@ -375,7 +522,8 @@ class Bind9Service {
 
         const includes = await this.getConfigIncludes();
         const zoneLayout = await this.detectZoneLayout();
-        const rpz = await this.discoverRpzZone();
+        const rpzZones = await this.discoverRpzZones();
+        const rpz = rpzZones[0] ?? null;
         const namedConfLocal = path.posix.join(BIND9_CONF_DIR, "named.conf.local");
         const namedConfOptions = path.posix.join(BIND9_CONF_DIR, "named.conf.options");
         const namedConfAcls = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
@@ -386,8 +534,8 @@ class Bind9Service {
             namedConfAcls: await this.canWritePath(namedConfAcls),
             namedConfKeys: await this.canWritePath(namedConfKeys),
         };
-        const rpzWritable = rpz
-            ? await this.canWritePath(rpz.filePath)
+        const rpzWritable = rpzZones.length > 0
+            ? (await Promise.all(rpzZones.map((zone) => this.canWritePath(zone.filePath)))).every(Boolean)
             : writablePaths.namedConfOptions && includes.namedConfLocalIncluded && writablePaths.namedConfLocal;
 
         const summary: Bind9ManagementSummary = {
@@ -397,8 +545,8 @@ class Bind9Service {
             zoneLayout,
             writablePaths,
             rpz: {
-                configured: Boolean(rpz),
-                zoneName: rpz?.zoneName || null,
+                configured: rpzZones.length > 0,
+                zoneName: rpzZones.length > 0 ? rpzZones.map((zone) => zone.zoneName).join(", ") : null,
                 filePath: rpz?.filePath || null,
                 writable: rpzWritable,
             },
@@ -1180,35 +1328,15 @@ zone "${safeDomain}" {
     /** Get configured forwarders from named-checkconf */
     async getForwarders(): Promise<string[]> {
         try {
+            const content = await this.readNamedConfOptions();
+            return this.parseDirectiveList(content, "forwarders");
+        } catch {
+            // Fallback to named-checkconf -p if direct file reads fail.
+        }
+
+        try {
             const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
-            const forwarders: string[] = [];
-            let inForwarders = false;
-            for (const line of result.stdout.split("\n")) {
-                const trimmed = line.trim();
-                if (trimmed.startsWith("forwarders")) {
-                    inForwarders = true;
-                    // May be on same line: forwarders { 8.8.8.8; 8.8.4.4; };
-                    const inlineMatch = trimmed.match(/\{([^}]+)\}/);
-                    if (inlineMatch) {
-                        for (const ip of inlineMatch[1].split(";").map(s => s.trim()).filter(Boolean)) {
-                            if (/^[\d.]+$/.test(ip) || /^\[[\da-fA-F:]+\]$/.test(ip)) forwarders.push(ip);
-                        }
-                        inForwarders = false;
-                    }
-                    continue;
-                }
-                if (inForwarders) {
-                    if (trimmed.includes("}")) {
-                        inForwarders = false;
-                        continue;
-                    }
-                    const ips = trimmed.split(";").map(s => s.trim()).filter(Boolean);
-                    for (const ip of ips) {
-                        if (/^[\d.]+$/.test(ip) || /^\[[\da-fA-F:]+\]$/.test(ip)) forwarders.push(ip);
-                    }
-                }
-            }
-            return forwarders;
+            return this.parseDirectiveList(result.stdout, "forwarders");
         } catch {
             return [];
         }
@@ -1217,27 +1345,22 @@ zone "${safeDomain}" {
     /** Get allow-recursion and allow-query ACLs from named-checkconf */
     async getAllowRecursionQuery(): Promise<{ allowRecursion: string[]; allowQuery: string[]; allowTransfer: string[] }> {
         try {
-            const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
-            const extractAcl = (keyword: string): string[] => {
-                const entries: string[] = [];
-                const regex = new RegExp(`${keyword}\\s+\\{([^}]+)\\}`, "g");
-                let match;
-                while ((match = regex.exec(result.stdout)) !== null) {
-                    for (const entry of match[1].split(";").map(s => s.trim()).filter(Boolean)) {
-                        entries.push(entry);
-                    }
-                }
-                // Also match: allow-recursion { any; }; or allow-recursion { none; };
-                const singleRegex = new RegExp(`${keyword}\\s+(\\S+);`, "g");
-                while ((match = singleRegex.exec(result.stdout)) !== null) {
-                    if (!entries.includes(match[1])) entries.push(match[1]);
-                }
-                return entries;
-            };
+            const content = await this.readNamedConfOptions();
             return {
-                allowRecursion: extractAcl("allow-recursion"),
-                allowQuery: extractAcl("allow-query"),
-                allowTransfer: extractAcl("allow-transfer"),
+                allowRecursion: this.parseAclDirectiveEntries(content, "allow-recursion"),
+                allowQuery: this.parseAclDirectiveEntries(content, "allow-query"),
+                allowTransfer: this.parseAclDirectiveEntries(content, "allow-transfer"),
+            };
+        } catch {
+            // Fallback to named-checkconf -p if direct file reads fail.
+        }
+
+        try {
+            const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
+            return {
+                allowRecursion: this.parseAclDirectiveEntries(result.stdout, "allow-recursion"),
+                allowQuery: this.parseAclDirectiveEntries(result.stdout, "allow-query"),
+                allowTransfer: this.parseAclDirectiveEntries(result.stdout, "allow-transfer"),
             };
         } catch {
             return { allowRecursion: [], allowQuery: [], allowTransfer: [] };
@@ -1507,6 +1630,68 @@ zone "${safeDomain}" {
      */
     async readBind9Logs(limit: number = 200): Promise<Array<{ timestamp: string; level: string; source: string; message: string }>> {
         const logs: Array<{ timestamp: string; level: string; source: string; message: string }> = [];
+        const linesPerSource = Math.max(20, Math.ceil(limit / 5));
+
+        const commandWithOptionalSudo = (command: string) => {
+            if (this.mode === "ssh" && sshManager.isConfigured()) {
+                return `sudo -n ${command} 2>/dev/null || ${command} 2>/dev/null`;
+            }
+            return `${command} 2>/dev/null`;
+        };
+
+        const appendParsedLogs = (rawOutput: string, source: string) => {
+            if (!rawOutput.trim()) return;
+
+            const lines = rawOutput.trim().split("\n");
+            for (const line of lines) {
+                if (!line.trim()) continue;
+
+                const bindTsMatch = line.match(/^(\d{1,2}-\w+-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.*)/);
+                if (bindTsMatch) {
+                    let timestamp: string;
+                    try {
+                        timestamp = new Date(bindTsMatch[1]).toISOString();
+                    } catch {
+                        timestamp = new Date().toISOString();
+                    }
+
+                    const rest = bindTsMatch[2];
+                    let level = "INFO";
+                    if (/error|fail/i.test(rest)) level = "ERROR";
+                    else if (/warn/i.test(rest)) level = "WARN";
+                    else if (/debug/i.test(rest)) level = "DEBUG";
+
+                    logs.push({ timestamp, level, source, message: rest.substring(0, 500) });
+                    continue;
+                }
+
+                const journalTsMatch = line.match(/^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+\S+\s+(.*)$/);
+                if (journalTsMatch) {
+                    let timestamp: string;
+                    try {
+                        timestamp = new Date(`${journalTsMatch[1]} ${new Date().getFullYear()}`).toISOString();
+                    } catch {
+                        timestamp = new Date().toISOString();
+                    }
+
+                    const rest = journalTsMatch[2];
+                    let level = "INFO";
+                    if (/error|fail/i.test(rest)) level = "ERROR";
+                    else if (/warn/i.test(rest)) level = "WARN";
+                    else if (/debug/i.test(rest)) level = "DEBUG";
+
+                    logs.push({ timestamp, level, source, message: rest.substring(0, 500) });
+                    continue;
+                }
+
+                logs.push({
+                    timestamp: new Date().toISOString(),
+                    level: /error|fail/i.test(line) ? "ERROR" : /warn/i.test(line) ? "WARN" : /debug/i.test(line) ? "DEBUG" : "INFO",
+                    source,
+                    message: line.substring(0, 500),
+                });
+            }
+        };
 
         // Log files to check, ordered by priority
         const logFiles = [
@@ -1519,45 +1704,37 @@ zone "${safeDomain}" {
 
         for (const logFile of logFiles) {
             try {
-                // Read only the last N lines using tail
-                const { stdout } = await this.execCommand(`tail -n ${Math.ceil(limit / logFiles.length)} ${logFile.path} 2>/dev/null`);
-                if (!stdout.trim()) continue;
-
-                const lines = stdout.trim().split("\n");
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-
-                    // BIND9 log format: "12-Feb-2026 12:34:56.789 queries: info: ..."
-                    // or: "12-Feb-2026 12:34:56.789 security: error: ..."
-                    const tsMatch = line.match(/^(\d{1,2}-\w+-\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.*)/);
-                    if (tsMatch) {
-                        let timestamp: string;
-                        try {
-                            timestamp = new Date(tsMatch[1]).toISOString();
-                        } catch {
-                            timestamp = new Date().toISOString();
-                        }
-
-                        const rest = tsMatch[2];
-                        // Detect level from the content
-                        let level = "INFO";
-                        if (/error|fail/i.test(rest)) level = "ERROR";
-                        else if (/warn/i.test(rest)) level = "WARN";
-                        else if (/debug/i.test(rest)) level = "DEBUG";
-
-                        logs.push({ timestamp, level, source: logFile.source, message: rest.substring(0, 500) });
-                    } else {
-                        // Fallback for unrecognized format
-                        logs.push({
-                            timestamp: new Date().toISOString(),
-                            level: "INFO",
-                            source: logFile.source,
-                            message: line.substring(0, 500),
-                        });
-                    }
-                }
+                const command = commandWithOptionalSudo(`tail -n ${linesPerSource} ${this.quoteShellArg(logFile.path)}`);
+                const { stdout } = await this.execCommand(command);
+                appendParsedLogs(stdout, logFile.source);
             } catch {
                 // Log file doesn't exist or not readable, skip
+            }
+        }
+
+        if (logs.length === 0) {
+            const fallbackSources = [
+                {
+                    source: "named.run",
+                    command: commandWithOptionalSudo(`tail -n ${limit} ${this.quoteShellArg(path.posix.join(BIND9_ZONE_DIR, "named.run"))}`),
+                },
+                {
+                    source: "bind9-service",
+                    command: commandWithOptionalSudo(`journalctl -u bind9 -n ${limit} --no-pager`),
+                },
+                {
+                    source: "named-service",
+                    command: commandWithOptionalSudo(`journalctl -u named -n ${limit} --no-pager`),
+                },
+            ];
+
+            for (const fallbackSource of fallbackSources) {
+                try {
+                    const { stdout } = await this.execCommand(fallbackSource.command);
+                    appendParsedLogs(stdout, fallbackSource.source);
+                } catch {
+                    // Skip unavailable fallbacks.
+                }
             }
         }
 
@@ -1739,44 +1916,8 @@ zone "${safeDomain}" {
      * Returns { zoneName, filePath } or null if no RPZ is configured.
      */
     async discoverRpzZone(): Promise<{ zoneName: string; filePath: string } | null> {
-        try {
-            const result = await this.execCommand(`${NAMED_CHECKCONF} -p 2>/dev/null`, true);
-            const output = result.stdout;
-
-            // Find response-policy zone name(s): response-policy { zone "rpz.intra"; };
-            const rpzZones: string[] = [];
-            const rpzRegex = /response-policy\s*\{([^}]+)\}/g;
-            let match;
-            while ((match = rpzRegex.exec(output)) !== null) {
-                const body = match[1];
-                const zoneRegex = /zone\s+"([^"]+)"/g;
-                let zMatch;
-                while ((zMatch = zoneRegex.exec(body)) !== null) {
-                    rpzZones.push(zMatch[1]);
-                }
-            }
-
-            if (rpzZones.length === 0) return null;
-
-            // Use the first RPZ zone found
-            const zoneName = rpzZones[0];
-
-            // Now find the zone declaration to get the file path
-            // Flatten multi-line zone blocks
-            const flat = output.replace(/\n\s+/g, " ");
-            // Match: zone "rpz.intra" IN { type master; file "db.rpz.intra"; ... };
-            const zoneDeclRegex = new RegExp(
-                `zone\\s+"${zoneName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s*(?:IN\\s*)?\\{[^}]*?file\\s+"([^"]+)"`, "i"
-            );
-            const declMatch = flat.match(zoneDeclRegex);
-            const filePath = declMatch
-                ? (declMatch[1].startsWith("/") ? declMatch[1] : path.posix.join(BIND9_ZONE_DIR, declMatch[1]))
-                : path.posix.join(BIND9_ZONE_DIR, `db.${zoneName}`);
-
-            return { zoneName, filePath };
-        } catch {
-            return null;
-        }
+        const zones = await this.discoverRpzZones();
+        return zones[0] ?? null;
     }
 
     /** Ensure named.conf.options includes response-policy */
