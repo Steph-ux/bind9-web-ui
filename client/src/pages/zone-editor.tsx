@@ -26,6 +26,11 @@ import {
   type ZoneDetail,
   type ZoneDnssecInfo,
 } from "@/lib/api";
+import {
+  recordPriorityTypes,
+  validateRecordForm,
+  type RecordFormValues,
+} from "@/lib/client-schemas";
 import { useToast } from "@/hooks/use-toast";
 import {
   RecordDeleteDialog,
@@ -77,6 +82,8 @@ export default function ZoneEditor() {
   const [newValue, setNewValue] = useState("");
   const [newTTL, setNewTTL] = useState("3600");
   const [newPriority, setNewPriority] = useState("");
+  const [newErrors, setNewErrors] = useState<Partial<Record<keyof RecordFormValues, string>>>({});
+  const [editErrors, setEditErrors] = useState<Partial<Record<keyof RecordFormValues, string>>>({});
 
   const { toast } = useToast();
   const { canManageDNS } = useAuth();
@@ -129,6 +136,79 @@ export default function ZoneEditor() {
   };
 
   const dnssecSigned = dnssec?.enabled || dnssecStatus?.signed;
+  const newRecordValues: RecordFormValues = {
+    name: newName,
+    type: newType as RecordFormValues["type"],
+    value: newValue,
+    ttl: newTTL,
+    priority: newPriority,
+  };
+  const editRecordValues: RecordFormValues = {
+    name: editName,
+    type: editType as RecordFormValues["type"],
+    value: editValue,
+    ttl: editTTL,
+    priority: editPriority,
+  };
+
+  const clearRecordError = (
+    setErrors: React.Dispatch<React.SetStateAction<Partial<Record<keyof RecordFormValues, string>>>>,
+    field: keyof RecordFormValues,
+  ) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const updateCreateField = <K extends keyof RecordFormValues>(field: K, value: RecordFormValues[K]) => {
+    if (field === "name") setNewName(value as string);
+    if (field === "type") {
+      setNewType(value as string);
+      if (!recordPriorityTypes.includes(value as (typeof recordPriorityTypes)[number])) {
+        setNewPriority("");
+        clearRecordError(setNewErrors, "priority");
+      }
+    }
+    if (field === "value") setNewValue(value as string);
+    if (field === "ttl") setNewTTL(value as string);
+    if (field === "priority") setNewPriority(value as string);
+    clearRecordError(setNewErrors, field);
+  };
+
+  const updateEditField = <K extends keyof RecordFormValues>(field: K, value: RecordFormValues[K]) => {
+    if (field === "name") setEditName(value as string);
+    if (field === "type") {
+      setEditType(value as string);
+      if (!recordPriorityTypes.includes(value as (typeof recordPriorityTypes)[number])) {
+        setEditPriority("");
+        clearRecordError(setEditErrors, "priority");
+      }
+    }
+    if (field === "value") setEditValue(value as string);
+    if (field === "ttl") setEditTTL(value as string);
+    if (field === "priority") setEditPriority(value as string);
+    clearRecordError(setEditErrors, field);
+  };
+
+  const collectRecordErrors = (values: RecordFormValues) => {
+    const validation = validateRecordForm(values);
+    if (validation.success) {
+      return { success: true as const, data: validation.data, errors: {} };
+    }
+
+    const errors: Partial<Record<keyof RecordFormValues, string>> = {};
+    for (const issue of validation.error.issues) {
+      const key = issue.path[0] as keyof RecordFormValues | undefined;
+      if (key && !errors[key]) {
+        errors[key] = issue.message;
+      }
+    }
+
+    return { success: false as const, errors };
+  };
 
   const fetchData = async () => {
     if (!zoneId) return;
@@ -164,23 +244,21 @@ export default function ZoneEditor() {
 
   const handleCreate = async () => {
     if (!zoneId) return;
-    if (!newName.trim() || !newValue.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Name and Value are required",
-        variant: "destructive",
-      });
+    const validation = collectRecordErrors(newRecordValues);
+    if (!validation.success) {
+      setNewErrors(validation.errors);
+      toast({ title: "Invalid record form", description: Object.values(validation.errors)[0], variant: "destructive" });
       return;
     }
 
     try {
       setCreating(true);
       await createRecord(zoneId, {
-        name: newName,
-        type: newType,
-        value: newValue,
-        ttl: parseInt(newTTL, 10) || 3600,
-        priority: newPriority ? parseInt(newPriority, 10) : null,
+        name: validation.data.name,
+        type: validation.data.type,
+        value: validation.data.value,
+        ttl: parseInt(validation.data.ttl, 10) || 3600,
+        priority: validation.data.priority ? parseInt(validation.data.priority, 10) : null,
       });
 
       toast({ title: "Success", description: "Record created successfully" });
@@ -188,7 +266,8 @@ export default function ZoneEditor() {
       setNewName("");
       setNewValue("");
       setNewPriority("");
-      fetchData();
+      setNewErrors({});
+      await fetchData();
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
     } finally {
@@ -203,31 +282,31 @@ export default function ZoneEditor() {
     setEditValue(record.value);
     setEditTTL(String(record.ttl));
     setEditPriority(record.priority != null ? String(record.priority) : "");
+    setEditErrors({});
   };
 
   const handleEdit = async () => {
     if (!editTarget) return;
-    if (!editName.trim() || !editValue.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Name and Value are required",
-        variant: "destructive",
-      });
+    const validation = collectRecordErrors(editRecordValues);
+    if (!validation.success) {
+      setEditErrors(validation.errors);
+      toast({ title: "Invalid record form", description: Object.values(validation.errors)[0], variant: "destructive" });
       return;
     }
 
     try {
       setSaving(true);
       await updateRecord(editTarget.id, {
-        name: editName,
-        type: editType as RecordData["type"],
-        value: editValue,
-        ttl: parseInt(editTTL, 10) || 3600,
-        priority: editPriority ? parseInt(editPriority, 10) : null,
+        name: validation.data.name,
+        type: validation.data.type as RecordData["type"],
+        value: validation.data.value,
+        ttl: parseInt(validation.data.ttl, 10) || 3600,
+        priority: validation.data.priority ? parseInt(validation.data.priority, 10) : null,
       });
       toast({ title: "Success", description: "Record updated successfully" });
       setEditTarget(null);
-      fetchData();
+      setEditErrors({});
+      await fetchData();
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
     } finally {
@@ -240,7 +319,7 @@ export default function ZoneEditor() {
       await deleteRecord(record.id);
       toast({ title: "Success", description: "Record deleted" });
       setDeleteTarget(null);
-      fetchData();
+      await fetchData();
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
     }
@@ -465,17 +544,15 @@ export default function ZoneEditor() {
           mode="create"
           zoneDomain={zone.domain}
           submitting={creating}
-          name={newName}
-          type={newType}
-          value={newValue}
-          ttl={newTTL}
-          priority={newPriority}
-          onOpenChange={setIsDialogOpen}
-          onNameChange={setNewName}
-          onTypeChange={setNewType}
-          onValueChange={setNewValue}
-          onTtlChange={setNewTTL}
-          onPriorityChange={setNewPriority}
+          values={newRecordValues}
+          errors={newErrors}
+          onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              setNewErrors({});
+            }
+          }}
+          onFieldChange={updateCreateField}
           onSubmit={handleCreate}
         />
       )}
@@ -486,19 +563,15 @@ export default function ZoneEditor() {
           mode="edit"
           zoneDomain={zone.domain}
           submitting={saving}
-          name={editName}
-          type={editType}
-          value={editValue}
-          ttl={editTTL}
-          priority={editPriority}
+          values={editRecordValues}
+          errors={editErrors}
           onOpenChange={(open) => {
-            if (!open) setEditTarget(null);
+            if (!open) {
+              setEditTarget(null);
+              setEditErrors({});
+            }
           }}
-          onNameChange={setEditName}
-          onTypeChange={setEditType}
-          onValueChange={setEditValue}
-          onTtlChange={setEditTTL}
-          onPriorityChange={setEditPriority}
+          onFieldChange={updateEditField}
           onSubmit={handleEdit}
         />
       )}

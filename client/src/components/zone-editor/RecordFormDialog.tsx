@@ -17,26 +17,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-const CREATE_RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "SRV"];
-const EDIT_RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "PTR"];
+import {
+  recordFormTypeOptions,
+  recordPriorityTypes,
+  type RecordFormValues,
+} from "@/lib/client-schemas";
 
 interface RecordFormDialogProps {
   open: boolean;
   mode: "create" | "edit";
   zoneDomain: string;
   submitting: boolean;
-  name: string;
-  type: string;
-  value: string;
-  ttl: string;
-  priority: string;
+  values: RecordFormValues;
+  errors: Partial<Record<keyof RecordFormValues, string>>;
   onOpenChange: (open: boolean) => void;
-  onNameChange: (value: string) => void;
-  onTypeChange: (value: string) => void;
-  onValueChange: (value: string) => void;
-  onTtlChange: (value: string) => void;
-  onPriorityChange: (value: string) => void;
+  onFieldChange: <K extends keyof RecordFormValues>(field: K, value: RecordFormValues[K]) => void;
   onSubmit: () => void;
 }
 
@@ -45,20 +40,12 @@ export function RecordFormDialog({
   mode,
   zoneDomain,
   submitting,
-  name,
-  type,
-  value,
-  ttl,
-  priority,
+  values,
+  errors,
   onOpenChange,
-  onNameChange,
-  onTypeChange,
-  onValueChange,
-  onTtlChange,
-  onPriorityChange,
+  onFieldChange,
   onSubmit,
 }: RecordFormDialogProps) {
-  const recordTypes = mode === "create" ? CREATE_RECORD_TYPES : EDIT_RECORD_TYPES;
   const title = mode === "create" ? "Add DNS Record" : "Edit DNS Record";
   const description =
     mode === "create"
@@ -80,28 +67,33 @@ export function RecordFormDialog({
             </Label>
             <Input
               id={`${mode}-name`}
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
-              className="col-span-3"
+              value={values.name}
+              onChange={(event) => onFieldChange("name", event.target.value)}
+              className="col-span-3 font-mono"
               placeholder="@ or subdomain"
             />
+            {errors.name ? <p className="col-span-3 col-start-2 text-xs text-destructive">{errors.name}</p> : null}
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor={`${mode}-type`} className="text-right">
               Type
             </Label>
-            <Select value={type} onValueChange={onTypeChange}>
+            <Select
+              value={values.type}
+              onValueChange={(value) => onFieldChange("type", value as RecordFormValues["type"])}
+            >
               <SelectTrigger id={`${mode}-type`} className="col-span-3">
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
-                {recordTypes.map((recordType) => (
+                {recordFormTypeOptions.map((recordType) => (
                   <SelectItem key={recordType} value={recordType}>
                     {recordType}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {errors.type ? <p className="col-span-3 col-start-2 text-xs text-destructive">{errors.type}</p> : null}
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor={`${mode}-value`} className="text-right">
@@ -109,11 +101,12 @@ export function RecordFormDialog({
             </Label>
             <Input
               id={`${mode}-value`}
-              value={value}
-              onChange={(event) => onValueChange(event.target.value)}
-              className="col-span-3"
+              value={values.value}
+              onChange={(event) => onFieldChange("value", event.target.value)}
+              className="col-span-3 font-mono"
               placeholder="IP or domain"
             />
+            {errors.value ? <p className="col-span-3 col-start-2 text-xs text-destructive">{errors.value}</p> : null}
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor={`${mode}-ttl`} className="text-right">
@@ -121,27 +114,32 @@ export function RecordFormDialog({
             </Label>
             <Input
               id={`${mode}-ttl`}
-              value={ttl}
-              onChange={(event) => onTtlChange(event.target.value)}
-              className="col-span-3"
+              value={values.ttl}
+              onChange={(event) => onFieldChange("ttl", event.target.value)}
+              className="col-span-3 font-mono"
             />
+            {errors.ttl ? <p className="col-span-3 col-start-2 text-xs text-destructive">{errors.ttl}</p> : null}
           </div>
-          {type === "MX" && (
+          {recordPriorityTypes.includes(values.type as (typeof recordPriorityTypes)[number]) && (
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor={`${mode}-priority`} className="text-right">
                 Priority
               </Label>
               <Input
                 id={`${mode}-priority`}
-                value={priority}
-                onChange={(event) => onPriorityChange(event.target.value)}
-                className="col-span-3"
+                value={values.priority}
+                onChange={(event) => onFieldChange("priority", event.target.value)}
+                className="col-span-3 font-mono"
                 placeholder="10"
               />
+              {errors.priority ? <p className="col-span-3 col-start-2 text-xs text-destructive">{errors.priority}</p> : null}
             </div>
           )}
         </div>
         <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button onClick={onSubmit} disabled={submitting}>
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {actionLabel}

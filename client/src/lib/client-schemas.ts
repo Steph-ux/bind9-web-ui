@@ -414,3 +414,68 @@ export type ZoneCreateFormValues = z.infer<typeof zoneCreateFormSchema>;
 export function validateZoneCreateForm(values: ZoneCreateFormValues) {
     return zoneCreateFormSchema.safeParse(values);
 }
+
+export const recordFormTypeOptions = [
+    "A",
+    "AAAA",
+    "CNAME",
+    "MX",
+    "TXT",
+    "NS",
+    "PTR",
+    "SRV",
+    "CAA",
+    "TLSA",
+    "DS",
+    "DNSKEY",
+] as const;
+
+export const recordPriorityTypes = ["MX", "SRV"] as const;
+
+const recordNameSchema = z
+    .string()
+    .trim()
+    .min(1, "Record name is required")
+    .max(255, "Record name is too long")
+    .regex(/^[a-zA-Z0-9*_.@-]+$/, "Record name contains invalid characters");
+
+const recordValueSchema = z
+    .string()
+    .trim()
+    .min(1, "Record value is required")
+    .max(4096, "Record value is too long");
+
+const recordTtlSchema = z
+    .string()
+    .trim()
+    .min(1, "TTL is required")
+    .refine((value) => /^\d+$/.test(value), "TTL must be a number")
+    .refine((value) => Number.parseInt(value, 10) >= 1, "TTL must be at least 1");
+
+const recordPrioritySchema = z
+    .string()
+    .trim()
+    .refine((value) => value === "" || /^\d+$/.test(value), "Priority must be a number")
+    .refine((value) => value === "" || Number.parseInt(value, 10) >= 0, "Priority cannot be negative");
+
+export const recordFormSchema = z.object({
+    name: recordNameSchema,
+    type: z.enum(recordFormTypeOptions),
+    value: recordValueSchema,
+    ttl: recordTtlSchema,
+    priority: recordPrioritySchema,
+}).superRefine((form, ctx) => {
+    if (recordPriorityTypes.includes(form.type as (typeof recordPriorityTypes)[number]) && !form.priority.trim()) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["priority"],
+            message: "Priority is required for MX and SRV records",
+        });
+    }
+});
+
+export type RecordFormValues = z.infer<typeof recordFormSchema>;
+
+export function validateRecordForm(values: RecordFormValues) {
+    return recordFormSchema.safeParse(values);
+}
