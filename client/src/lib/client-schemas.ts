@@ -300,3 +300,117 @@ export function validateNotificationChannelForm(
         }
     }).safeParse(values);
 }
+
+const zoneDomainSchema = z
+    .string()
+    .trim()
+    .min(1, "Domain is required")
+    .max(255, "Domain is too long")
+    .regex(/^[a-zA-Z0-9.-]+\.?$/, "Domain contains invalid characters");
+
+const zoneAdminSchema = z
+    .string()
+    .trim()
+    .max(255, "Admin email is too long")
+    .refine((value) => value === "" || /^[a-zA-Z0-9.-]+$/.test(value), "Admin email must use the BIND host-style format");
+
+const zoneServerListSchema = z.string().trim().max(2048, "Server list is too long");
+const zoneTypeSchema = z.enum(["master", "slave", "forward"]);
+const zoneNetworkSchema = z.string().trim().max(64, "Network is too long");
+
+function parseZoneServerList(value: string) {
+    return value
+        .split(/[,\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function isValidZoneServer(value: string) {
+    const ipv4 = value.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+    if (ipv4) {
+        return value.split(".").every((part) => Number(part) >= 0 && Number(part) <= 255);
+    }
+    return /^[a-fA-F0-9:]+$/.test(value);
+}
+
+function isSupportedReverseCidr(value: string) {
+    const match = value.trim().match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+    if (!match) {
+        return false;
+    }
+
+    const octets = match[1].split(".").map((part) => Number(part));
+    const prefix = Number(match[2]);
+
+    if (octets.some((part) => part < 0 || part > 255)) {
+        return false;
+    }
+
+    return [8, 16, 24].includes(prefix);
+}
+
+export const zoneCreateFormSchema = z.object({
+    domain: zoneDomainSchema,
+    zoneType: zoneTypeSchema,
+    adminEmail: zoneAdminSchema,
+    masterServers: zoneServerListSchema,
+    forwarders: zoneServerListSchema,
+    autoReverse: z.boolean(),
+    network: zoneNetworkSchema,
+}).superRefine((form, ctx) => {
+    if (form.zoneType === "slave") {
+        const servers = parseZoneServerList(form.masterServers);
+        if (servers.length === 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["masterServers"],
+                message: "Slave zones require at least one master server",
+            });
+        } else if (servers.some((server) => !isValidZoneServer(server))) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["masterServers"],
+                message: "Use only IPv4 or IPv6 addresses in the master list",
+            });
+        }
+    }
+
+    if (form.zoneType === "forward") {
+        const servers = parseZoneServerList(form.forwarders);
+        if (servers.length === 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["forwarders"],
+                message: "Forward zones require at least one forwarder",
+            });
+        } else if (servers.some((server) => !isValidZoneServer(server))) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["forwarders"],
+                message: "Use only IPv4 or IPv6 addresses in the forwarder list",
+            });
+        }
+    }
+
+    if (form.zoneType === "master" && form.autoReverse) {
+        if (!form.network.trim()) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["network"],
+                message: "Network is required when auto-reverse is enabled",
+            });
+        } else if (!isSupportedReverseCidr(form.network)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["network"],
+                message: "Use a valid IPv4 CIDR with /8, /16 or /24",
+            });
+        }
+    }
+});
+
+export type ZoneCreateFormValues = z.infer<typeof zoneCreateFormSchema>;
+
+export function validateZoneCreateForm(values: ZoneCreateFormValues) {
+    return zoneCreateFormSchema.safeParse(values);
+}

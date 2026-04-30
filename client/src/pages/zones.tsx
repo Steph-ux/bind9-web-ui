@@ -15,6 +15,10 @@ import {
   updateZone,
   type ZoneData,
 } from "@/lib/api";
+import {
+  validateZoneCreateForm,
+  type ZoneCreateFormValues,
+} from "@/lib/client-schemas";
 import { useToast } from "@/hooks/use-toast";
 import {
   ZoneCreateDialog,
@@ -31,13 +35,16 @@ export default function Zones() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newDomain, setNewDomain] = useState("");
-  const [newType, setNewType] = useState("master");
-  const [newAdmin, setNewAdmin] = useState("");
-  const [newMasterServers, setNewMasterServers] = useState("");
-  const [newForwarders, setNewForwarders] = useState("");
-  const [autoReverse, setAutoReverse] = useState(false);
-  const [network, setNetwork] = useState("");
+  const [createValues, setCreateValues] = useState<ZoneCreateFormValues>({
+    domain: "",
+    zoneType: "master",
+    adminEmail: "",
+    masterServers: "",
+    forwarders: "",
+    autoReverse: false,
+    network: "",
+  });
+  const [createErrors, setCreateErrors] = useState<Partial<Record<keyof ZoneCreateFormValues, string>>>({});
   const [syncing, setSyncing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ZoneData | null>(null);
   const [replicationSavingId, setReplicationSavingId] = useState<string | null>(null);
@@ -70,38 +77,91 @@ export default function Zones() {
   const secondaryZones = zones.filter(
     (zone) => zone.type === "slave" || zone.type === "forward",
   ).length;
+  const createValidation = validateZoneCreateForm(createValues);
+  const createValidationMessage = createValidation.success
+    ? null
+    : createValidation.error.issues[0]?.message || "Invalid zone configuration";
 
   const resetCreateForm = () => {
-    setNewDomain("");
-    setNewType("master");
-    setNewAdmin("");
-    setNewMasterServers("");
-    setNewForwarders("");
-    setAutoReverse(false);
-    setNetwork("");
+    setCreateValues({
+      domain: "",
+      zoneType: "master",
+      adminEmail: "",
+      masterServers: "",
+      forwarders: "",
+      autoReverse: false,
+      network: "",
+    });
+    setCreateErrors({});
+  };
+
+  const updateCreateField = <K extends keyof ZoneCreateFormValues>(
+    field: K,
+    value: ZoneCreateFormValues[K],
+  ) => {
+    setCreateValues((current) => {
+      const next = { ...current, [field]: value };
+
+      if (field === "zoneType") {
+        if (value !== "slave") {
+          next.masterServers = "";
+        }
+        if (value !== "forward") {
+          next.forwarders = "";
+        }
+        if (value !== "master") {
+          next.autoReverse = false;
+          next.network = "";
+        }
+      }
+
+      if (field === "autoReverse" && value === false) {
+        next.network = "";
+      }
+
+      return next;
+    });
+    setCreateErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const handleCreate = async () => {
-    if (!newDomain.trim()) {
-      toast({ title: "Error", description: "Domain is required", variant: "destructive" });
+    const validation = validateZoneCreateForm(createValues);
+    if (!validation.success) {
+      const nextErrors: Partial<Record<keyof ZoneCreateFormValues, string>> = {};
+      for (const issue of validation.error.issues) {
+        const key = issue.path[0] as keyof ZoneCreateFormValues | undefined;
+        if (key && !nextErrors[key]) {
+          nextErrors[key] = issue.message;
+        }
+      }
+      setCreateErrors(nextErrors);
+      toast({ title: "Invalid zone form", description: validation.error.issues[0]?.message, variant: "destructive" });
       return;
     }
 
+    setCreateErrors({});
+
     try {
       setCreating(true);
+      const values = validation.data;
       await createZone({
-        domain: newDomain.trim(),
-        type: newType,
-        adminEmail: newAdmin.trim() || undefined,
-        masterServers: newType === "slave" ? newMasterServers.trim() : undefined,
-        forwarders: newType === "forward" ? newForwarders.trim() : undefined,
-        autoReverse: newType === "master" ? autoReverse : undefined,
-        network: newType === "master" && autoReverse ? network.trim() : undefined,
+        domain: values.domain,
+        type: values.zoneType,
+        adminEmail: values.adminEmail || undefined,
+        masterServers: values.zoneType === "slave" ? values.masterServers : undefined,
+        forwarders: values.zoneType === "forward" ? values.forwarders : undefined,
+        autoReverse: values.zoneType === "master" ? values.autoReverse : undefined,
+        network: values.zoneType === "master" && values.autoReverse ? values.network : undefined,
       });
-      toast({ title: "Success", description: `Zone ${newDomain} created` });
+      toast({ title: "Success", description: `Zone ${values.domain} created` });
       setIsDialogOpen(false);
       resetCreateForm();
-      fetchZones();
+      await fetchZones();
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
     } finally {
@@ -114,7 +174,7 @@ export default function Zones() {
       await deleteZone(zone.id);
       toast({ title: "Deleted", description: `Zone ${zone.domain} removed` });
       setDeleteTarget(null);
-      fetchZones();
+      await fetchZones();
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
     }
@@ -197,7 +257,7 @@ export default function Zones() {
                         title: "Sync complete",
                         description: `${result.synced} zones synchronized, ${result.skipped} skipped, ${result.total} found in BIND9.`,
                       });
-                      fetchZones();
+                      await fetchZones();
                     } catch (requestError: any) {
                       toast({
                         title: "Sync failed",
@@ -289,22 +349,18 @@ export default function Zones() {
 
       <ZoneCreateDialog
         open={isDialogOpen}
-        onOpenChange={setIsDialogOpen}
+        onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            resetCreateForm();
+          }
+        }}
         creating={creating}
-        domain={newDomain}
-        zoneType={newType}
-        adminEmail={newAdmin}
-        masterServers={newMasterServers}
-        forwarders={newForwarders}
-        autoReverse={autoReverse}
-        network={network}
-        onDomainChange={setNewDomain}
-        onZoneTypeChange={setNewType}
-        onAdminEmailChange={setNewAdmin}
-        onMasterServersChange={setNewMasterServers}
-        onForwardersChange={setNewForwarders}
-        onAutoReverseChange={setAutoReverse}
-        onNetworkChange={setNetwork}
+        values={createValues}
+        errors={createErrors}
+        validationMessage={createValidationMessage}
+        autoReverse={createValues.autoReverse}
+        onFieldChange={updateCreateField}
         onSubmit={handleCreate}
       />
 
