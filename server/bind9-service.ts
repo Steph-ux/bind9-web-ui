@@ -243,7 +243,7 @@ class Bind9Service {
         return this.uniqueEntries(zoneNames);
     }
 
-    private async discoverRpzZones(): Promise<Array<{ zoneName: string; filePath: string }>> {
+    async discoverRpzZones(): Promise<Array<{ zoneName: string; filePath: string }>> {
         let zoneNames: string[] = [];
 
         try {

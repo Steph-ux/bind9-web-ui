@@ -335,6 +335,7 @@ export interface RpzEntry {
     target: string | null;
     comment: string | null;
     sourceName?: string | null;
+    sourceZone?: string | null;
     createdAt?: string;
     updatedAt?: string;
 }
@@ -359,6 +360,7 @@ export interface RpzStats {
     nxdomain: number;
     nodata: number;
     redirect: number;
+    sourceZones: string[];
 }
 
 export interface RpzImportResult {
@@ -390,7 +392,7 @@ export const deleteRpzEntry = (id: string) =>
 export const clearRpzEntries = () =>
     request<{ message: string }>("/rpz", { method: "DELETE" });
 export const syncRpzEntries = () =>
-    request<{ message: string }>("/rpz/sync", { method: "POST" });
+    request<{ message: string; imported: number; skipped: number; zones: string[] }>("/rpz/sync", { method: "POST" });
 export const importRpzEntries = (data: { content: string; sourceName: string }) =>
     request<RpzImportResult>("/rpz/import", { method: "POST", body: JSON.stringify(data) });
 export const importRpzEntriesFromUrl = (data: { url: string; sourceName: string }) =>

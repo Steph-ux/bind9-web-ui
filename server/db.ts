@@ -92,6 +92,7 @@ if (DB_TYPE === "sqlite") {
       type TEXT NOT NULL DEFAULT 'nxdomain',
       target TEXT DEFAULT '',
       comment TEXT DEFAULT '',
+      source_zone TEXT DEFAULT '',
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS connections (
@@ -231,6 +232,7 @@ if (DB_TYPE === "sqlite") {
   try { sqlite.exec(`ALTER TABLE connections ADD COLUMN name TEXT NOT NULL DEFAULT 'default'`); } catch {}
   // Migrate: rpz_entries may be missing comment column on existing DBs
   try { sqlite.exec(`ALTER TABLE rpz_entries ADD COLUMN comment TEXT DEFAULT ''`); } catch {}
+  try { sqlite.exec(`ALTER TABLE rpz_entries ADD COLUMN source_zone TEXT DEFAULT ''`); } catch {}
   // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
   try { sqlite.exec(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Migrate: add replication_enabled column to zones
@@ -267,6 +269,7 @@ if (DB_TYPE === "sqlite") {
 
   // Migrate: rpz_entries may be missing comment column on existing DBs
   try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT ''`); } catch {}
+  try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS source_zone TEXT DEFAULT ''`); } catch {}
   // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Migrate: add replication_enabled column to zones
@@ -295,6 +298,7 @@ if (DB_TYPE === "sqlite") {
 
   // Migrate: rpz_entries may be missing comment column on existing DBs
   try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT ''`); } catch {}
+  try { await pool.query(`ALTER TABLE rpz_entries ADD COLUMN IF NOT EXISTS source_zone TEXT DEFAULT ''`); } catch {}
   // Migrate: fix rpz_entries type default from old 'CNAME' to 'nxdomain'
   try { await pool.query(`UPDATE rpz_entries SET type = 'nxdomain' WHERE type = 'CNAME'`); } catch {}
   // Migrate: add replication_enabled column to zones

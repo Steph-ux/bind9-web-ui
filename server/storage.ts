@@ -128,7 +128,7 @@ export interface IStorage {
   createBackup(data: Omit<Backup, "id" | "createdAt">): Promise<Backup>;
   deleteBackup(id: string): Promise<boolean>;
 
-  getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>>;
+  getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string; sourceZone?: string }>>;
   createRpzEntry(entry: InsertRpzEntry): Promise<RpzEntry>;
   deleteRpzEntry(id: string): Promise<boolean>;
   getRpzExistingNames(names: string[]): Promise<Set<string>>;
@@ -141,7 +141,7 @@ export interface IStorage {
     limit: number;
     totalPages: number;
   }>;
-  getRpzStats(): Promise<{ total: number; nxdomain: number; nodata: number; redirect: number }>;
+  getRpzStats(): Promise<{ total: number; nxdomain: number; nodata: number; redirect: number; sourceZones: string[] }>;
   // Logs
   getLogs(filter?: LogFilter): Promise<LogEntry[]>;
   insertLog(entry: InsertLogEntry): Promise<LogEntry>;
@@ -485,16 +485,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   /** Fetch only name/type/target for BIND9 zone file writing (avoids loading full rows) */
-  async getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string }>> {
+  async getRpzZoneData(): Promise<Array<{ name: string; type: string; target?: string; sourceZone?: string }>> {
     await this.ensureDb();
-    const rows = await db.select({ name: rpzEntries.name, type: rpzEntries.type, target: rpzEntries.target }).from(rpzEntries);
-    return rows.map((r: { name: string; type: string; target: string | null }) => ({ name: r.name, type: r.type, target: r.target || undefined }));
+    const rows = await db.select({
+      name: rpzEntries.name,
+      type: rpzEntries.type,
+      target: rpzEntries.target,
+      sourceZone: rpzEntries.sourceZone,
+    }).from(rpzEntries);
+    return rows.map((r: { name: string; type: string; target: string | null; sourceZone: string | null }) => ({
+      name: r.name,
+      type: r.type,
+      target: r.target || undefined,
+      sourceZone: r.sourceZone || undefined,
+    }));
   }
 
   async createRpzEntry(insertEntry: InsertRpzEntry): Promise<RpzEntry> {
     await this.ensureDb();
     const [entry] = await db.insert(rpzEntries).values({
       ...insertEntry,
+      sourceZone: insertEntry.sourceZone || "",
       createdAt: new Date().toISOString(),
     }).returning();
     return entry;
@@ -529,6 +540,7 @@ export class DatabaseStorage implements IStorage {
     for (let i = 0; i < entries.length; i += BATCH_SIZE) {
       const batch = entries.slice(i, i + BATCH_SIZE).map(e => ({
         ...e,
+        sourceZone: e.sourceZone || "",
         createdAt: new Date().toISOString(),
       }));
       try {
@@ -590,20 +602,25 @@ export class DatabaseStorage implements IStorage {
     return { entries, total, page: opts.page, limit: opts.limit, totalPages };
   }
 
-  async getRpzStats(): Promise<{ total: number; nxdomain: number; nodata: number; redirect: number }> {
+  async getRpzStats(): Promise<{ total: number; nxdomain: number; nodata: number; redirect: number; sourceZones: string[] }> {
     await this.ensureDb();
     const result = await db.select({
       type: rpzEntries.type,
       count: sql<number>`count(*)`,
     }).from(rpzEntries).groupBy(rpzEntries.type);
+    const zoneRows = await db.select({ sourceZone: rpzEntries.sourceZone }).from(rpzEntries);
 
-    const stats = { total: 0, nxdomain: 0, nodata: 0, redirect: 0 };
+    const stats = { total: 0, nxdomain: 0, nodata: 0, redirect: 0, sourceZones: [] as string[] };
     for (const row of result) {
       stats.total += Number(row.count);
       if (row.type === "nxdomain") stats.nxdomain = Number(row.count);
       if (row.type === "nodata") stats.nodata = Number(row.count);
       if (row.type === "redirect") stats.redirect = Number(row.count);
     }
+    const sourceZones = zoneRows
+      .map((row: { sourceZone: string | null }) => row.sourceZone || "")
+      .filter((value: string) => Boolean(value));
+    stats.sourceZones = Array.from(new Set<string>(sourceZones)).sort();
     return stats;
   }
 

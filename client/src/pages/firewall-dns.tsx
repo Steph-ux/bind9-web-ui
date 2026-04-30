@@ -374,10 +374,10 @@ export default function FirewallDNS() {
                         <AlertDescription>
                             The active server already exposes the following response-policy zone set:
                             <span className="mx-1 font-mono">{rpzSummary.zoneName}</span>.
-                            This screen edits the application-synchronized RPZ inventory, so use
-                            <span className="mx-1 font-semibold">Sync from BIND9</span>
-                            before expecting pre-existing server rules to appear here.
-                            {multipleRpzZones ? " When several RPZ zones exist, the table does not merge every zone into one editable dataset." : ""}
+                            This screen now keeps the synchronized inventory with a source-zone marker for each
+                            rule. New rules and imports are assigned to the primary managed RPZ zone unless a
+                            source zone already exists.
+                            {multipleRpzZones ? " Multiple RPZ zones are active, so the table shows which zone each synchronized rule came from." : ""}
                         </AlertDescription>
                     </Alert>
                 ) : null}

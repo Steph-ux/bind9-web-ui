@@ -283,6 +283,7 @@ export const rpzEntries = sqliteTable("rpz_entries", {
   type: text("type", { enum: ["nxdomain", "nodata", "redirect"] }).notNull().default("nxdomain"),
   target: text("target").default(""), // IP or CNAME if redirect
   comment: text("comment").default(""),
+  sourceZone: text("source_zone").default(""),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
@@ -291,6 +292,7 @@ export const insertRpzEntrySchema = createInsertSchema(rpzEntries).pick({
   type: true,
   target: true,
   comment: true,
+  sourceZone: true,
 });
 export type InsertRpzEntry = z.infer<typeof insertRpzEntrySchema>;
 export type RpzEntry = typeof rpzEntries.$inferSelect;

@@ -175,6 +175,7 @@ export const rpzEntries = mysqlTable("rpz_entries", {
   type: mysqlEnum("type", ["nxdomain", "nodata", "redirect"]).notNull().default("nxdomain"),
   target: varchar("target", { length: 255 }).default(""),
   comment: text("comment").default(""),
+  sourceZone: varchar("source_zone", { length: 255 }).default(""),
   createdAt: varchar("created_at", { length: 64 }).notNull().$defaultFn(() => new Date().toISOString()),
 });
 
@@ -183,6 +184,7 @@ export const insertRpzEntrySchema = createInsertSchema(rpzEntries).pick({
   type: true,
   target: true,
   comment: true,
+  sourceZone: true,
 });
 export type InsertRpzEntry = z.infer<typeof insertRpzEntrySchema>;
 export type RpzEntry = typeof rpzEntries.$inferSelect;

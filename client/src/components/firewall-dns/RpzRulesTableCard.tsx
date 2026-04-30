@@ -94,6 +94,7 @@ export function RpzRulesTableCard({
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Domain</TableHead>
+                                <TableHead>Zone</TableHead>
                                 <TableHead>Action</TableHead>
                                 <TableHead>Target</TableHead>
                                 <TableHead>Comment</TableHead>
@@ -103,7 +104,7 @@ export function RpzRulesTableCard({
                         <TableBody>
                             {!entries.length ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                                         {totalEntries
                                             ? "No rules match your filter."
                                             : "No rules defined. Add a rule or import a blocklist to get started."}
@@ -117,6 +118,15 @@ export function RpzRulesTableCard({
                                                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                                                 <span className="break-all">{entry.name}</span>
                                             </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            {entry.sourceZone ? (
+                                                <Badge variant="outline" className="font-mono text-xs">
+                                                    {entry.sourceZone}
+                                                </Badge>
+                                            ) : (
+                                                <span className="text-muted-foreground">-</span>
+                                            )}
                                         </TableCell>
                                         <TableCell>
                                             <Badge variant={entry.type === "redirect" ? "secondary" : "destructive"}>

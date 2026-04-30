@@ -14,6 +14,81 @@ type RegisterRpzRoutesOptions = {
 };
 
 let rpzSyncLock = Promise.resolve();
+const DEFAULT_RPZ_ZONE = "rpz.intra";
+const SUPPORTED_RPZ_TYPES = new Set(["nxdomain", "nodata", "redirect"]);
+
+type RpzSnapshotEntry = {
+  name: string;
+  type: string;
+  target: string | null;
+  comment: string | null;
+  sourceZone: string | null;
+};
+
+type RpzHydrationResult = {
+  imported: number;
+  skipped: number;
+  zones: string[];
+};
+
+async function getConfiguredRpzZones(): Promise<Array<{ zoneName: string; filePath: string }>> {
+  return bind9Service.discoverRpzZones();
+}
+
+async function getDefaultRpzZoneName(): Promise<string> {
+  const zones = await getConfiguredRpzZones();
+  return zones[0]?.zoneName || DEFAULT_RPZ_ZONE;
+}
+
+async function hydrateRpzSnapshotFromBind(options: { force?: boolean } = {}): Promise<RpzHydrationResult> {
+  if (!(await bind9Service.isAvailable())) {
+    return { imported: 0, skipped: 0, zones: [] };
+  }
+
+  if (!options.force) {
+    const currentStats = await storage.getRpzStats();
+    if (currentStats.total > 0) {
+      return { imported: 0, skipped: 0, zones: currentStats.sourceZones };
+    }
+  }
+
+  const configuredZones = await getConfiguredRpzZones();
+  if (configuredZones.length === 0) {
+    return { imported: 0, skipped: 0, zones: [] };
+  }
+
+  const mergedEntries = new Map<string, z.infer<typeof insertRpzEntrySchema>>();
+  let skipped = 0;
+
+  for (const zone of configuredZones) {
+    const zoneEntries = await bind9Service.readRpzZoneFile(zone.zoneName, zone.filePath);
+    for (const entry of zoneEntries) {
+      if (!SUPPORTED_RPZ_TYPES.has(entry.type)) {
+        skipped += 1;
+        continue;
+      }
+
+      const normalizedName = String(entry.name).trim().toLowerCase();
+      if (!normalizedName || mergedEntries.has(normalizedName)) {
+        skipped += 1;
+        continue;
+      }
+
+      mergedEntries.set(normalizedName, {
+        name: normalizedName,
+        type: entry.type as "nxdomain" | "nodata" | "redirect",
+        target: entry.target || "",
+        comment: entry.comment || `Synced from BIND9 zone ${zone.zoneName}`,
+        sourceZone: zone.zoneName,
+      });
+    }
+  }
+
+  await storage.clearRpzEntries();
+  const entriesToInsert = Array.from(mergedEntries.values());
+  const imported = entriesToInsert.length > 0 ? await storage.createRpzEntriesBatch(entriesToInsert) : 0;
+  return { imported, skipped, zones: configuredZones.map((zone) => zone.zoneName) };
+}
 
 async function syncRpzZone(): Promise<void> {
   const previous = rpzSyncLock;
@@ -30,33 +105,46 @@ async function syncRpzZone(): Promise<void> {
     }
 
     const zoneData = await storage.getRpzZoneData();
-    const discovered = await bind9Service.discoverRpzZone();
-    const zoneName = discovered?.zoneName || "rpz.intra";
+    let discoveredZones = await getConfiguredRpzZones();
+    const defaultZoneName = discoveredZones[0]?.zoneName || DEFAULT_RPZ_ZONE;
 
-    if (!discovered) {
+    if (discoveredZones.length === 0) {
       if (!summary.writablePaths.namedConfOptions || !summary.includes.namedConfLocalIncluded || !summary.writablePaths.namedConfLocal) {
         throw new Error("RPZ is not configured and the active server connection cannot update named.conf.options and named.conf.local");
       }
-    } else {
-      await bind9Service.assertWritablePath(discovered.filePath, "write the RPZ zone file");
+      await bind9Service.ensureRpzConfigured(defaultZoneName);
+      discoveredZones = await getConfiguredRpzZones();
     }
 
-    await bind9Service.ensureRpzConfigured(zoneName);
-    const resolved = await bind9Service.discoverRpzZone();
-    const filePath = resolved?.filePath || discovered?.filePath;
-    if (!filePath) {
-      throw new Error("Unable to resolve the RPZ zone file path");
+    if (discoveredZones.length === 0) {
+      throw new Error("Unable to resolve RPZ zone definitions after configuration");
     }
 
-    await bind9Service.assertWritablePath(filePath, "write the RPZ zone file");
-    await bind9Service.writeRpzZone(zoneName, zoneData, filePath);
+    const knownZones = new Set(discoveredZones.map((zone) => zone.zoneName));
+    const groupedEntries = new Map<string, Array<{ name: string; type: string; target?: string }>>();
+    for (const zone of discoveredZones) {
+      groupedEntries.set(zone.zoneName, []);
+    }
+
+    for (const entry of zoneData) {
+      const sourceZone = entry.sourceZone && knownZones.has(entry.sourceZone) ? entry.sourceZone : defaultZoneName;
+      const zoneEntries = groupedEntries.get(sourceZone) || [];
+      zoneEntries.push({ name: entry.name, type: entry.type, target: entry.target });
+      groupedEntries.set(sourceZone, zoneEntries);
+    }
+
+    for (const zone of discoveredZones) {
+      await bind9Service.assertWritablePath(zone.filePath, `write the RPZ zone file for ${zone.zoneName}`);
+      await bind9Service.writeRpzZone(zone.zoneName, groupedEntries.get(zone.zoneName) || [], zone.filePath);
+    }
+
     await bind9Service.reload();
   } finally {
     release!();
   }
 }
 
-async function restoreRpzSnapshot(snapshot: Array<{ name: string; type: string; target: string | null; comment: string | null }>): Promise<void> {
+async function restoreRpzSnapshot(snapshot: RpzSnapshotEntry[]): Promise<void> {
   await storage.clearRpzEntries();
   if (snapshot.length === 0) {
     return;
@@ -68,6 +156,7 @@ async function restoreRpzSnapshot(snapshot: Array<{ name: string; type: string; 
       type: entry.type as any,
       target: entry.target || "",
       comment: entry.comment || "",
+      sourceZone: entry.sourceZone || "",
     })),
   );
 }
@@ -80,6 +169,7 @@ export function registerRpzRoutes({
 }: RegisterRpzRoutesOptions) {
   app.get("/api/rpz", requireOperator, async (req: Request, res: Response) => {
     try {
+      await hydrateRpzSnapshotFromBind();
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 50));
       const search = String(req.query.search || "").trim();
@@ -93,6 +183,7 @@ export function registerRpzRoutes({
 
   app.get("/api/rpz/stats", requireOperator, async (_req: Request, res: Response) => {
     try {
+      await hydrateRpzSnapshotFromBind();
       const stats = await storage.getRpzStats();
       res.json(stats);
     } catch (error: any) {
@@ -126,6 +217,8 @@ export function registerRpzRoutes({
         return res.status(400).json({ message: "Comment contains invalid characters" });
       }
 
+      await hydrateRpzSnapshotFromBind();
+      data.sourceZone = data.sourceZone || await getDefaultRpzZoneName();
       const snapshot = await storage.getRpzEntries();
       const entry = await storage.createRpzEntry(data);
 
@@ -148,6 +241,7 @@ export function registerRpzRoutes({
   app.delete("/api/rpz/:id", requireOperator, async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
+      await hydrateRpzSnapshotFromBind();
       const snapshot = await storage.getRpzEntries();
       const deleted = await storage.deleteRpzEntry(id);
       if (!deleted) {
@@ -172,9 +266,13 @@ export function registerRpzRoutes({
       if (!(await bind9Service.isAvailable())) {
         return res.status(503).json({ message: "BIND9 is not available" });
       }
-      const discovered = await bind9Service.discoverRpzZone();
-      const zoneName = discovered?.zoneName || "rpz.intra";
-      const entries = await bind9Service.readRpzZoneFile(zoneName, discovered?.filePath);
+      const discoveredZones = await getConfiguredRpzZones();
+      const mergedEntries: Array<{ name: string; type: string; target: string; comment?: string; sourceZone?: string }> = [];
+      for (const zone of discoveredZones) {
+        const entries = await bind9Service.readRpzZoneFile(zone.zoneName, zone.filePath);
+        mergedEntries.push(...entries.map((entry) => ({ ...entry, sourceZone: zone.zoneName })));
+      }
+      const entries = mergedEntries.sort((left, right) => left.name.localeCompare(right.name));
       res.json(entries);
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
@@ -187,37 +285,24 @@ export function registerRpzRoutes({
         return res.status(503).json({ message: "BIND9 is not available" });
       }
       const snapshot = await storage.getRpzEntries();
-      const discovered = await bind9Service.discoverRpzZone();
-      const zoneName = discovered?.zoneName || "rpz.intra";
-      const zoneEntries = await bind9Service.readRpzZoneFile(zoneName, discovered?.filePath);
-      const dbNames = await storage.getRpzExistingNames(zoneEntries.map((entry) => entry.name));
-
-      const newEntries = zoneEntries.filter(
-        (entry) => !dbNames.has(entry.name) && ["nxdomain", "nodata", "redirect"].includes(entry.type),
-      );
-      const skipped = zoneEntries.length - newEntries.length;
-      const entriesToInsert = newEntries.map((entry) => ({
-        name: entry.name,
-        type: entry.type as any,
-        target: entry.target || "",
-        comment: entry.comment || "Synced from BIND9 zone file",
-      }));
-      const imported = entriesToInsert.length > 0 ? await storage.createRpzEntriesBatch(entriesToInsert) : 0;
-
       try {
-        await syncRpzZone();
+        const { imported, skipped, zones } = await hydrateRpzSnapshotFromBind({ force: true });
+        res.json({
+          message: `Synced ${imported} entries from ${zones.length} RPZ zone(s), ${skipped} skipped`,
+          imported,
+          skipped,
+          zones,
+        });
+
+        await storage.insertLog({
+          level: "INFO",
+          source: "rpz",
+          message: `RPZ sync: ${imported} imported, ${skipped} skipped from ${zones.length} zone(s)`,
+        });
       } catch (syncError: any) {
         await restoreRpzSnapshot(snapshot);
         return res.status(500).json({ message: `RPZ sync failed, the application state was restored: ${syncError.message}` });
       }
-
-      res.json({ message: `Synced ${imported} entries, ${skipped} skipped`, imported, skipped });
-
-      await storage.insertLog({
-        level: "INFO",
-        source: "rpz",
-        message: `RPZ sync: ${imported} imported, ${skipped} skipped from zone file`,
-      });
     } catch (error: any) {
       res.status(500).json({ message: safeError(500, error.message) });
     }
@@ -242,15 +327,18 @@ export function registerRpzRoutes({
         return res.status(400).json({ message: `Too many entries (${parsed.length}), maximum 1000000 per import` });
       }
 
+      await hydrateRpzSnapshotFromBind();
       const snapshot = await storage.getRpzEntries();
       const dbNames = await storage.getRpzExistingNames(parsed.map((entry) => entry.name));
       const newEntries = parsed.filter((entry) => !dbNames.has(entry.name));
       const duplicates = parsed.length - newEntries.length;
+      const defaultZoneName = await getDefaultRpzZoneName();
       const entriesToInsert = newEntries.map((entry) => ({
         name: entry.name,
         type: entry.type as any,
         target: entry.target || "",
         comment: entry.comment || `Imported from ${safeSource}`,
+        sourceZone: defaultZoneName,
       }));
       const imported = entriesToInsert.length > 0 ? await storage.createRpzEntriesBatch(entriesToInsert) : 0;
 
@@ -322,15 +410,18 @@ export function registerRpzRoutes({
         return res.status(400).json({ message: `Too many entries (${parsed.length}), maximum 1000000 per import` });
       }
 
+      await hydrateRpzSnapshotFromBind();
       const snapshot = await storage.getRpzEntries();
       const dbNames = await storage.getRpzExistingNames(parsed.map((entry) => entry.name));
       const newEntries = parsed.filter((entry) => !dbNames.has(entry.name));
       const duplicates = parsed.length - newEntries.length;
+      const defaultZoneName = await getDefaultRpzZoneName();
       const entriesToInsert = newEntries.map((entry) => ({
         name: entry.name,
         type: entry.type as any,
         target: entry.target || "",
         comment: entry.comment || `Imported from ${safeSource}`,
+        sourceZone: defaultZoneName,
       }));
       const imported = entriesToInsert.length > 0 ? await storage.createRpzEntriesBatch(entriesToInsert) : 0;
 
@@ -360,6 +451,7 @@ export function registerRpzRoutes({
 
   app.delete("/api/rpz", requireAdmin, async (_req: Request, res: Response) => {
     try {
+      await hydrateRpzSnapshotFromBind();
       const snapshot = await storage.getRpzEntries();
       const stats = await storage.getRpzStats();
       const count = stats.total;
