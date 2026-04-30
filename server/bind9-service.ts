@@ -1414,6 +1414,7 @@ zone "${safeDomain}" {
                 const name = match[1];
                 const cleanContent = match[2]
                     .replace(/\/\/.*$/gm, "") // remove comments
+                    .replace(/#.*$/gm, "")    // remove BIND-style comments
                     .replace(/\s+/g, " ")     // normalize whitespace
                     .split(";")               // split by semi-colon
                     .map(s => s.trim())
