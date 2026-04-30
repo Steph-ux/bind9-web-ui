@@ -1,368 +1,535 @@
-﻿import { useState, useEffect } from "react";
-import { useAuth } from "@/lib/auth-provider";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, CheckCircle2, KeyRound, RefreshCw, Shield } from "lucide-react";
+
+import {
+  AclFormDialog,
+  AclListCard,
+  TsigKeyFormDialog,
+  TsigKeysCard,
+  normalizeAclNetworks,
+} from "@/components/security";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Shield, Plus, Key, Lock, Trash2, Edit, Loader2 } from "lucide-react";
+import { MetricCard, PageHeader, PageState } from "@/components/layout";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { getAcls, createAcl, updateAcl, deleteAcl, getKeys, createKey, deleteKey, type AclData, type KeyData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-provider";
+import { validateAclForm, validateTsigKeyForm } from "@/lib/client-schemas";
+import {
+  createAcl,
+  createKey,
+  deleteAcl,
+  deleteKey,
+  getAcls,
+  getKeys,
+  getStatus,
+  updateAcl,
+  type AclData,
+  type KeyData,
+  type StatusData,
+} from "@/lib/api";
+
+type SecuritySnapshot = {
+  acls: AclData[];
+  keys: KeyData[];
+  status: StatusData | null;
+};
+
+type AclFormState = {
+  name: string;
+  networks: string;
+  comment: string;
+};
+
+type KeyFormState = {
+  name: string;
+  algorithm: "hmac-sha256" | "hmac-sha512" | "hmac-md5";
+  secret: string;
+};
+
+type DeleteTarget =
+  | { type: "acl"; item: AclData }
+  | { type: "key"; item: KeyData }
+  | null;
+
+function collectFieldErrors<T extends string>(
+  issues: Array<{ path: Array<string | number>; message: string }>,
+) {
+  const next: Partial<Record<T, string>> = {};
+  for (const issue of issues) {
+    const field = String(issue.path[0] ?? "") as T;
+    if (field && !next[field]) {
+      next[field] = issue.message;
+    }
+  }
+  return next;
+}
+
+function getAclCapabilityReason(status: StatusData | null, canManageDNS: boolean) {
+  if (!canManageDNS) {
+    return "Your role does not allow DNS security changes.";
+  }
+  if (!status?.management) {
+    return "";
+  }
+  if (!status.management.available) {
+    return "BIND9 management is unavailable on the current target.";
+  }
+  if (!status.management.includes.namedConfAclsIncluded) {
+    return "named.conf.acls is not included by the target's main BIND configuration.";
+  }
+  if (!status.management.writablePaths.namedConfAcls || !status.management.features.acls) {
+    return "named.conf.acls is not writable on the current target.";
+  }
+  return "";
+}
+
+function getKeyCapabilityReason(status: StatusData | null, canManageDNS: boolean) {
+  if (!canManageDNS) {
+    return "Your role does not allow DNS security changes.";
+  }
+  if (!status?.management) {
+    return "";
+  }
+  if (!status.management.available) {
+    return "BIND9 management is unavailable on the current target.";
+  }
+  if (!status.management.includes.namedConfKeysIncluded) {
+    return "named.conf.keys is not included by the target's main BIND configuration.";
+  }
+  if (!status.management.writablePaths.namedConfKeys || !status.management.features.keys) {
+    return "named.conf.keys is not writable on the current target.";
+  }
+  return "";
+}
 
 export default function ACLs() {
-  const [aclList, setAclList] = useState<AclData[]>([]);
-  const [keyList, setKeyList] = useState<KeyData[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [aclDialogOpen, setAclDialogOpen] = useState(false);
-  const [aclName, setAclName] = useState("");
-  const [aclNetworks, setAclNetworks] = useState("");
-  const [aclComment, setAclComment] = useState("");
-  const [editingAcl, setEditingAcl] = useState<AclData | null>(null);
-
-  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
-  const [keyName, setKeyName] = useState("");
-  const [keyAlgorithm, setKeyAlgorithm] = useState("hmac-sha256");
-  const [keySecret, setKeySecret] = useState("");
-
-  const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'acl' | 'key'; item: AclData | KeyData } | null>(null);
   const { toast } = useToast();
   const { canManageDNS } = useAuth();
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
+  const [aclDialogOpen, setAclDialogOpen] = useState(false);
+  const [editingAcl, setEditingAcl] = useState<AclData | null>(null);
+  const [aclForm, setAclForm] = useState<AclFormState>({
+    name: "",
+    networks: "",
+    comment: "",
+  });
+  const [aclErrors, setAclErrors] = useState<Partial<Record<"name" | "networks" | "comment", string>>>({});
+
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  const [keyForm, setKeyForm] = useState<KeyFormState>({
+    name: "",
+    algorithm: "hmac-sha256",
+    secret: "",
+  });
+  const [keyErrors, setKeyErrors] = useState<Partial<Record<"name" | "algorithm" | "secret", string>>>({});
+
+  const [aclSaving, setAclSaving] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const { data, error, isPending, isFetching, refetch } = useQuery<SecuritySnapshot>({
+    queryKey: ["security-page"],
+    queryFn: async () => {
       const [acls, keys] = await Promise.all([getAcls(), getKeys()]);
-      setAclList(acls);
-      setKeyList(keys);
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
+      const status = await getStatus().catch(() => null);
+      return { acls, keys, status };
+    },
+  });
 
-  useEffect(() => { fetchData(); }, []);
-
-  const handleSaveAcl = async () => {
-    if (!aclName.trim() || !aclNetworks.trim()) {
-      toast({ title: "Error", description: "Name and networks are required", variant: "destructive" });
-      return;
-    }
-    try {
-      setSaving(true);
-      if (editingAcl) {
-        await updateAcl(editingAcl.id, { name: aclName, networks: aclNetworks, comment: aclComment });
-        toast({ title: "Updated", description: `ACL '${aclName}' updated` });
-      } else {
-        await createAcl({ name: aclName, networks: aclNetworks, comment: aclComment || undefined });
-        toast({ title: "Created", description: `ACL '${aclName}' created` });
-      }
-      setAclDialogOpen(false);
-      resetAclForm();
-      fetchData();
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEditAcl = (acl: AclData) => {
-    setEditingAcl(acl);
-    setAclName(acl.name);
-    setAclNetworks(acl.networks);
-    setAclComment(acl.comment || "");
-    setAclDialogOpen(true);
-  };
-
-  const handleDeleteAcl = async (acl: AclData) => {
-    try {
-      await deleteAcl(acl.id);
-      toast({ title: "Deleted", description: `ACL '${acl.name}' removed` });
-      setDeleteTarget(null);
-      fetchData();
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
-    }
-  };
+  const aclList = data?.acls ?? [];
+  const keyList = data?.keys ?? [];
+  const status = data?.status ?? null;
+  const targetLabel =
+    status?.connectionMode === "ssh" && status?.sshState?.host
+      ? status.sshState.host
+      : status?.hostname || "current server";
+  const management = status?.management;
+  const aclCapabilityReason = getAclCapabilityReason(status, canManageDNS);
+  const keyCapabilityReason = getKeyCapabilityReason(status, canManageDNS);
+  const canWriteAcls = canManageDNS && !aclCapabilityReason;
+  const canWriteKeys = canManageDNS && !keyCapabilityReason;
 
   const resetAclForm = () => {
     setEditingAcl(null);
-    setAclName("");
-    setAclNetworks("");
-    setAclComment("");
+    setAclForm({ name: "", networks: "", comment: "" });
+    setAclErrors({});
+  };
+
+  const resetKeyForm = () => {
+    setKeyForm({ name: "", algorithm: "hmac-sha256", secret: "" });
+    setKeyErrors({});
+  };
+
+  const openCreateAcl = () => {
+    resetAclForm();
+    setAclDialogOpen(true);
+  };
+
+  const openTrustedTransferAcl = () => {
+    setEditingAcl(null);
+    setAclErrors({});
+    setAclForm({
+      name: "trusted-transfer",
+      networks: "192.168.11.103;\n192.168.11.106;",
+      comment: "Secondary servers allowed to receive zone transfers",
+    });
+    setAclDialogOpen(true);
+  };
+
+  const openEditAcl = (acl: AclData) => {
+    setEditingAcl(acl);
+    setAclErrors({});
+    setAclForm({
+      name: acl.name,
+      networks: acl.networks,
+      comment: acl.comment || "",
+    });
+    setAclDialogOpen(true);
+  };
+
+  const handleSaveAcl = async () => {
+    const parsed = validateAclForm(aclForm);
+    if (!parsed.success) {
+      setAclErrors(collectFieldErrors(parsed.error.issues));
+      return;
+    }
+
+    if (!canWriteAcls) {
+      toast({ title: "Read-only ACL target", description: aclCapabilityReason, variant: "destructive" });
+      return;
+    }
+
+    try {
+      setAclSaving(true);
+      const payload = {
+        name: parsed.data.name,
+        networks: normalizeAclNetworks(parsed.data.networks),
+        comment: parsed.data.comment || undefined,
+      };
+
+      if (editingAcl) {
+        await updateAcl(editingAcl.id, payload);
+        toast({ title: "ACL updated", description: `${payload.name} was updated on ${targetLabel}.` });
+      } else {
+        await createAcl(payload);
+        toast({ title: "ACL created", description: `${payload.name} was created on ${targetLabel}.` });
+      }
+
+      setAclDialogOpen(false);
+      resetAclForm();
+      await refetch();
+    } catch (e: any) {
+      toast({ title: "ACL save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setAclSaving(false);
+    }
   };
 
   const handleSaveKey = async () => {
-    if (!keyName.trim() || !keySecret.trim()) {
-      toast({ title: "Error", description: "Name and secret are required", variant: "destructive" });
+    const parsed = validateTsigKeyForm(keyForm);
+    if (!parsed.success) {
+      setKeyErrors(collectFieldErrors(parsed.error.issues));
       return;
     }
+
+    if (!canWriteKeys) {
+      toast({ title: "Read-only key target", description: keyCapabilityReason, variant: "destructive" });
+      return;
+    }
+
     try {
-      setSaving(true);
-      await createKey({ name: keyName, algorithm: keyAlgorithm, secret: keySecret });
-      toast({ title: "Created", description: `TSIG key '${keyName}' created` });
+      setKeySaving(true);
+      await createKey(parsed.data);
+      toast({ title: "TSIG key created", description: `${parsed.data.name} was created on ${targetLabel}.` });
       setKeyDialogOpen(false);
-      setKeyName("");
-      setKeySecret("");
-      setKeyAlgorithm("hmac-sha256");
-      fetchData();
+      resetKeyForm();
+      await refetch();
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      toast({ title: "Key creation failed", description: e.message, variant: "destructive" });
     } finally {
-      setSaving(false);
+      setKeySaving(false);
     }
   };
 
-  const handleDeleteKey = async (key: KeyData) => {
+  const handleDeleteConfirmed = async () => {
+    if (!deleteTarget) {
+      return;
+    }
+
     try {
-      await deleteKey(key.id);
-      toast({ title: "Deleted", description: `Key '${key.name}' removed` });
+      setDeleteBusy(true);
+      if (deleteTarget.type === "acl") {
+        await deleteAcl(deleteTarget.item.id);
+        toast({ title: "ACL deleted", description: `${deleteTarget.item.name} was removed from ${targetLabel}.` });
+      } else {
+        await deleteKey(deleteTarget.item.id);
+        toast({ title: "TSIG key deleted", description: `${deleteTarget.item.name} was removed from ${targetLabel}.` });
+      }
       setDeleteTarget(null);
-      fetchData();
+      await refetch();
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      toast({ title: "Deletion failed", description: e.message, variant: "destructive" });
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
-  if (loading) {
+  if (isPending) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center" style={{ minHeight: "60vh" }}>
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <PageState
+          loading
+          title="Loading security settings"
+          description="Reading ACLs, TSIG keys, and management capability data."
+          className="min-h-[60vh]"
+        />
       </DashboardLayout>
     );
   }
 
-  const handleCreateTrustedTransfer = () => {
-    setAclName("trusted-transfer");
-    setAclNetworks("192.168.1.50; // IP of your NS2");
-    setAclComment("Allow zone transfers to secondary nameservers");
-    setEditingAcl(null);
-    setAclDialogOpen(true);
-  };
+  if (error || !data) {
+    return (
+      <DashboardLayout>
+        <PageState
+          tone="danger"
+          title="Security settings unavailable"
+          description={error instanceof Error ? error.message : "Unable to load ACLs and TSIG keys."}
+          action={<Button onClick={() => refetch()}>Retry</Button>}
+          className="min-h-[60vh]"
+        />
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Security Settings</h2>
-          <p className="text-muted-foreground">Manage Access Control Lists and TSIG Keys for server security.</p>
-        </div>
-        <div className="flex gap-2">
-          {canManageDNS && (
-            <>
-              <Button variant="outline" className="gap-2" onClick={() => setKeyDialogOpen(true)}>
-                <Key className="h-4 w-4" /> New Key
+      <div className="space-y-6">
+        <PageHeader
+          title="ACLs & TSIG Keys"
+          description="Manage BIND access control lists and shared transfer secrets from the active target."
+          icon={Shield}
+          badge={
+            <Badge variant="outline" className="border-border/70 bg-background/70">
+              {status?.connectionMode === "ssh" ? "SSH target" : "Local target"}
+            </Badge>
+          }
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
+                onClick={() => refetch()}
+                disabled={isFetching}
+              >
+                <RefreshCw className={["h-4 w-4", isFetching ? "animate-spin" : ""].join(" ")} />
+                Refresh
               </Button>
-              <Button className="gap-2" onClick={() => { resetAclForm(); setAclDialogOpen(true); }}>
-                <Plus className="h-4 w-4" /> Add ACL
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+              {canWriteAcls ? (
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-xl border-border/70 bg-background/70 shadow-none"
+                  onClick={openTrustedTransferAcl}
+                >
+                  Create trusted-transfer
+                </Button>
+              ) : null}
+            </div>
+          }
+        />
 
-      <Alert className="mb-6">
-        <Shield className="h-4 w-4" />
-        <AlertTitle className="font-semibold">Zone Transfer Security</AlertTitle>
-        <AlertDescription>
-          By default, Zone Transfers are blocked (<code className="rounded bg-muted px-1">allow-transfer {"{ none; }"}</code>).
-          To authorize your secondary servers (NS2, NS3), create an ACL named
-          <code className="rounded bg-zinc-900 dark:bg-zinc-900 text-yellow-400 dark:text-yellow-400 px-1.5 py-0.5 mx-1 font-mono">trusted-transfer</code>
-          containing their IPs.
-        </AlertDescription>
-        <div className="mt-3">
-          <Button variant="outline" size="sm" className="gap-2" onClick={handleCreateTrustedTransfer}>
-            <Plus className="h-3 w-3" /> Setup "trusted-transfer" ACL
-          </Button>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Managed ACLs"
+            value={aclList.length}
+            description={`Imported from named.conf.acls on ${targetLabel}`}
+            icon={Shield}
+            tone="success"
+          />
+          <MetricCard
+            label="Managed Keys"
+            value={keyList.length}
+            description={`Imported from named.conf.keys on ${targetLabel}`}
+            icon={KeyRound}
+          />
+          <MetricCard
+            label="ACL Include"
+            value={management ? (management.includes.namedConfAclsIncluded ? "Included" : "Missing") : "Unknown"}
+            description={management ? (management.writablePaths.namedConfAcls ? "Writable" : "Read-only") : "Status data unavailable"}
+            icon={management?.includes.namedConfAclsIncluded ? CheckCircle2 : AlertTriangle}
+            tone={management?.includes.namedConfAclsIncluded ? "success" : "warning"}
+          />
+          <MetricCard
+            label="Keys Include"
+            value={management ? (management.includes.namedConfKeysIncluded ? "Included" : "Missing") : "Unknown"}
+            description={management ? (management.writablePaths.namedConfKeys ? "Writable" : "Read-only") : "Status data unavailable"}
+            icon={management?.includes.namedConfKeysIncluded ? CheckCircle2 : AlertTriangle}
+            tone={management?.includes.namedConfKeysIncluded ? "success" : "warning"}
+          />
         </div>
-      </Alert>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* ACLs List */}
-        <Card>
-          <CardHeader className="border-b flex items-center gap-2">
-            <Shield className="h-5 w-5 text-primary" />
-            <CardTitle>Access Control Lists</CardTitle>
+        <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
+          <CardHeader className="border-b border-border/60">
+            <CardTitle className="text-base tracking-[-0.04em]">Managed Scope</CardTitle>
           </CardHeader>
-          <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground mb-4">Named address matches for security blocks.</p>
-            {aclList.length === 0 ? (
-              <div className="text-center text-muted-foreground py-8">
-                No ACLs configured. Click "Add ACL" to create one.
+          <CardContent className="grid gap-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Target</div>
+              <div className="truncate font-mono font-semibold">{targetLabel}</div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
+              <div className="font-mono font-semibold">{status?.connectionMode?.toUpperCase() || "LOCAL"}</div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">ACL File</div>
+              <div className="font-mono font-semibold">
+                {management?.writablePaths.namedConfAcls ? "Writable" : management ? "Read-only" : "Unknown"}
               </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {aclList.map((acl) => (
-                  <div key={acl.id} className="flex items-center justify-between p-3 rounded-md border bg-muted/30">
-                    <div>
-                      <div className="font-mono font-bold text-primary mb-1">{acl.name}</div>
-                      <div className="text-muted-foreground font-mono text-sm">{acl.networks}</div>
-                      {acl.comment && <div className="text-muted-foreground italic mt-1 text-xs">{acl.comment}</div>}
-                    </div>
-                    <div className="flex gap-1">
-                      {canManageDNS && (
-                        <>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditAcl(acl)}>
-                            <Edit className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeleteTarget({ type: 'acl', item: acl })}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Keys File</div>
+              <div className="font-mono font-semibold">
+                {management?.writablePaths.namedConfKeys ? "Writable" : management ? "Read-only" : "Unknown"}
               </div>
-            )}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Keys List */}
-        <Card>
-          <CardHeader className="border-b flex items-center gap-2">
-            <Lock className="h-5 w-5 text-primary" />
-            <CardTitle>TSIG Keys</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground mb-4">Shared secrets for secure zone transfers and updates.</p>
-            {keyList.length === 0 ? (
-              <div className="text-center text-muted-foreground py-8">
-                No TSIG keys configured. Click "New Key" to create one.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {keyList.map((key) => (
-                  <div key={key.id} className="flex items-center justify-between p-3 rounded-md border bg-muted/30">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono font-bold text-primary">{key.name}</span>
-                        <Badge variant="secondary" className="text-[10px] rounded-full">{key.algorithm}</Badge>
-                      </div>
-                      <div className="text-muted-foreground font-mono text-sm truncate max-w-[250px]">
-                        {key.secret}
-                      </div>
-                    </div>
-                    <div className="flex gap-1">
-                      {canManageDNS && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeleteTarget({ type: 'key', item: key })}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <Alert>
+          <Shield className="h-4 w-4" />
+          <AlertTitle>Managed include files only</AlertTitle>
+          <AlertDescription>
+            The ACL page manages entries from <code className="rounded bg-background/80 px-1">named.conf.acls</code>. The TSIG page manages entries from <code className="rounded bg-background/80 px-1">named.conf.keys</code>. If an ACL exists only in <code className="rounded bg-background/80 px-1">named.conf.options</code>, BIND will still use it, but this page will not import it until it is moved into the dedicated include file.
+          </AlertDescription>
+        </Alert>
+
+        {!canWriteAcls || !canWriteKeys ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Partial read-only mode</AlertTitle>
+            <AlertDescription className="space-y-1">
+              {!canWriteAcls ? <div>ACLs: {aclCapabilityReason}</div> : null}
+              {!canWriteKeys ? <div>TSIG keys: {keyCapabilityReason}</div> : null}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert>
+            <CheckCircle2 className="h-4 w-4" />
+            <AlertTitle>Writable target confirmed</AlertTitle>
+            <AlertDescription>
+              Changes from this screen are written directly to the active BIND target and followed by a BIND reconfiguration. Existing TSIG secrets stay masked by design when read back from the API.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <AclListCard
+            acls={aclList}
+            canManage={canWriteAcls}
+            onCreate={openCreateAcl}
+            onEdit={openEditAcl}
+            onDelete={(acl) => setDeleteTarget({ type: "acl", item: acl })}
+          />
+          <TsigKeysCard
+            keys={keyList}
+            canManage={canWriteKeys}
+            onCreate={() => {
+              resetKeyForm();
+              setKeyDialogOpen(true);
+            }}
+            onDelete={(key) => setDeleteTarget({ type: "key", item: key })}
+          />
+        </div>
+
+        <AclFormDialog
+          open={aclDialogOpen}
+          saving={aclSaving}
+          editing={Boolean(editingAcl)}
+          values={aclForm}
+          errors={aclErrors}
+          onOpenChange={(open) => {
+            setAclDialogOpen(open);
+            if (!open) {
+              resetAclForm();
+            }
+          }}
+          onChange={(field, value) => {
+            setAclForm((current) => ({ ...current, [field]: value }));
+            setAclErrors((current) => ({ ...current, [field]: undefined }));
+          }}
+          onSubmit={handleSaveAcl}
+        />
+
+        <TsigKeyFormDialog
+          open={keyDialogOpen}
+          saving={keySaving}
+          values={keyForm}
+          errors={keyErrors}
+          onOpenChange={(open) => {
+            setKeyDialogOpen(open);
+            if (!open) {
+              resetKeyForm();
+            }
+          }}
+          onNameChange={(value) => {
+            setKeyForm((current) => ({ ...current, name: value }));
+            setKeyErrors((current) => ({ ...current, name: undefined }));
+          }}
+          onAlgorithmChange={(value) => {
+            setKeyForm((current) => ({ ...current, algorithm: value }));
+            setKeyErrors((current) => ({ ...current, algorithm: undefined }));
+          }}
+          onSecretChange={(value) => {
+            setKeyForm((current) => ({ ...current, secret: value }));
+            setKeyErrors((current) => ({ ...current, secret: undefined }));
+          }}
+          onSubmit={handleSaveKey}
+        />
+
+        <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm deletion</AlertDialogTitle>
+              <AlertDialogDescription>
+                {deleteTarget?.type === "acl" ? (
+                  <>
+                    Delete ACL <strong>{deleteTarget.item.name}</strong> from the active target?
+                  </>
+                ) : deleteTarget?.type === "key" ? (
+                  <>
+                    Delete TSIG key <strong>{deleteTarget.item.name}</strong> from the active target?
+                  </>
+                ) : null}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={handleDeleteConfirmed}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
-
-      {/* Key Dialog */}
-      <Dialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create TSIG Key</DialogTitle>
-          </DialogHeader>
-          <p className="text-muted-foreground text-sm">Add a shared secret for secure zone transfers.</p>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="keyName">Name</Label>
-              <Input id="keyName" className="font-mono" value={keyName} onChange={e => setKeyName(e.target.value)} placeholder="transfer-key" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="keyAlgo">Algorithm</Label>
-              <Select value={keyAlgorithm} onValueChange={setKeyAlgorithm}>
-                <SelectTrigger id="keyAlgo">
-                  <SelectValue placeholder="Select algorithm" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hmac-sha256">HMAC-SHA256</SelectItem>
-                  <SelectItem value="hmac-sha512">HMAC-SHA512</SelectItem>
-                  <SelectItem value="hmac-md5">HMAC-MD5</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="keySecret">Secret</Label>
-              <Input id="keySecret" type="password" className="font-mono" value={keySecret} onChange={e => setKeySecret(e.target.value)} placeholder="Base64 encoded secret" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setKeyDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveKey} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Create Key
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ACL Dialog */}
-      <Dialog open={aclDialogOpen} onOpenChange={(open) => { if (!open) resetAclForm(); setAclDialogOpen(open); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingAcl ? "Edit ACL" : "Create ACL"}</DialogTitle>
-          </DialogHeader>
-          <p className="text-muted-foreground text-sm">Define named address matches for security rules.</p>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="aclName">Name</Label>
-              <Input id="aclName" className="font-mono" value={aclName} onChange={e => setAclName(e.target.value)} placeholder="trusted-clients" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="aclNetworks">Networks</Label>
-              <Input id="aclNetworks" className="font-mono" value={aclNetworks} onChange={e => setAclNetworks(e.target.value)} placeholder="127.0.0.1; 192.168.1.0/24;" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="aclComment">Comment</Label>
-              <Input id="aclComment" value={aclComment} onChange={e => setAclComment(e.target.value)} placeholder="Optional description" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setAclDialogOpen(false); resetAclForm(); }}>Cancel</Button>
-            <Button onClick={handleSaveAcl} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {editingAcl ? "Update ACL" : "Create ACL"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteTarget?.type === 'acl'
-                ? <>Are you sure you want to delete ACL <strong>{(deleteTarget?.item as AclData)?.name}</strong>?</>
-                : <>Are you sure you want to delete TSIG key <strong>{(deleteTarget?.item as KeyData)?.name}</strong>?</>
-              }
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => {
-              if (deleteTarget?.type === 'acl') handleDeleteAcl(deleteTarget.item as AclData);
-              else if (deleteTarget?.type === 'key') handleDeleteKey(deleteTarget.item as KeyData);
-            }}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </DashboardLayout>
   );
 }

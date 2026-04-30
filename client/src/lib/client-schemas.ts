@@ -15,6 +15,48 @@ export const managedUserCreateSchema = z.object({
 
 export type ManagedUserCreateForm = z.infer<typeof managedUserCreateSchema>;
 
+const bindIdentifierSchema = z
+    .string()
+    .trim()
+    .min(1, "Name is required")
+    .max(128, "Name is too long")
+    .regex(/^[a-zA-Z0-9._-]+$/, "Name contains invalid characters");
+
+const aclNetworksSchema = z
+    .string()
+    .trim()
+    .min(1, "At least one network is required")
+    .max(4096, "Network list is too long")
+    .refine((value) => !/["'{}]/.test(value), "Networks contain unsupported characters");
+
+export const aclFormSchema = z.object({
+    name: bindIdentifierSchema,
+    networks: aclNetworksSchema,
+    comment: z.string().trim().max(255, "Comment is too long"),
+});
+
+export type AclFormValues = z.infer<typeof aclFormSchema>;
+
+export function validateAclForm(values: AclFormValues) {
+    return aclFormSchema.safeParse(values);
+}
+
+export const tsigKeyFormSchema = z.object({
+    name: bindIdentifierSchema,
+    algorithm: z.enum(["hmac-sha256", "hmac-sha512", "hmac-md5"]),
+    secret: z
+        .string()
+        .trim()
+        .min(1, "Secret is required")
+        .max(4096, "Secret is too long"),
+});
+
+export type TsigKeyFormValues = z.infer<typeof tsigKeyFormSchema>;
+
+export function validateTsigKeyForm(values: TsigKeyFormValues) {
+    return tsigKeyFormSchema.safeParse(values);
+}
+
 const connectionNameSchema = z
     .string()
     .trim()
