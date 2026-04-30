@@ -1,4 +1,5 @@
-import { Copy, Loader2, Plus, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Copy, Loader2, Plus, ShieldCheck } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,6 +17,7 @@ interface ZoneDnssecTabProps {
   zoneDomain: string;
   dnssec: ZoneDnssecInfo | null;
   dnssecStatus: DnssecStatus | null;
+  dnssecError: string | null;
   managedKeys: DnssecKeyEntry[];
   dnssecLoading: boolean;
   onGenerateKey: (keyType: "KSK" | "ZSK") => void;
@@ -28,6 +30,7 @@ export function ZoneDnssecTab({
   zoneDomain,
   dnssec,
   dnssecStatus,
+  dnssecError,
   managedKeys,
   dnssecLoading,
   onGenerateKey,
@@ -40,6 +43,16 @@ export function ZoneDnssecTab({
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
+        {dnssecError ? (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Partial DNSSEC visibility</AlertTitle>
+            <AlertDescription>
+              {dnssecError} Key operations may still work, but this tab does not currently have the full state.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <div className="linear-panel flex items-center gap-4 rounded-2xl px-4 py-4 text-card-foreground">
           <div
             className={`rounded-full p-3 ${

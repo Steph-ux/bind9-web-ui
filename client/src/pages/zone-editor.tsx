@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
-import { ArrowLeft, Copy, Pencil, Plus, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Copy, Pencil, Plus, Search, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-provider";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { MetricCard, PageState } from "@/components/layout";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,6 +34,20 @@ import {
   ZoneRecordsTab,
 } from "@/components/zone-editor";
 
+interface DnssecSnapshot {
+  dnssec: ZoneDnssecInfo | null;
+  managedKeys: DnssecKeyEntry[];
+  dnssecStatus: DnssecStatus | null;
+  error: string | null;
+}
+
+const EMPTY_DNSSEC_SNAPSHOT: DnssecSnapshot = {
+  dnssec: null,
+  managedKeys: [],
+  dnssecStatus: null,
+  error: null,
+};
+
 export default function ZoneEditor() {
   const [, params] = useRoute("/zones/:id");
   const zoneId = params?.id;
@@ -43,6 +58,7 @@ export default function ZoneEditor() {
   const [managedKeys, setManagedKeys] = useState<DnssecKeyEntry[]>([]);
   const [dnssecStatus, setDnssecStatus] = useState<DnssecStatus | null>(null);
   const [dnssecLoading, setDnssecLoading] = useState(false);
+  const [dnssecError, setDnssecError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -65,33 +81,69 @@ export default function ZoneEditor() {
   const { toast } = useToast();
   const { canManageDNS } = useAuth();
 
-  const refreshDnssecState = async () => {
-    if (!zoneId) return;
+  const applyDnssecSnapshot = (snapshot: DnssecSnapshot) => {
+    setDnssec(snapshot.dnssec);
+    setManagedKeys(snapshot.managedKeys);
+    setDnssecStatus(snapshot.dnssecStatus);
+    setDnssecError(snapshot.error);
+  };
 
-    const [dnssecInfo, keys, status] = await Promise.all([
+  const loadDnssecState = async (): Promise<DnssecSnapshot> => {
+    if (!zoneId) return EMPTY_DNSSEC_SNAPSHOT;
+
+    const [dnssecInfo, keys, status] = await Promise.allSettled([
       getZoneDnssecInfo(zoneId),
       getDnssecKeys(zoneId),
       getDnssecStatus(zoneId),
     ]);
 
-    setDnssec(dnssecInfo);
-    setManagedKeys(keys);
-    setDnssecStatus(status);
+    const unavailableParts: string[] = [];
+
+    if (dnssecInfo.status !== "fulfilled") {
+      unavailableParts.push("zone signing metadata");
+    }
+    if (keys.status !== "fulfilled") {
+      unavailableParts.push("managed DNSSEC keys");
+    }
+    if (status.status !== "fulfilled") {
+      unavailableParts.push("signing status");
+    }
+
+    return {
+      dnssec: dnssecInfo.status === "fulfilled" ? dnssecInfo.value : null,
+      managedKeys: keys.status === "fulfilled" ? keys.value : [],
+      dnssecStatus: status.status === "fulfilled" ? status.value : null,
+      error:
+        unavailableParts.length === 0
+          ? null
+          : unavailableParts.length === 3
+            ? "DNSSEC details are currently unavailable for this zone."
+            : `Some DNSSEC details are temporarily unavailable: ${unavailableParts.join(", ")}.`,
+    };
   };
+
+  const refreshDnssecState = async () => {
+    const snapshot = await loadDnssecState();
+    applyDnssecSnapshot(snapshot);
+    return snapshot;
+  };
+
+  const dnssecSigned = dnssec?.enabled || dnssecStatus?.signed;
 
   const fetchData = async () => {
     if (!zoneId) return;
 
     try {
       setLoading(true);
-      const [zoneData, recordData] = await Promise.all([getZone(zoneId), getRecords(zoneId)]);
+      const [zoneData, recordData, dnssecSnapshot] = await Promise.all([
+        getZone(zoneId),
+        getRecords(zoneId),
+        loadDnssecState(),
+      ]);
       setZone(zoneData);
       setRecords(recordData);
+      applyDnssecSnapshot(dnssecSnapshot);
       setError(null);
-
-      refreshDnssecState().catch((dnssecError) => {
-        console.error("Failed to fetch DNSSEC state", dnssecError);
-      });
     } catch (requestError: any) {
       setError(requestError.message);
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
@@ -206,8 +258,7 @@ export default function ZoneEditor() {
         variant: result.success ? "default" : "destructive",
       });
       if (result.success) {
-        const keys = await getDnssecKeys(zoneId);
-        setManagedKeys(keys);
+        await refreshDnssecState();
       }
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
@@ -248,8 +299,7 @@ export default function ZoneEditor() {
         variant: result.success ? "default" : "destructive",
       });
       if (result.success) {
-        const keys = await getDnssecKeys(zoneId);
-        setManagedKeys(keys);
+        await refreshDnssecState();
       }
     } catch (requestError: any) {
       toast({ title: "Error", description: requestError.message, variant: "destructive" });
@@ -257,8 +307,18 @@ export default function ZoneEditor() {
   };
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({ title: "Copied", description: "DS Record copied to clipboard" });
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        toast({ title: "Copied", description: "DS Record copied to clipboard" });
+      })
+      .catch(() => {
+        toast({
+          title: "Clipboard unavailable",
+          description: "Copy the DS record manually from this page.",
+          variant: "destructive",
+        });
+      });
   };
 
   if (loading && !zone) {
@@ -334,14 +394,16 @@ export default function ZoneEditor() {
           />
           <MetricCard
             label="DNSSEC"
-            value={dnssec?.enabled || dnssecStatus?.signed ? "Enabled" : "Disabled"}
+            value={dnssecError ? "Partial" : dnssecSigned ? "Enabled" : "Disabled"}
             description={
-              managedKeys.length > 0
+              dnssecError
+                ? "Zone records remain editable."
+                : managedKeys.length > 0
                 ? `${managedKeys.length} managed key(s)`
                 : "No managed key detected."
             }
             icon={ShieldCheck}
-            tone={dnssec?.enabled || dnssecStatus?.signed ? "success" : "warning"}
+            tone={dnssecError ? "warning" : dnssecSigned ? "success" : "warning"}
           />
           <MetricCard
             label="Editing"
@@ -352,6 +414,16 @@ export default function ZoneEditor() {
             icon={Pencil}
           />
         </div>
+
+        {dnssecError ? (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>DNSSEC details partially unavailable</AlertTitle>
+            <AlertDescription>
+              Record editing is still available for this zone, but {dnssecError}
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         <Tabs defaultValue="records" className="w-full">
           <TabsList>
@@ -375,6 +447,7 @@ export default function ZoneEditor() {
               zoneDomain={zone.domain}
               dnssec={dnssec}
               dnssecStatus={dnssecStatus}
+              dnssecError={dnssecError}
               managedKeys={managedKeys}
               dnssecLoading={dnssecLoading}
               onGenerateKey={handleGenerateDnssecKey}
