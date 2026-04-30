@@ -18,6 +18,8 @@ interface ZoneDnssecTabProps {
   dnssec: ZoneDnssecInfo | null;
   dnssecStatus: DnssecStatus | null;
   dnssecError: string | null;
+  canManageDnssec: boolean;
+  readOnlyReason: string | null;
   managedKeys: DnssecKeyEntry[];
   dnssecLoading: boolean;
   onGenerateKey: (keyType: "KSK" | "ZSK") => void;
@@ -31,6 +33,8 @@ export function ZoneDnssecTab({
   dnssec,
   dnssecStatus,
   dnssecError,
+  canManageDnssec,
+  readOnlyReason,
   managedKeys,
   dnssecLoading,
   onGenerateKey,
@@ -50,6 +54,14 @@ export function ZoneDnssecTab({
             <AlertDescription>
               {dnssecError} Key operations may still work, but this tab does not currently have the full state.
             </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!canManageDnssec && readOnlyReason ? (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>DNSSEC is read-only here</AlertTitle>
+            <AlertDescription>{readOnlyReason}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -83,7 +95,7 @@ export function ZoneDnssecTab({
             variant="outline"
             size="sm"
             className="gap-2"
-            disabled={dnssecLoading}
+            disabled={!canManageDnssec || dnssecLoading}
             onClick={() => onGenerateKey("KSK")}
           >
             {dnssecLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -93,7 +105,7 @@ export function ZoneDnssecTab({
             variant="outline"
             size="sm"
             className="gap-2"
-            disabled={dnssecLoading}
+            disabled={!canManageDnssec || dnssecLoading}
             onClick={() => onGenerateKey("ZSK")}
           >
             {dnssecLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -103,7 +115,7 @@ export function ZoneDnssecTab({
             variant="default"
             size="sm"
             className="gap-2"
-            disabled={dnssecLoading || managedKeys.filter((key) => key.status === "active").length === 0}
+            disabled={!canManageDnssec || dnssecLoading || managedKeys.filter((key) => key.status === "active").length === 0}
             onClick={onSignZone}
           >
             <ShieldCheck className="h-4 w-4" />
@@ -156,7 +168,7 @@ export function ZoneDnssecTab({
                       {new Date(key.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      {key.status === "active" && (
+                      {key.status === "active" && canManageDnssec && (
                         <Button
                           variant="ghost"
                           size="sm"

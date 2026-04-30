@@ -136,6 +136,13 @@ export default function ZoneEditor() {
   };
 
   const dnssecSigned = dnssec?.enabled || dnssecStatus?.signed;
+  const zoneSupportsWrites = zone?.type === "master";
+  const canManageZone = canManageDNS && zoneSupportsWrites;
+  const readOnlyReason = !zoneSupportsWrites
+    ? `This ${zone?.type || "non-master"} zone can be inspected here, but record and DNSSEC changes are limited to master zones.`
+    : !canManageDNS
+      ? "Your current role can inspect this zone, but it cannot change records or DNSSEC state."
+      : null;
   const newRecordValues: RecordFormValues = {
     name: newName,
     type: newType as RecordFormValues["type"],
@@ -448,7 +455,7 @@ export default function ZoneEditor() {
               </p>
             </div>
           </div>
-          {canManageDNS && (
+          {canManageZone && (
             <div className="flex gap-2">
               <Button onClick={() => setIsDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
@@ -486,13 +493,23 @@ export default function ZoneEditor() {
           />
           <MetricCard
             label="Editing"
-            value={canManageDNS ? "Writable" : "Read-only"}
+            value={canManageZone ? "Writable" : "Read-only"}
             description={
-              canManageDNS ? "You can create and modify records." : "You can only inspect this zone."
+              canManageZone
+                ? "You can create and modify records."
+                : readOnlyReason || "You can only inspect this zone."
             }
             icon={Pencil}
           />
         </div>
+
+        {readOnlyReason ? (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Read-only zone view</AlertTitle>
+            <AlertDescription>{readOnlyReason}</AlertDescription>
+          </Alert>
+        ) : null}
 
         {dnssecError ? (
           <Alert>
@@ -515,7 +532,7 @@ export default function ZoneEditor() {
               records={filteredRecords}
               searchTerm={searchTerm}
               onSearchTermChange={setSearchTerm}
-              canManageDNS={canManageDNS}
+              canManageDNS={canManageZone}
               onEditRecord={openEdit}
               onDeleteRecord={setDeleteTarget}
             />
@@ -527,6 +544,8 @@ export default function ZoneEditor() {
               dnssec={dnssec}
               dnssecStatus={dnssecStatus}
               dnssecError={dnssecError}
+              canManageDnssec={canManageZone}
+              readOnlyReason={readOnlyReason}
               managedKeys={managedKeys}
               dnssecLoading={dnssecLoading}
               onGenerateKey={handleGenerateDnssecKey}
@@ -538,7 +557,7 @@ export default function ZoneEditor() {
         </Tabs>
       </div>
 
-      {canManageDNS && (
+      {canManageZone && (
         <RecordFormDialog
           open={isDialogOpen}
           mode="create"
@@ -557,7 +576,7 @@ export default function ZoneEditor() {
         />
       )}
 
-      {canManageDNS && (
+      {canManageZone && (
         <RecordFormDialog
           open={!!editTarget}
           mode="edit"
