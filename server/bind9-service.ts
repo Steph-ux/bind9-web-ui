@@ -251,6 +251,46 @@ class Bind9Service {
         return this.uniqueEntries(zoneNames);
     }
 
+    private async discoverConfiguredLogFiles(): Promise<Array<{ path: string; source: string }>> {
+        const contents: string[] = [];
+        try {
+            contents.push(await this.readNamedConfOptions());
+        } catch {
+            // Ignore unavailable options file.
+        }
+
+        try {
+            contents.push(await this.readNamedConf());
+        } catch {
+            // Ignore unavailable main config file.
+        }
+
+        const discovered = new Map<string, { path: string; source: string }>();
+
+        for (const content of contents) {
+            const loggingBodies = this.extractBraceDirectiveBodies(content, "logging");
+            for (const body of loggingBodies) {
+                let quotedMatch: RegExpExecArray | null;
+                const quotedRegex = /\bfile\b\s+"([^"]+)"/gi;
+                while ((quotedMatch = quotedRegex.exec(body)) !== null) {
+                    const logPath = quotedMatch[1].trim();
+                    if (!logPath.startsWith("/")) continue;
+
+                    const baseName = path.posix.basename(logPath);
+                    const source = baseName === "named.run"
+                        ? "named.run"
+                        : baseName.replace(/\.log(?:\.\d+)?$/i, "") || "bind";
+
+                    if (!discovered.has(logPath)) {
+                        discovered.set(logPath, { path: logPath, source });
+                    }
+                }
+            }
+        }
+
+        return Array.from(discovered.values());
+    }
+
     async discoverRpzZones(): Promise<Array<{ zoneName: string; filePath: string }>> {
         let zoneNames: string[] = [];
 
@@ -369,7 +409,6 @@ class Bind9Service {
             ["named-checkzone", await this.getRemoteBinaryPath("named-checkzone", ["/usr/bin/named-checkzone", "/usr/sbin/named-checkzone"])],
             ["named-checkconf", await this.getRemoteBinaryPath("named-checkconf", ["/usr/bin/named-checkconf", "/usr/sbin/named-checkconf"])],
             ["rndc", await this.getRemoteBinaryPath("rndc", ["/usr/sbin/rndc", "/usr/bin/rndc"])],
-            ["named", await this.getRemoteBinaryPath("named", ["/usr/sbin/named", "/usr/bin/named"])],
         ];
 
         let resolvedCommand = command;
@@ -1762,7 +1801,8 @@ zone "${safeDomain}" {
             }
         };
 
-        const logFiles = [
+        const configuredLogFiles = await this.discoverConfiguredLogFiles();
+        const fallbackLogFiles = [
             { path: "/var/log/named/data/query.log", source: "query" },
             { path: "/var/log/named/data/error.log", source: "error" },
             { path: "/var/log/named/data/security.log", source: "security" },
@@ -1770,6 +1810,9 @@ zone "${safeDomain}" {
             { path: "/var/log/named/data/rate_limiting.log", source: "rate-limit" },
             { path: path.posix.join(BIND9_ZONE_DIR, "named.run"), source: "named.run" },
         ];
+        const logFiles = [...configuredLogFiles, ...fallbackLogFiles].filter((entry, index, array) =>
+            array.findIndex((candidate) => candidate.path === entry.path) === index,
+        );
 
         for (const logFile of logFiles) {
             try {
