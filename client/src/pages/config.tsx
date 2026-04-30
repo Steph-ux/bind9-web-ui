@@ -26,6 +26,8 @@ import { getConfig, getStatus, saveConfig, type StatusData } from "@/lib/api";
 
 export default function Config() {
   const [optionsContent, setOptionsContent] = useState("");
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
+  const [optionsLoadError, setOptionsLoadError] = useState<string | null>(null);
   const [statusSnapshot, setStatusSnapshot] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,9 +56,21 @@ export default function Config() {
 
         if (configResult.status === "fulfilled") {
           setOptionsContent(configResult.value.content);
+          setOptionsLoaded(true);
+          setOptionsLoadError(null);
           parseConfigForForm(configResult.value.content);
         } else {
-          toast({ title: "Info", description: "Using default configuration" });
+          setOptionsLoaded(false);
+          setOptionsLoadError(
+            configResult.reason instanceof Error
+              ? configResult.reason.message
+              : "Unable to read named.conf.options from the active target.",
+          );
+          toast({
+            title: "Configuration read failed",
+            description: "named.conf.options could not be loaded. Editing is disabled to prevent accidental overwrite.",
+            variant: "destructive",
+          });
         }
 
         if (statusResult.status === "fulfilled") {
@@ -232,10 +246,14 @@ export default function Config() {
   const canWriteOptions = Boolean(
     isAdmin &&
       management?.available &&
-      management?.writablePaths.namedConfOptions,
+      management?.writablePaths.namedConfOptions &&
+      optionsLoaded &&
+      !optionsLoadError,
   );
   const editorDisabled = !canWriteOptions;
-  const readOnlyReason = !isAdmin
+  const readOnlyReason = optionsLoadError
+    ? "named.conf.options could not be loaded from the active target. Saving is blocked to avoid overwriting the server with generated defaults."
+    : !isAdmin
     ? "Only administrators can change named.conf.options."
     : !management
       ? "Management capability data is unavailable for this target."
@@ -330,6 +348,17 @@ export default function Config() {
             </div>
           </CardContent>
         </Card>
+
+        {optionsLoadError ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Configuration file unavailable</AlertTitle>
+            <AlertDescription>
+              The application could not read <code className="rounded bg-background/80 px-1">named.conf.options</code> from <span className="font-mono">{targetLabel}</span>. Editing is disabled until the file can be loaded successfully.
+              <span className="block pt-2 text-xs">{optionsLoadError}</span>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {editorDisabled ? (
           <Alert variant="destructive">
