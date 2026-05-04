@@ -204,6 +204,83 @@ For remote mode:
 
 ## Quick Start
 
+### Production install
+
+On Debian or Ubuntu:
+
+```bash
+git clone https://github.com/Steph-ux/bind9-web-ui.git
+cd bind9-web-ui
+sudo bash install.sh
+```
+
+As a single shell line:
+
+```bash
+git clone https://github.com/Steph-ux/bind9-web-ui.git && cd bind9-web-ui && sudo bash install.sh
+```
+
+Default install:
+
+- app installed in `/opt/bind9-web-ui`
+- env file in `/etc/bind9-web-ui.env`
+- systemd service `bind9-web-ui`
+- nginx reverse proxy on `https://<server-ip>:8443`
+- Node.js listens locally on `127.0.0.1:3001`
+- generated admin password stored in `/root/bind9-web-ui-bootstrap-admin.txt`
+
+### Install options
+
+Set the initial admin password:
+
+```bash
+sudo env DEFAULT_ADMIN_PASSWORD='change-me-now' bash install.sh
+```
+
+Use Apache instead of nginx:
+
+```bash
+sudo env WEB_SERVER=apache bash install.sh
+```
+
+Use nginx on ports 80/443:
+
+```bash
+sudo env WEB_SERVER=nginx WEB_HTTP_PORT=80 WEB_HTTPS_PORT=443 SERVER_NAME=dns.example.com bash install.sh
+```
+
+Use Apache on ports 80/443:
+
+```bash
+sudo env WEB_SERVER=apache WEB_HTTP_PORT=80 WEB_HTTPS_PORT=443 SERVER_NAME=dns.example.com bash install.sh
+```
+
+Install without nginx/apache:
+
+```bash
+sudo env WEB_SERVER=none bash install.sh
+```
+
+`WEB_SERVER` can be `nginx`, `apache`, or `none`. If `WEB_SERVER=none`, put your own TLS reverse proxy in front of the Node.js service.
+
+To replace the default web site on the server:
+
+```bash
+sudo env DISABLE_DEFAULT_SITE=1 WEB_HTTP_PORT=80 WEB_HTTPS_PORT=443 SERVER_NAME=dns.example.com bash install.sh
+```
+
+### Install on the BIND server
+
+If the Web UI runs on the same host as BIND9:
+
+```bash
+sudo env LOCAL_BIND_ACCESS=1 bash install.sh
+```
+
+This lets systemd write to the configured BIND directories and adds the service user to the BIND group when it exists. If BIND files are root-only, local writes may still fail; use an SSH connection to `localhost` with sudo, or adjust permissions deliberately.
+
+### Manual development start
+
 ### 1. Clone the repository
 
 ```bash
@@ -274,11 +351,13 @@ The repository already includes an `.env.example`.
 
 | Variable | Default | Description |
 |---|---|---|
+| `HOST` | `0.0.0.0` | Bind address for the Node.js server |
 | `PORT` | `3001` | HTTP port for the application |
 | `NODE_ENV` | `development` | Runtime mode |
 | `SESSION_SECRET` | random in development | Mandatory in production |
 | `DB_TYPE` | `sqlite` | `sqlite`, `postgresql`, or `mysql` |
 | `DATABASE_URL` | `data/bind9admin.db` | SQLite path or database connection URL |
+| `BACKUP_DIR` | `data/backups` | Runtime backup directory |
 | `BIND9_CONF_DIR` | `/etc/bind` | Local-mode BIND config directory |
 | `BIND9_ZONE_DIR` | `/var/cache/bind` | Local-mode zone directory |
 | `RNDC_BIN` | `rndc` | Path to the `rndc` binary |
