@@ -185,7 +185,7 @@ export default function ACLs() {
     setAclErrors({});
     setAclForm({
       name: "trusted-transfer",
-      networks: "192.168.11.103;\n192.168.11.106;",
+      networks: "192.168.1.10;\n192.168.1.11;",
       comment: "Secondary servers allowed to receive zone transfers",
     });
     setAclDialogOpen(true);

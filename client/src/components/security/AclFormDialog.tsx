@@ -59,7 +59,7 @@ export function AclFormDialog({
                             className="min-h-[120px] font-mono"
                             value={values.networks}
                             onChange={(event) => onChange("networks", event.target.value)}
-                            placeholder={"192.168.11.103;\n192.168.11.106;\n192.168.8.0/22;"}
+                            placeholder={"192.168.1.10;\n192.168.1.11;\n192.168.0.0/16;"}
                             spellCheck={false}
                         />
                         <p className="text-xs text-muted-foreground">
