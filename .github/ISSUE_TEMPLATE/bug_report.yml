@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem with BIND9 Web UI
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, real zone exports, private keys, or production screenshots.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps needed to reproduce the issue.
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: bind-version
+    attributes:
+      label: BIND9 version
+      placeholder: "example: 9.18.x"
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Management mode
+      options:
+        - Local BIND host
+        - Remote SSH
+        - Both
+        - Not sure
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database backend
+      options:
+        - SQLite
+        - PostgreSQL
+        - MySQL
+        - Not sure
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Paste only sanitized logs. Remove secrets, IPs, domains, and credentials if needed.
+

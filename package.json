@@ -1,17 +1,41 @@
 {
-  "name": "rest-express",
+  "name": "bind9-web-ui",
   "version": "1.0.0",
+  "description": "Self-hosted BIND9 DNS control panel for zones, records, ACLs, TSIG keys, RPZ, backups, and remote SSH management.",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://github.com/Steph-ux/bind9-web-ui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Steph-ux/bind9-web-ui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Steph-ux/bind9-web-ui/issues"
+  },
+  "keywords": [
+    "bind9",
+    "bind",
+    "dns",
+    "dns-manager",
+    "dns-control-panel",
+    "dns-firewall",
+    "rpz",
+    "self-hosted",
+    "web-ui",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev:client": "vite dev --port 3001",
-    "dev": "set NODE_ENV=development && tsx server/index.ts",
+    "dev": "cross-env NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
-    "start": "set NODE_ENV=production && node dist/index.cjs",
+    "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "db:push:pg": "set DB_TYPE=postgresql&& drizzle-kit push --config=drizzle.config.pg.ts",
-    "db:push:mysql": "set DB_TYPE=mysql&& drizzle-kit push --config=drizzle.config.mysql.ts",
+    "db:push:pg": "cross-env DB_TYPE=postgresql drizzle-kit push --config=drizzle.config.pg.ts",
+    "db:push:mysql": "cross-env DB_TYPE=mysql drizzle-kit push --config=drizzle.config.mysql.ts",
     "db:generate:pg": "drizzle-kit generate --config=drizzle.config.pg.ts",
     "db:generate:mysql": "drizzle-kit generate --config=drizzle.config.mysql.ts",
     "db:studio:pg": "drizzle-kit studio --config=drizzle.config.pg.ts",
@@ -103,6 +127,7 @@
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
     "postcss": "^8.5.6",

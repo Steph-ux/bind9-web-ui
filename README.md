@@ -1,8 +1,8 @@
 # BIND9 Web UI
 
-The missing web UI for BIND9.
+Self-hosted DNS control panel for BIND9.
 
-BIND9 Web UI is a self-hosted administration panel for BIND9 servers. It supports both local management and remote management over SSH, with a modern dashboard for zones, records, ACLs, TSIG keys, RPZ, replication, backups, user access, and operational visibility.
+BIND9 Web UI helps DNS operators manage BIND9 without hand-editing every zone and configuration file. It supports local management and remote management over SSH, with a dashboard for zones, records, ACLs, TSIG keys, RPZ, replication, backups, user access, and operational visibility.
 
 Copyright (c) 2025 Stephane ASSOGBA
 
@@ -18,6 +18,7 @@ Copyright (c) 2025 Stephane ASSOGBA
 
 ## Quick Links
 
+- [One-command install](#production-install)
 - [Production install](#production-install)
 - [Install options](#install-options)
 - [Install on the BIND server](#install-on-the-bind-server)
@@ -25,6 +26,17 @@ Copyright (c) 2025 Stephane ASSOGBA
 - [Environment variables](#environment-variables)
 - [Remote BIND permissions](#remote-bind-permissions)
 - [Recommended production setup](#recommended-production-setup)
+- [Contributing](#contributing)
+
+## One-Command Install
+
+On Debian or Ubuntu:
+
+```bash
+git clone https://github.com/Steph-ux/bind9-web-ui.git && cd bind9-web-ui && sudo bash install.sh
+```
+
+The installer can deploy behind nginx, Apache, or no reverse proxy, and can run on the same host as BIND9 or on a separate management server.
 
 ## Why This Exists
 
@@ -36,6 +48,13 @@ BIND9 is one of the most capable DNS servers available, but it still lacks an of
 - awkward remote administration when BIND runs on another host
 
 This project fills that gap with a full web UI focused on operational safety and day-to-day administration.
+
+## Who It Is For
+
+- DNS administrators who run BIND9 in production or labs
+- Teams that want a self-hosted DNS management interface
+- Operators managing several BIND9 servers from one UI
+- Environments that need local control instead of a SaaS DNS platform
 
 ## Core Features
 
@@ -476,6 +495,14 @@ If you also use firewall management through the UI, you may need additional `sud
 - keep remote sudo permissions minimal
 - use PostgreSQL or MySQL if you need a database backend beyond local SQLite
 - monitor the host and back up the application data directory
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), run `npm run check` before opening a pull request, and include enough context for DNS/BIND-related changes to be reviewed safely.
+
+## Security
+
+Do not post secrets, real zone exports, private keys, or production screenshots in public issues. See [SECURITY.md](SECURITY.md) for reporting guidance.
 
 ## License
 
