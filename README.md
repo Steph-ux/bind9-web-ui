@@ -16,6 +16,16 @@ Copyright (c) 2025 Stephane ASSOGBA
 ![MySQL](https://img.shields.io/badge/MySQL-Supported-4479A1?logo=mysql&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
+## Quick Links
+
+- [Production install](#production-install)
+- [Install options](#install-options)
+- [Install on the BIND server](#install-on-the-bind-server)
+- [Manual development start](#manual-development-start)
+- [Environment variables](#environment-variables)
+- [Remote BIND permissions](#remote-bind-permissions)
+- [Recommended production setup](#recommended-production-setup)
+
 ## Why This Exists
 
 BIND9 is one of the most capable DNS servers available, but it still lacks an official management interface. In practice that means:
