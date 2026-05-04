@@ -7,3 +7,6 @@ vite.config.ts.*
 *.tar.gz
 data/
 migrations/
+backup/
+backups/
+Backups/
