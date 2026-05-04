@@ -37,21 +37,6 @@ BIND9 is one of the most capable DNS servers available, but it still lacks an of
 
 This project fills that gap with a full web UI focused on operational safety and day-to-day administration.
 
-## Screenshots
-
-<table>
-  <tr>
-    <td align="center"><b>Dashboard</b></td>
-    <td align="center"><b>Logs</b></td>
-    <td align="center"><b>Connections</b></td>
-  </tr>
-  <tr>
-    <td><img src="screenshots/Dashboard.png" alt="Dashboard" width="400" /></td>
-    <td><img src="screenshots/Logs.png" alt="Logs" width="400" /></td>
-    <td><img src="screenshots/SSH.png" alt="SSH connections" width="400" /></td>
-  </tr>
-</table>
-
 ## Core Features
 
 ### DNS management
@@ -178,7 +163,6 @@ Bind-Config/
 ├── shared/              # Shared schemas and types
 ├── data/                # SQLite database and local data
 ├── script/              # Build scripts
-├── screenshots/         # README screenshots
 ├── DESIGN.md            # Active design system direction
 └── README.md
 ```
