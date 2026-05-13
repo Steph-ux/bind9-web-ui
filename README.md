@@ -466,6 +466,52 @@ If you also use firewall management through the UI, you may need additional `sud
 - `firewall-cmd`
 - `systemctl`
 
+## BIND Reload After Web UI Changes
+
+When a record is created or updated from the Web UI, the zone file must be valid and BIND must reload the affected zone before clients can resolve the new data.
+
+If the zone file contains the new record but DNS queries still return `NXDOMAIN` or an older SOA serial, BIND is still serving the previous in-memory zone. Validate the zone and reload it:
+
+```bash
+sudo named-checkconf
+sudo named-checkzone intra.isoceltelecom.com /var/cache/bind/zones/forward/intra.isoceltelecom.com
+sudo rndc reload intra.isoceltelecom.com
+```
+
+For deployments where the Web UI writes BIND zone files directly, use an automatic reload guard so changes are applied only after validation succeeds:
+
+```ini
+# /etc/systemd/system/bind-zones-auto-reload.service
+[Unit]
+Description=Validate and reload BIND zones after Web UI changes
+After=named.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bind-zones-reload-if-valid.sh
+```
+
+```ini
+# /etc/systemd/system/bind-zones-auto-reload.path
+[Unit]
+Description=Watch BIND zone files for Web UI changes
+
+[Path]
+PathChanged=/var/cache/bind/zones/forward/intra.isoceltelecom.com
+PathChanged=/var/cache/bind/zones/reverse/intra.isoceltelecom.com
+Unit=bind-zones-auto-reload.service
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now bind-zones-auto-reload.path
+```
+
+The reload script should run `named-checkconf`, validate every managed zone with `named-checkzone`, and then call `rndc reload <zone>`. This prevents the UI from reporting a saved record while BIND continues serving stale data.
+
 ## Security Highlights
 
 - Passwords are hashed using Node.js crypto primitives
