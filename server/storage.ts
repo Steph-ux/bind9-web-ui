@@ -1,4 +1,4 @@
-﻿// Copyright Â(c) 2025 Stephane ASSOGBA
+// Copyright Â(c) 2025 Stephane ASSOGBA
 import { eq, desc, like, and, sql, inArray } from "drizzle-orm";
 import { db, dbReady } from "./db";
 import {
@@ -643,7 +643,17 @@ export class DatabaseStorage implements IStorage {
       await db.delete(ipBlacklist).where(eq(ipBlacklist.ip, ip));
       return false;
     }
-    return true;
+    // Failed login attempts are tracked in this table before the threshold is
+    // reached. Do not treat those tracking rows as active bans.
+    if (entry.reason === "manual" || entry.reason === "brute_force") {
+      return true;
+    }
+
+    if (entry.expiresAt) {
+      return true;
+    }
+
+    return entry.attemptCount >= DatabaseStorage.BAN_THRESHOLD;
   }
 
   async recordFailedAttempt(ip: string, reason: "login_failed" | "api_abuse" | "brute_force" | "manual"): Promise<void> {

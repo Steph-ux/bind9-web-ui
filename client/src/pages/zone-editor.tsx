@@ -530,11 +530,13 @@ export default function ZoneEditor() {
           <TabsContent value="records" className="space-y-4">
             <ZoneRecordsTab
               records={filteredRecords}
+              zoneDomain={zone.domain}
               searchTerm={searchTerm}
               onSearchTermChange={setSearchTerm}
               canManageDNS={canManageZone}
               onEditRecord={openEdit}
               onDeleteRecord={setDeleteTarget}
+              onOpenCreate={() => setIsDialogOpen(true)}
             />
           </TabsContent>
 

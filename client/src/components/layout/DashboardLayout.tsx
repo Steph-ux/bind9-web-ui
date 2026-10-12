@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Suspense, lazy } from "react";
 import { Link, useLocation } from "wouter";
 import {
@@ -25,10 +25,14 @@ import {
   Terminal,
   UserRound,
   Users,
+  RefreshCw,
+  RotateCcw,
+  Activity,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-provider";
-import { getLogs, type LogData } from "@/lib/api";
+import { getLogs, executeRndc, type LogData } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,25 +64,25 @@ interface NavSection {
 }
 
 const coreNavigation: NavItem[] = [
-  { label: "Overview", href: "/", icon: LayoutDashboard },
-  { label: "Zones", href: "/zones", icon: Globe },
+  { label: "Vue d'ensemble", href: "/", icon: LayoutDashboard },
+  { label: "Zones DNS", href: "/zones", icon: Globe },
   { label: "Configuration", href: "/config", icon: Settings },
-  { label: "ACLs & Keys", href: "/acls", icon: Shield },
-  { label: "Logs", href: "/logs", icon: Terminal },
-  { label: "Server Status", href: "/status", icon: Server },
-];
-
-const adminOperations: NavItem[] = [
-  { label: "Connections", href: "/connections", icon: Plug },
-  { label: "Replication", href: "/replication", icon: Copy },
-  { label: "Users", href: "/users", icon: Users },
+  { label: "ACLs & Cles", href: "/acls", icon: Shield },
+  { label: "Logs & Audit", href: "/logs", icon: Terminal },
+  { label: "Statut Serveur", href: "/status", icon: Server },
 ];
 
 const adminSecurity: NavItem[] = [
-  { label: "Firewall", href: "/firewall", icon: ShieldCheck },
-  { label: "DNS Firewall", href: "/firewall-rpz", icon: ShieldAlert },
-  { label: "IP Blacklist", href: "/blacklist", icon: ShieldBan },
-  { label: "API Tokens", href: "/api-tokens", icon: Key },
+  { label: "Pare-feu RPZ", href: "/firewall-rpz", icon: ShieldAlert },
+  { label: "Liste Noire IP", href: "/blacklist", icon: ShieldBan },
+  { label: "Pare-feu Reseau", href: "/firewall", icon: ShieldCheck },
+  { label: "Jetons API", href: "/api-tokens", icon: Key },
+];
+
+const adminOperations: NavItem[] = [
+  { label: "Replication Cluster", href: "/replication", icon: Copy },
+  { label: "Noeuds SSH", href: "/connections", icon: Plug },
+  { label: "Utilisateurs", href: "/users", icon: Users },
 ];
 
 const LayoutCommandPalette = lazy(async () => {
@@ -182,16 +186,37 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<LogData[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [reloadingBind, setReloadingBind] = useState(false);
+  const { toast } = useToast();
+
+  const handleQuickReload = async () => {
+    setReloadingBind(true);
+    try {
+      const res = await executeRndc("reload");
+      toast({
+        title: "BIND9 recharge",
+        description: res.output || "Configuration BIND9 et zones rechargees avec succes.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Erreur lors du rechargement",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setReloadingBind(false);
+    }
+  };
 
   const shortcutLabel = getShortcutLabel();
   const currentRouteLabel = getCurrentRouteLabel(location);
 
   const navSections: NavSection[] = [
-    { title: "Overview", items: coreNavigation },
+    { title: "DNS Management", items: coreNavigation },
     ...(user?.role === "admin"
       ? [
-          { title: "Operations", items: adminOperations },
-          { title: "Security", items: adminSecurity },
+          { title: "Securite & Filtrage", items: adminSecurity },
+          { title: "Infrastructure", items: adminOperations },
         ]
       : []),
   ];
@@ -267,16 +292,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       >
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/70 px-4">
           <Link href="/" className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.82))] text-primary-foreground shadow-[0_18px_50px_hsl(var(--primary)/0.28)]">
-              <span className="text-base font-semibold">B</span>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 text-white shadow-[0_0_24px_rgba(99,102,241,0.35)]">
+              <span className="text-sm font-bold tracking-tight">DNS</span>
             </div>
             {!sidebarCollapsed ? (
               <div className="min-w-0">
                 <div className="truncate text-base font-semibold tracking-[-0.03em] text-sidebar-foreground">
-                  BIND9Admin
+                  BIND9 Config
                 </div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/45">
-                  DNS Operations
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Control Plane</span>
                 </div>
               </div>
             ) : null}
@@ -382,14 +408,28 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
             </div>
 
+            {user?.role === "admin" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={reloadingBind}
+                onClick={handleQuickReload}
+                className="hidden h-9 items-center gap-1.5 rounded-xl border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 md:inline-flex"
+                title="Recharger immediatement la configuration BIND9 (rndc reload)"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${reloadingBind ? "animate-spin" : ""}`} />
+                <span className="text-xs font-medium">Recharger BIND9</span>
+              </Button>
+            )}
+
             <Button
               variant="outline"
               size="sm"
-              className="hidden h-10 gap-2 rounded-xl border-border/70 bg-background/70 text-muted-foreground shadow-none sm:inline-flex"
+              className="hidden h-9 gap-2 rounded-xl border-border/70 bg-background/70 text-muted-foreground shadow-none sm:inline-flex"
               onClick={() => setCommandOpen(true)}
             >
               <Search className="h-4 w-4" />
-              <span>Quick Search</span>
+              <span>Palette rapide</span>
               <Kbd>{shortcutLabel}</Kbd>
             </Button>
 
@@ -493,13 +533,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <SheetContent side="left" className="w-[300px] border-border/70 bg-sidebar/92 p-0 backdrop-blur-xl">
           <SheetHeader className="border-b border-border/70 px-4 py-4">
             <SheetTitle className="flex items-center gap-3 text-left">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.82))] text-primary-foreground shadow-[0_18px_50px_hsl(var(--primary)/0.28)]">
-                B
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 text-white shadow-[0_0_24px_rgba(99,102,241,0.35)]">
+                <span className="text-sm font-bold tracking-tight">DNS</span>
               </div>
               <div>
-                <div className="text-base font-semibold tracking-[-0.03em]">BIND9Admin</div>
-                <div className="text-[11px] font-normal uppercase tracking-[0.18em] text-muted-foreground">
-                  DNS Operations
+                <div className="text-base font-semibold tracking-[-0.03em]">BIND9 Config</div>
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Control Plane</span>
                 </div>
               </div>
             </SheetTitle>
