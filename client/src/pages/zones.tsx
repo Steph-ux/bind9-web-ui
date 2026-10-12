@@ -238,29 +238,29 @@ export default function Zones() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="Zone Management"
-          description="Create, import and maintain authoritative zones and forwarders from one workspace."
+          title="Gestion des Zones DNS"
+          description="Catalogue des zones directes, inverses et forwarders sous controle de BIND9."
           icon={Globe}
-          badge={<Badge variant="outline">{zones.length} total zones</Badge>}
+          badge={<Badge variant="outline" className="font-mono text-xs">{zones.length} zones au total</Badge>}
           actions={
             <>
               {canManageDNS && (
                 <Button
                   variant="outline"
-                  className="gap-2"
+                  className="gap-2 rounded-xl border-border/70 bg-background/70 shadow-none hover:bg-muted"
                   disabled={syncing}
                   onClick={async () => {
                     setSyncing(true);
                     try {
                       const result = await syncZones();
                       toast({
-                        title: "Sync complete",
-                        description: `${result.synced} zones synchronized, ${result.skipped} skipped, ${result.total} found in BIND9.`,
+                        title: "Synchronisation terminee",
+                        description: `${result.synced} zones synchronisees, ${result.skipped} ignorees, ${result.total} detectees dans BIND9.`,
                       });
                       await fetchZones();
                     } catch (requestError: any) {
                       toast({
-                        title: "Sync failed",
+                        title: "Echec de synchronisation",
                         description: requestError.message,
                         variant: "destructive",
                       });
@@ -274,13 +274,16 @@ export default function Zones() {
                   ) : (
                     <RefreshCcw className="h-4 w-4" />
                   )}
-                  Sync from BIND9
+                  Synchroniser BIND9
                 </Button>
               )}
               {canManageDNS && (
-                <Button className="gap-2" onClick={() => setIsDialogOpen(true)}>
+                <Button
+                  className="gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-indigo-600"
+                  onClick={() => setIsDialogOpen(true)}
+                >
                   <Plus className="h-4 w-4" />
-                  Add New Zone
+                  Creer une zone
                 </Button>
               )}
             </>
@@ -289,30 +292,30 @@ export default function Zones() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Visible Zones"
+            label="Zones Visibles"
             value={filteredZones.length}
             description={
-              searchTerm ? `Filtered from ${zones.length} total zones.` : "Current inventory in the panel."
+              searchTerm ? `Filtrees parmi ${zones.length} au total.` : "Inventaire affiche dans le panneau."
             }
             icon={Globe}
           />
           <MetricCard
-            label="Active Zones"
+            label="Zones Actives"
             value={activeZones}
-            description="Zones currently marked active."
+            description="Zones operationnelles en resolution."
             icon={RefreshCcw}
             tone="success"
           />
           <MetricCard
-            label="Primary Zones"
+            label="Zones Primaires"
             value={masterZones}
-            description="Master zones editable from this panel."
+            description="Zones maitres modifiables depuis l'interface."
             icon={FileEdit}
           />
           <MetricCard
-            label="Secondary and Forward"
+            label="Secondaires & Forward"
             value={secondaryZones}
-            description="Zones synchronized or forwarded from upstream."
+            description="Zones repliquees ou redirigees vers les serveurs amont."
             icon={Copy}
             tone="warning"
           />

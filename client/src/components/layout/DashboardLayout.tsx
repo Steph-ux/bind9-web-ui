@@ -172,7 +172,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
 
-  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (!saved || saved === "light") {
+      localStorage.setItem("theme", "dark");
+      return "dark";
+    }
+    return saved;
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const storedCollapsed = localStorage.getItem("sidebarCollapsed");

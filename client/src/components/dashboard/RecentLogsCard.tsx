@@ -1,53 +1,86 @@
+import { Activity, Terminal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { DashboardData } from "@/lib/api";
 
 export function RecentLogsCard({ logs }: { logs: DashboardData["recentLogs"] }) {
+  const getLevelStyle = (level: string) => {
+    switch (level.toUpperCase()) {
+      case "INFO":
+        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+      case "WARN":
+      case "WARNING":
+        return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+      case "ERROR":
+      case "CRITICAL":
+        return "bg-red-500/10 text-red-400 border-red-500/30";
+      default:
+        return "bg-muted text-muted-foreground border-border/60";
+    }
+  };
+
   return (
-    <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div className="space-y-1">
-          <CardTitle className="tracking-[-0.04em]">Recent system logs</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Live service activity and recent platform events.
-          </p>
+    <Card className="rounded-2xl border border-border/70 bg-card/85 shadow-sm overflow-hidden">
+      <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-border/50 bg-muted/20">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-primary">
+            <Terminal className="h-4 w-4" />
+          </div>
+          <div>
+            <CardTitle className="text-base font-bold tracking-tight text-foreground">
+              Journal d'Audit & Evenements DNS
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Flux des requetes DNS, transferts de zone et sauvegardes systeme
+            </p>
+          </div>
         </div>
-        <Badge variant="outline" className="border-border/70 bg-background/70">
-          Live feed
-        </Badge>
+
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="gap-1.5 border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-mono text-xs">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Flux en direct
+          </Badge>
+        </div>
       </CardHeader>
-      <CardContent className="p-0">
-        <ScrollArea className="h-[320px]">
-          <div className="space-y-2 p-4 font-mono text-[13px]">
-            {logs.length > 0 ? (
+
+      <CardContent className="p-0 bg-background/40">
+        <ScrollArea className="h-[300px]">
+          <div className="divide-y divide-border/40 font-mono text-xs">
+            {logs && logs.length > 0 ? (
               logs.map((log) => (
                 <div
                   key={log.id}
-                  className="grid grid-cols-[84px_68px_minmax(0,120px)_1fr] gap-3 rounded-2xl border border-border/60 bg-background/50 px-3 py-3 text-foreground"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 transition-colors hover:bg-muted/30"
                 >
-                  <span className="shrink-0 text-muted-foreground">
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span
-                    className={[
-                      "inline-flex h-6 items-center justify-center rounded-full px-2 text-[11px] font-semibold",
-                      log.level === "INFO"
-                        ? "bg-primary/12 text-primary"
-                        : log.level === "WARN"
-                          ? "bg-amber-500/12 text-amber-400"
-                          : "bg-destructive/12 text-destructive",
-                    ].join(" ")}
-                  >
-                    {log.level}
-                  </span>
-                  <span className="truncate text-foreground/80">{log.source}</span>
-                  <span className="break-all text-foreground/92">{log.message}</span>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-[11px] text-muted-foreground shrink-0">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+
+                    <Badge
+                      variant="outline"
+                      className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 shrink-0 ${getLevelStyle(
+                        log.level
+                      )}`}
+                    >
+                      {log.level}
+                    </Badge>
+
+                    <Badge variant="secondary" className="text-[10px] uppercase font-mono shrink-0">
+                      {log.source}
+                    </Badge>
+
+                    <span className="truncate text-foreground/90 font-mono text-xs" title={log.message}>
+                      {log.message}
+                    </span>
+                  </div>
                 </div>
               ))
             ) : (
-              <div className="rounded-2xl border border-dashed border-border/60 bg-background/45 py-10 text-center text-muted-foreground">
-                No log entries yet. Activity will appear here.
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                Aucun evenement recent dans le journal d'audit.
               </div>
             )}
           </div>

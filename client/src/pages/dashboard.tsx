@@ -138,37 +138,39 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="System Overview"
-          description="Real-time DNS metrics, service health, and recent server activity across the current control plane."
+          title="Supervision BIND9 & Control Plane"
+          description="Metriques en direct, etat de sante du cluster DNS et activite recente des requetes autoritaires."
           icon={Server}
           badge={
-            <Badge variant="outline" className="gap-2 border-border/70 bg-background/70">
+            <Badge variant="outline" className="gap-2 border-border/70 bg-background/80 py-1 px-3">
               <span
                 className={[
                   "h-2 w-2 rounded-full",
-                  data.bind9.running ? "bg-emerald-500" : "bg-amber-500",
+                  data.bind9.running ? "bg-emerald-500 animate-pulse" : "bg-amber-500",
                 ].join(" ")}
               />
-              {data.bind9.running ? "BIND9 online" : "BIND9 not detected"}
+              <span className="font-mono text-xs font-semibold">
+                {data.bind9.running ? "BIND9 En Ligne (v9.18)" : "BIND9 Non Détecté"}
+              </span>
             </Badge>
           }
           actions={
             <>
               <Button
                 variant="outline"
-                className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
+                className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none hover:bg-muted"
                 onClick={() => exportDashboardReport(data)}
               >
                 <Download className="h-4 w-4" />
-                Export report
+                <span className="hidden sm:inline">Exporter rapport</span>
               </Button>
               <Button
-                className="h-10 gap-2 rounded-xl bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-primary-foreground shadow-[0_16px_40px_hsl(var(--primary)/0.22)]"
+                className="h-10 gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-indigo-600"
                 onClick={() => refetch()}
                 disabled={isFetching}
               >
                 <RefreshCw className={["h-4 w-4", isFetching ? "animate-spin" : ""].join(" ")} />
-                {isFetching ? "Refreshing" : "Refresh"}
+                <span>{isFetching ? "Actualisation..." : "Actualiser"}</span>
               </Button>
             </>
           }

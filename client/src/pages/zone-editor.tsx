@@ -451,15 +451,18 @@ export default function ZoneEditor() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{zone.domain}</h1>
               <p className="text-sm text-muted-foreground">
-                {records.length} records - {zone.type}
+                <span className="font-mono">{records.length} enregistrements</span> • <span className="uppercase font-semibold">{zone.type}</span>
               </p>
             </div>
           </div>
           {canManageZone && (
             <div className="flex gap-2">
-              <Button onClick={() => setIsDialogOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Record
+              <Button
+                className="gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-indigo-600"
+                onClick={() => setIsDialogOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Ajouter un enregistrement
               </Button>
             </div>
           )}
@@ -467,37 +470,37 @@ export default function ZoneEditor() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Records"
+            label="Enregistrements"
             value={records.length}
-            description="Total DNS records in this zone."
+            description="Total des enregistrements de cette zone."
             icon={Copy}
           />
           <MetricCard
-            label="Filtered Results"
+            label="Resultats Filtres"
             value={filteredRecords.length}
-            description={searchTerm ? `Filter: ${searchTerm}` : "Current visible result set."}
+            description={searchTerm ? `Filtre actif : ${searchTerm}` : "Total affiche dans l'onglet."}
             icon={Search}
           />
           <MetricCard
             label="DNSSEC"
-            value={dnssecError ? "Partial" : dnssecSigned ? "Enabled" : "Disabled"}
+            value={dnssecError ? "Partiel" : dnssecSigned ? "Active" : "Desactive"}
             description={
               dnssecError
-                ? "Zone records remain editable."
+                ? "Zone modifiable mais DNSSEC limite."
                 : managedKeys.length > 0
-                ? `${managedKeys.length} managed key(s)`
-                : "No managed key detected."
+                ? `${managedKeys.length} cle(s) geree(s)`
+                : "Aucune cle de signature."
             }
             icon={ShieldCheck}
             tone={dnssecError ? "warning" : dnssecSigned ? "success" : "warning"}
           />
           <MetricCard
-            label="Editing"
-            value={canManageZone ? "Writable" : "Read-only"}
+            label="Mode d'Edition"
+            value={canManageZone ? "Ecriture" : "Lecture seule"}
             description={
               canManageZone
-                ? "You can create and modify records."
-                : readOnlyReason || "You can only inspect this zone."
+                ? "Creation et modification autorisees."
+                : readOnlyReason || "Consultation uniquement."
             }
             icon={Pencil}
           />
