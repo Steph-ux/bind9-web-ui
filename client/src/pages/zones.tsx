@@ -241,7 +241,7 @@ export default function Zones() {
           title="Gestion des Zones DNS"
           description="Catalogue des zones directes, inverses et forwarders sous controle de BIND9."
           icon={Globe}
-          badge={<Badge variant="outline" className="font-mono text-xs">{zones.length} zones au total</Badge>}
+          
           actions={
             <>
               {canManageDNS && (

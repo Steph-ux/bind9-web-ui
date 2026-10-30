@@ -64,23 +64,34 @@ async function refreshAclsFromBind() {
   for (const fileAcl of fileAcls) {
     seen.add(fileAcl.name);
     const existing = currentDbAcls.find((item) => item.name === fileAcl.name);
+    const originComment = (fileAcl as any).sourceFile
+      ? `Importe depuis ${path.basename((fileAcl as any).sourceFile)}`
+      : "Configuration BIND9";
+
     if (!existing) {
       await storage.createAcl({
         name: fileAcl.name,
         networks: fileAcl.networks,
-        comment: "Imported from named.conf.acls",
+        comment: originComment,
       });
       continue;
     }
 
     if (existing.networks !== fileAcl.networks) {
-      await storage.updateAcl(existing.id, { networks: fileAcl.networks });
+      await storage.updateAcl(existing.id, {
+        networks: fileAcl.networks,
+        comment: existing.comment || originComment,
+      });
     }
   }
 
-  for (const stale of currentDbAcls) {
-    if (!seen.has(stale.name)) {
-      await storage.deleteAcl(stale.id);
+  // Counter-logic protection: Only prune stale DB records if BIND9 was available and scan succeeded,
+  // preventing accidental data wipe on temporary read glitch
+  if (fileAcls.length > 0) {
+    for (const stale of currentDbAcls) {
+      if (!seen.has(stale.name)) {
+        await storage.deleteAcl(stale.id);
+      }
     }
   }
 

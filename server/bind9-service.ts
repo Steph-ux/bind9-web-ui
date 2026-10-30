@@ -513,10 +513,16 @@ class Bind9Service {
         try {
             const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf");
             const content = await this.readRemoteFile(confPath);
+            const aclsExplicit = content.includes("named.conf.acls");
+            const keysExplicit = content.includes("named.conf.keys");
+            const canWriteMain = await this.canWritePath(confPath);
+            const canWriteDir = await this.canWritePath(BIND9_CONF_DIR);
+
             return {
                 namedConfLocalIncluded: content.includes("named.conf.local"),
-                namedConfAclsIncluded: content.includes("named.conf.acls"),
-                namedConfKeysIncluded: content.includes("named.conf.keys"),
+                // Available if already included OR if named.conf is writable (can be auto-included non-destructively)
+                namedConfAclsIncluded: aclsExplicit || canWriteMain || canWriteDir,
+                namedConfKeysIncluded: keysExplicit || canWriteMain || canWriteDir,
             };
         } catch {
             return {
@@ -1658,48 +1664,88 @@ zone "${safeDomain}" {
     }
 
     /**
-     * Parse named.conf.acls to extract existing ACLs.
-     * Returns array of { name, networks }
+     * Parse named.conf recursively to extract existing ACLs from ANY file in the BIND9 configuration.
+     * Handles brownfield BIND9 where ACLs were placed in named.conf.options, named.conf.local, or named.conf.
+     * Supports quoted (acl "name") and unquoted (acl name) declarations.
+     * Returns array of { name, networks, sourceFile }
      */
-    async syncAclsFromConfig(): Promise<Array<{ name: string; networks: string }>> {
-        const acls: Array<{ name: string; networks: string }> = [];
-        try {
-            const confPath = path.posix.join(BIND9_CONF_DIR, "named.conf.acls");
-            let content = "";
+    async syncAclsFromConfig(): Promise<Array<{ name: string; networks: string; sourceFile?: string }>> {
+        const aclsMap = new Map<string, { name: string; networks: string; sourceFile: string }>();
+        const visited = new Set<string>();
+
+        const parseFile = async (confPath: string) => {
+            const normalizedPath = path.posix.normalize(confPath);
+            if (visited.has(normalizedPath)) return;
+            visited.add(normalizedPath);
+
+            let content: string;
             try {
-                content = await this.readRemoteFile(confPath);
+                content = await this.readRemoteFile(normalizedPath);
             } catch {
-                console.log("[bind9] named.conf.acls not found, skipping import.");
-                return [];
+                return;
             }
 
-            // Simple regex parser for: acl "name" { 1.2.3.4; ... };
-            // Matches: acl "NAME" { CONTENT };
-            const aclRegex = /acl\s+"([^"]+)"\s*{([^}]+)};/g;
+            // Strip BIND comments: //, #, and /* ... */
+            const cleaned = content
+                .replace(/\/\/.*$/gm, "")
+                .replace(/#.*$/gm, "")
+                .replace(/\/\*[\s\S]*?\*\//g, "");
+
+            // 1. Process 'include' directives recursively
+            const includeRegex = /include\s+"([^"]+)"\s*;/gi;
+            let incMatch;
+            while ((incMatch = includeRegex.exec(cleaned)) !== null) {
+                let incPath = incMatch[1];
+                if (!path.isAbsolute(incPath)) {
+                    incPath = path.posix.join(BIND9_CONF_DIR, incPath);
+                }
+                await parseFile(incPath);
+            }
+
+            // 2. Extract ACLs: matches acl "NAME" { ... }; or acl NAME { ... };
+            const aclRegex = /acl\s+(?:"([^"]+)"|([a-zA-Z0-9._-]+))\s*{([^}]+)};/g;
             let match;
+            while ((match = aclRegex.exec(cleaned)) !== null) {
+                const name = match[1] || match[2];
+                if (!name || aclsMap.has(name)) continue;
 
-            while ((match = aclRegex.exec(content)) !== null) {
-                const name = match[1];
-                const cleanContent = match[2]
-                    .replace(/\/\/.*$/gm, "") // remove comments
-                    .replace(/#.*$/gm, "")    // remove BIND-style comments
-                    .replace(/\s+/g, " ")     // normalize whitespace
-                    .split(";")               // split by semi-colon
+                const cleanNetworks = match[3]
+                    .replace(/\s+/g, " ")
+                    .split(";")
                     .map(s => s.trim())
-                    .filter(s => s);          // remove empty strings
+                    .filter(Boolean);
 
-                const networks = cleanContent.join("; ");
-                if (name && networks) {
-                    acls.push({ name, networks: networks + ";" });
+                if (cleanNetworks.length > 0) {
+                    aclsMap.set(name, {
+                        name,
+                        networks: cleanNetworks.join("; ") + ";",
+                        sourceFile: normalizedPath,
+                    });
                 }
             }
-            console.log(`[bind9] Found ${acls.length} ACLs in config`);
-            return acls;
+        };
 
-        } catch (error: any) {
-            console.error(`[bind9] Failed to sync ACLs from config: ${error.message}`);
-            return [];
+        // Parse tree starting from main named.conf
+        const mainConf = path.posix.join(BIND9_CONF_DIR, "named.conf");
+        await parseFile(mainConf);
+
+        // Fallback candidates in case includes are not explicitly linked yet
+        const candidates = [
+            path.posix.join(BIND9_CONF_DIR, "named.conf.acls"),
+            path.posix.join(BIND9_CONF_DIR, "named.conf.options"),
+            path.posix.join(BIND9_CONF_DIR, "named.conf.local"),
+        ];
+
+        for (const candidate of candidates) {
+            const norm = path.posix.normalize(candidate);
+            if (!visited.has(norm)) {
+                await parseFile(norm);
+            }
         }
+
+        const result = Array.from(aclsMap.values());
+        console.log(`[bind9] Discovered ${result.length} ACLs across BIND9 configuration files`);
+        return result;
     }
 
     /**
