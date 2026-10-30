@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { Link, useRoute } from "wouter";
 import { AlertTriangle, ArrowLeft, Copy, Pencil, Plus, Search, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-provider";
@@ -54,6 +55,7 @@ const EMPTY_DNSSEC_SNAPSHOT: DnssecSnapshot = {
 };
 
 export default function ZoneEditor() {
+  const { t, language } = useI18n();
   const [, params] = useRoute("/zones/:id");
   const zoneId = params?.id;
 
@@ -243,6 +245,29 @@ export default function ZoneEditor() {
     fetchData();
   }, [zoneId]);
 
+  const calculatedDefaultTTL = useMemo(() => {
+    if (!records || records.length === 0) return 86400;
+    const ttlCounts = records.reduce<Record<number, number>>((acc, r) => {
+      if (r.ttl) acc[r.ttl] = (acc[r.ttl] || 0) + 1;
+      return acc;
+    }, {});
+    let maxCount = 0;
+    let bestTTL = 86400;
+    for (const [ttlStr, count] of Object.entries(ttlCounts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        bestTTL = Number(ttlStr);
+      }
+    }
+    return bestTTL;
+  }, [records]);
+
+  useEffect(() => {
+    if (calculatedDefaultTTL && !editTarget) {
+      setNewTTL(String(calculatedDefaultTTL));
+    }
+  }, [calculatedDefaultTTL, editTarget]);
+
   const filteredRecords = records.filter(
     (record) =>
       record.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -254,7 +279,7 @@ export default function ZoneEditor() {
     const validation = collectRecordErrors(newRecordValues);
     if (!validation.success) {
       setNewErrors(validation.errors);
-      toast({ title: "Invalid record form", description: Object.values(validation.errors)[0], variant: "destructive" });
+      toast({ title: t.zones.invalidRecordForm, description: Object.values(validation.errors)[0], variant: "destructive" });
       return;
     }
 
@@ -268,7 +293,7 @@ export default function ZoneEditor() {
         priority: validation.data.priority ? parseInt(validation.data.priority, 10) : null,
       });
 
-      toast({ title: "Success", description: "Record created successfully" });
+      toast({ title: t.zones.recordCreatedSuccess, description: t.zones.recordCreatedSuccess });
       setIsDialogOpen(false);
       setNewName("");
       setNewValue("");
@@ -297,7 +322,7 @@ export default function ZoneEditor() {
     const validation = collectRecordErrors(editRecordValues);
     if (!validation.success) {
       setEditErrors(validation.errors);
-      toast({ title: "Invalid record form", description: Object.values(validation.errors)[0], variant: "destructive" });
+      toast({ title: t.zones.invalidRecordForm, description: Object.values(validation.errors)[0], variant: "destructive" });
       return;
     }
 
@@ -310,7 +335,7 @@ export default function ZoneEditor() {
         ttl: parseInt(validation.data.ttl, 10) || 3600,
         priority: validation.data.priority ? parseInt(validation.data.priority, 10) : null,
       });
-      toast({ title: "Success", description: "Record updated successfully" });
+      toast({ title: t.zones.recordUpdatedSuccess, description: t.zones.recordUpdatedSuccess });
       setEditTarget(null);
       setEditErrors({});
       await fetchData();
@@ -324,7 +349,7 @@ export default function ZoneEditor() {
   const handleDelete = async (record: RecordData) => {
     try {
       await deleteRecord(record.id);
-      toast({ title: "Success", description: "Record deleted" });
+      toast({ title: t.zones.recordDeletedSuccess, description: t.zones.recordDeletedSuccess });
       setDeleteTarget(null);
       await fetchData();
     } catch (requestError: any) {
@@ -534,6 +559,7 @@ export default function ZoneEditor() {
             <ZoneRecordsTab
               records={filteredRecords}
               zoneDomain={zone.domain}
+              defaultTTL={calculatedDefaultTTL}
               searchTerm={searchTerm}
               onSearchTermChange={setSearchTerm}
               canManageDNS={canManageZone}
@@ -567,6 +593,7 @@ export default function ZoneEditor() {
           open={isDialogOpen}
           mode="create"
           zoneDomain={zone.domain}
+          defaultTTL={calculatedDefaultTTL}
           submitting={creating}
           values={newRecordValues}
           errors={newErrors}
@@ -586,6 +613,7 @@ export default function ZoneEditor() {
           open={!!editTarget}
           mode="edit"
           zoneDomain={zone.domain}
+          defaultTTL={calculatedDefaultTTL}
           submitting={saving}
           values={editRecordValues}
           errors={editErrors}

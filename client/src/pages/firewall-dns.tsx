@@ -97,7 +97,7 @@ export default function FirewallDNS() {
         mutationFn: createRpzEntry,
         onSuccess: () => {
             invalidateRpzQueries();
-            toast({ title: "Rule added", description: "The DNS firewall rule has been added and applied." });
+            toast({ title: t.rpz.ruleAddedSuccess, description: t.rpz.ruleAddedDesc });
             setNewEntry(EMPTY_ENTRY);
         },
         onError: (error: Error) => {
@@ -110,7 +110,7 @@ export default function FirewallDNS() {
         onSuccess: () => {
             invalidateRpzQueries();
             setDeleteTarget(null);
-            toast({ title: "Rule deleted", description: "The DNS firewall rule has been removed." });
+            toast({ title: t.rpz.ruleDeletedSuccess, description: t.rpz.ruleDeletedDesc });
         },
         onError: (error: Error) => {
             toast({ title: "Failed to delete rule", description: error.message, variant: "destructive" });
@@ -122,7 +122,7 @@ export default function FirewallDNS() {
         onSuccess: () => {
             invalidateRpzQueries();
             setClearAllOpen(false);
-            toast({ title: "All rules cleared", description: "All DNS firewall rules have been removed." });
+            toast({ title: t.rpz.rulesClearedSuccess, description: t.rpz.rulesClearedDesc });
         },
         onError: (error: Error) => {
             toast({ title: "Failed to clear rules", description: error.message, variant: "destructive" });
@@ -133,7 +133,7 @@ export default function FirewallDNS() {
         mutationFn: syncRpzEntries,
         onSuccess: (data) => {
             invalidateRpzQueries();
-            toast({ title: "Sync complete", description: data.message });
+            toast({ title: t.rpz.syncSuccess, description: data.message });
         },
         onError: (error: Error) => {
             toast({ title: "Sync failed", description: error.message, variant: "destructive" });
@@ -364,15 +364,15 @@ export default function FirewallDNS() {
 
                 {rpzSummary?.configured ? (
                     <Alert>
-                        <Shield className="h-4 w-4" />
-                        <AlertTitle>Server-side RPZ detected</AlertTitle>
+                        <Shield className="h-4 w-4 text-primary" />
+                        <AlertTitle>{t.rpz.serverDetectedTitle}</AlertTitle>
                         <AlertDescription>
-                            The active server already exposes the following response-policy zone set:
-                            <span className="mx-1 font-mono">{rpzSummary.zoneName}</span>.
-                            This screen now keeps the synchronized inventory with a source-zone marker for each
-                            rule. New rules and imports are assigned to the primary managed RPZ zone unless a
-                            source zone already exists.
-                            {multipleRpzZones ? " Multiple RPZ zones are active, so the table shows which zone each synchronized rule came from." : ""}
+                            {t.rpz.serverDetectedDesc}
+                            <span className="mx-1 font-mono font-medium">{rpzSummary.zoneName}</span>.
+                            {language === "fr"
+                                ? " Cet écran maintient l'inventaire synchronisé avec un marqueur de zone source pour chaque règle. Les nouvelles règles et imports sont assignés à la zone RPZ primaire gérée sauf si une zone source existe déjà."
+                                : " This screen keeps the synchronized inventory with a source-zone marker for each rule. New rules and imports are assigned to the primary managed RPZ zone unless a source zone already exists."}
+                            {multipleRpzZones ? ` ${t.rpz.serverDetectedMultiple}` : ""}
                         </AlertDescription>
                     </Alert>
                 ) : null}

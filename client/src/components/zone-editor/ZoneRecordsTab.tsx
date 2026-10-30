@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Check, Clock, Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import type { RecordData } from "@/lib/api";
 interface ZoneRecordsTabProps {
   records: RecordData[];
   zoneDomain?: string;
+  defaultTTL?: number;
   searchTerm: string;
   onSearchTermChange: (value: string) => void;
   canManageDNS: boolean;
@@ -30,6 +32,7 @@ type RecordCategory = "all" | "a_aaaa" | "cname" | "mx" | "txt" | "ns_soa" | "ot
 export function ZoneRecordsTab({
   records,
   zoneDomain,
+  defaultTTL,
   searchTerm,
   onSearchTermChange,
   canManageDNS,
@@ -37,8 +40,23 @@ export function ZoneRecordsTab({
   onDeleteRecord,
   onOpenCreate,
 }: ZoneRecordsTabProps) {
+  const { t } = useI18n();
   const [categoryFilter, setCategoryFilter] = useState<RecordCategory>("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Compute predominant zone TTL or fallback
+  const ttlCounts = records.reduce<Record<number, number>>((acc, r) => {
+    if (r.ttl) acc[r.ttl] = (acc[r.ttl] || 0) + 1;
+    return acc;
+  }, {});
+
+  const calculatedDefaultTTL = Object.entries(ttlCounts).reduce(
+    (max, [ttl, count]) => (count > max.count ? { ttl: Number(ttl), count } : max),
+    { ttl: 86400, count: 0 }
+  ).ttl;
+
+  const effectiveZoneTTL = defaultTTL || calculatedDefaultTTL;
+  const inheritingCount = records.filter((r) => r.ttl === effectiveZoneTTL).length;
 
   const handleCopy = (id: string, text: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -133,9 +151,20 @@ export function ZoneRecordsTab({
               onChange={(event) => onSearchTermChange(event.target.value)}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div
+              className="flex items-center gap-1.5 rounded-xl border border-border/70 bg-background/50 px-2.5 py-1 text-xs"
+              title={t.zones.zoneDefaultTtlDesc}
+            >
+              <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="font-medium text-foreground">{t.zones.zoneDefaultTtl} :</span>
+              <span className="font-mono font-bold text-primary">{formatTTL(effectiveZoneTTL)}</span>
+              <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                ({inheritingCount}/{records.length} {t.zones.recordsCountInherited})
+              </span>
+            </div>
             <span className="text-xs text-muted-foreground">
-              {filteredRecords.length} / {records.length} enregistrements affichés
+              {filteredRecords.length} / {records.length} affichés
             </span>
             {canManageDNS && onOpenCreate && (
               <Button size="sm" onClick={onOpenCreate} className="h-9 gap-1.5 rounded-xl">
@@ -356,8 +385,23 @@ export function ZoneRecordsTab({
                     </TableCell>
 
                     {/* TTL */}
-                    <TableCell className="px-4 py-3 align-top font-mono text-xs text-muted-foreground">
-                      {formatTTL(record.ttl)}
+                    <TableCell className="px-4 py-3 align-top font-mono text-xs">
+                      {record.ttl === effectiveZoneTTL ? (
+                        <div className="flex items-center gap-1.5" title={t.zones.zoneDefaultTtlDesc}>
+                          <span className="text-muted-foreground/80 font-mono text-xs">
+                            {formatTTL(record.ttl)}
+                          </span>
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground/70 border-border/40 bg-muted/20">
+                            {t.zones.inheritedTtl}
+                          </Badge>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5" title={t.zones.ttlExplanation}>
+                          <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500 font-mono text-[11px] font-medium px-1.5 py-0.5">
+                            {formatTTL(record.ttl)} • {t.zones.specificTtl}
+                          </Badge>
+                        </div>
+                      )}
                     </TableCell>
 
                     {/* Actions */}

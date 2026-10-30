@@ -91,6 +91,22 @@ export interface Translations {
     activeZones: string;
     masterZones: string;
     secondaryZones: string;
+    zoneDefaultTtl: string;
+    zoneDefaultTtlDesc: string;
+    inheritedTtl: string;
+    specificTtl: string;
+    useDefaultTtl: string;
+    customTtl: string;
+    customTtlOption: string;
+    ttlExplanation: string;
+    recordsCountInherited: string;
+    recordCreatedSuccess: string;
+    recordUpdatedSuccess: string;
+    recordDeletedSuccess: string;
+    invalidRecordForm: string;
+    deleteRecordTitle: string;
+    deleteRecordDesc: string;
+    deleteRecordBtn: string;
   };
   acls: {
     title: string;
@@ -165,6 +181,18 @@ export interface Translations {
     deleteDesc: string;
     clearTitle: string;
     clearDesc: string;
+    serverDetectedTitle: string;
+    serverDetectedDesc: string;
+    serverDetectedMultiple: string;
+    deleteRuleBtn: string;
+    clearAllRulesBtn: string;
+    ruleAddedSuccess: string;
+    ruleAddedDesc: string;
+    ruleDeletedSuccess: string;
+    ruleDeletedDesc: string;
+    rulesClearedSuccess: string;
+    rulesClearedDesc: string;
+    syncSuccess: string;
   };
   firewall: {
     title: string;
@@ -311,6 +339,22 @@ const translations: Record<Language, Translations> = {
       activeZones: "Zones Actives",
       masterZones: "Zones Primaires",
       secondaryZones: "Secondaires & Forward",
+      zoneDefaultTtl: "TTL par défaut de la zone",
+      zoneDefaultTtlDesc: "Durée de mise en cache standard héritée par tous les enregistrements ordinaires de la zone.",
+      inheritedTtl: "Par défaut (Hérité)",
+      specificTtl: "Spécifique",
+      useDefaultTtl: "Utiliser le TTL par défaut de la zone",
+      customTtl: "TTL personnalisé",
+      customTtlOption: "Définir un TTL spécifique pour cet enregistrement",
+      ttlExplanation: "Le TTL global s'applique à tous les enregistrements de la zone. Seuls les services nécessitant un basculement rapide (ex. Active Directory SRV) possèdent un TTL spécifique plus court.",
+      recordsCountInherited: "enregistrements utilisent le TTL par défaut",
+      recordCreatedSuccess: "Enregistrement créé avec succès",
+      recordUpdatedSuccess: "Enregistrement mis à jour avec succès",
+      recordDeletedSuccess: "Enregistrement supprimé avec succès",
+      invalidRecordForm: "Formulaire d'enregistrement non valide",
+      deleteRecordTitle: "Supprimer l'enregistrement DNS",
+      deleteRecordDesc: "Êtes-vous sûr de vouloir supprimer l'enregistrement",
+      deleteRecordBtn: "Supprimer l'enregistrement",
     },
     acls: {
       title: "Listes de Contrôle (ACL) & Clés TSIG",
@@ -385,6 +429,18 @@ const translations: Record<Language, Translations> = {
       deleteDesc: "Êtes-vous sûr de vouloir supprimer cette règle ? Les requêtes vers ce domaine ne seront plus filtrées par cette politique.",
       clearTitle: "Purger toutes les règles",
       clearDesc: "Cette action supprimera toutes les règles de la base de données. Êtes-vous sûr ?",
+      serverDetectedTitle: "Zone RPZ Serveur Détectée",
+      serverDetectedDesc: "Le serveur actif expose déjà l'ensemble de zones de politique de réponse suivant :",
+      serverDetectedMultiple: "Plusieurs zones RPZ sont actives, le tableau affiche donc la zone d'origine de chaque règle synchronisée.",
+      deleteRuleBtn: "Supprimer la règle",
+      clearAllRulesBtn: "Purger toutes les règles",
+      ruleAddedSuccess: "Règle ajoutée",
+      ruleAddedDesc: "La règle de pare-feu DNS a été enregistrée et appliquée.",
+      ruleDeletedSuccess: "Règle supprimée",
+      ruleDeletedDesc: "La règle de filtrage DNS a été retirée.",
+      rulesClearedSuccess: "Toutes les règles purgées",
+      rulesClearedDesc: "L'ensemble des règles RPZ a été supprimé de la base.",
+      syncSuccess: "Synchronisation BIND9 réussie",
     },
     firewall: {
       title: "Pare-feu Réseau",
@@ -529,6 +585,22 @@ const translations: Record<Language, Translations> = {
       activeZones: "Active Zones",
       masterZones: "Primary Zones",
       secondaryZones: "Secondary & Forward",
+      zoneDefaultTtl: "Zone Default TTL",
+      zoneDefaultTtlDesc: "Standard caching duration inherited by all ordinary records.",
+      inheritedTtl: "Default (Inherited)",
+      specificTtl: "Custom",
+      useDefaultTtl: "Use zone default TTL",
+      customTtl: "Custom TTL",
+      customTtlOption: "Set a specific custom TTL for this record",
+      ttlExplanation: "The global TTL applies to all zone records. Only services requiring fast failover (e.g. Active Directory SRV) use shorter specific TTLs.",
+      recordsCountInherited: "records use the default TTL",
+      recordCreatedSuccess: "Record created successfully",
+      recordUpdatedSuccess: "Record updated successfully",
+      recordDeletedSuccess: "Record deleted successfully",
+      invalidRecordForm: "Invalid record form",
+      deleteRecordTitle: "Delete DNS Record",
+      deleteRecordDesc: "Are you sure you want to delete record",
+      deleteRecordBtn: "Delete Record",
     },
     acls: {
       title: "Access Control Lists (ACL) & TSIG Keys",
@@ -603,6 +675,18 @@ const translations: Record<Language, Translations> = {
       deleteDesc: "Are you sure you want to delete this rule? Queries to this domain will no longer be filtered by this policy.",
       clearTitle: "Clear All Rules",
       clearDesc: "This action will remove all rules from the database. Are you sure?",
+      serverDetectedTitle: "Server-side RPZ detected",
+      serverDetectedDesc: "The active server already exposes the following response-policy zone set:",
+      serverDetectedMultiple: "Multiple RPZ zones are active, so the table shows which zone each synchronized rule came from.",
+      deleteRuleBtn: "Delete Rule",
+      clearAllRulesBtn: "Clear All Rules",
+      ruleAddedSuccess: "Rule added",
+      ruleAddedDesc: "The DNS firewall rule has been added and applied.",
+      ruleDeletedSuccess: "Rule deleted",
+      ruleDeletedDesc: "The DNS firewall rule has been removed.",
+      rulesClearedSuccess: "All rules cleared",
+      rulesClearedDesc: "All DNS firewall rules have been removed.",
+      syncSuccess: "Sync complete",
     },
     firewall: {
       title: "Network Firewall",

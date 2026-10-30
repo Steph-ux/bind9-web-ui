@@ -1,4 +1,5 @@
 import type { RecordData } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +22,8 @@ export function RecordDeleteDialog({
   onOpenChange,
   onConfirm,
 }: RecordDeleteDialogProps) {
+  const { t } = useI18n();
+
   return (
     <AlertDialog
       open={!!record}
@@ -30,19 +33,19 @@ export function RecordDeleteDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete DNS Record</AlertDialogTitle>
+          <AlertDialogTitle>{t.zones.deleteRecordTitle}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete record <strong>{record?.name}</strong>{" "}
-            ({record?.type})? This action cannot be undone.
+            {t.zones.deleteRecordDesc} <strong>{record?.name}</strong>{" "}
+            ({record?.type}) ?
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={onConfirm}
           >
-            Delete Record
+            {t.zones.deleteRecordBtn}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

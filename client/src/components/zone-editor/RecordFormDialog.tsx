@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { Check, Copy, Info, Loader2, Mail, Shield, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,7 @@ interface RecordFormDialogProps {
   open: boolean;
   mode: "create" | "edit";
   zoneDomain: string;
+  defaultTTL?: number;
   submitting: boolean;
   values: RecordFormValues;
   errors: Partial<Record<keyof RecordFormValues, string>>;
@@ -41,10 +43,11 @@ interface RecordFormDialogProps {
 
 const COMMON_TYPES: Array<RecordFormValues["type"]> = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "PTR", "NS"];
 const TTL_PRESETS = [
-  { label: "5 min (300s)", value: "300" },
+  { label: "10 min (600s - AD/SRV)", value: "600" },
   { label: "1 heure (3600s)", value: "3600" },
   { label: "4 heures (14400s)", value: "14400" },
   { label: "1 jour (86400s)", value: "86400" },
+  { label: "7 jours (604800s - Hôtes)", value: "604800" },
 ];
 
 function isValidIPv4(ip: string): boolean {
@@ -67,6 +70,7 @@ export function RecordFormDialog({
   open,
   mode,
   zoneDomain,
+  defaultTTL,
   submitting,
   values,
   errors,
@@ -74,7 +78,9 @@ export function RecordFormDialog({
   onFieldChange,
   onSubmit,
 }: RecordFormDialogProps) {
+  const { t } = useI18n();
   const [activeWizard, setActiveWizard] = useState<"none" | "spf" | "dmarc" | "dkim">("none");
+  const effectiveDefaultTTL = defaultTTL || 86400;
 
   // SPF Wizard Local State
   const [spfIncludeMx, setSpfIncludeMx] = useState(true);
@@ -547,32 +553,73 @@ export function RecordFormDialog({
           )}
 
           {/* TTL Preset Selector */}
-          <div>
-            <Label htmlFor={`${mode}-ttl`} className="mb-1.5 block text-xs font-semibold uppercase text-muted-foreground">
-              Duree de vie en cache (TTL en secondes)
-            </Label>
-            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              {TTL_PRESETS.map((preset) => (
-                <button
-                  key={preset.value}
-                  type="button"
-                  onClick={() => onFieldChange("ttl", preset.value)}
-                  className={`rounded-lg border px-2.5 py-1 text-xs transition-all ${
-                    values.ttl === preset.value
-                      ? "border-primary bg-primary/10 text-primary font-bold"
-                      : "border-border/60 bg-background text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
+          <div className="space-y-2 rounded-xl border border-border/60 bg-card/50 p-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor={`${mode}-ttl`} className="text-xs font-semibold uppercase text-muted-foreground">
+                Durée de vie en cache (TTL)
+              </Label>
+              <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
+                Zone : {effectiveDefaultTTL}s
+              </Badge>
             </div>
-            <Input
-              id={`${mode}-ttl`}
-              value={values.ttl}
-              onChange={(e) => onFieldChange("ttl", e.target.value)}
-              className="font-mono text-sm max-w-[200px]"
-            />
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={values.ttl === String(effectiveDefaultTTL) ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  onClick={() => onFieldChange("ttl", String(effectiveDefaultTTL))}
+                >
+                  <Check className={`h-3 w-3 ${values.ttl === String(effectiveDefaultTTL) ? "opacity-100" : "opacity-0"}`} />
+                  {t.zones.useDefaultTtl} ({effectiveDefaultTTL}s)
+                </Button>
+                <Button
+                  type="button"
+                  variant={values.ttl !== String(effectiveDefaultTTL) ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    if (values.ttl === String(effectiveDefaultTTL)) {
+                      onFieldChange("ttl", "600");
+                    }
+                  }}
+                >
+                  {t.zones.customTtl}
+                </Button>
+              </div>
+
+              {values.ttl !== String(effectiveDefaultTTL) && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {TTL_PRESETS.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => onFieldChange("ttl", preset.value)}
+                        className={`rounded-lg border px-2.5 py-1 text-xs transition-all ${
+                          values.ttl === preset.value
+                            ? "border-primary bg-primary/10 text-primary font-bold"
+                            : "border-border/60 bg-background text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={`${mode}-ttl`}
+                      value={values.ttl}
+                      onChange={(e) => onFieldChange("ttl", e.target.value)}
+                      placeholder="TTL en secondes (ex: 600)"
+                      className="font-mono text-sm max-w-[200px] h-8"
+                    />
+                    <span className="text-xs text-muted-foreground">secondes</span>
+                  </div>
+                </div>
+              )}
+            </div>
             {errors.ttl && <p className="mt-1 text-xs text-destructive">{errors.ttl}</p>}
           </div>
         </div>
