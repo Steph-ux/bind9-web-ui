@@ -34,12 +34,12 @@
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "db:push:pg": "cross-env DB_TYPE=postgresql drizzle-kit push --config=drizzle.config.pg.ts",
-    "db:push:mysql": "cross-env DB_TYPE=mysql drizzle-kit push --config=drizzle.config.mysql.ts",
-    "db:generate:pg": "drizzle-kit generate --config=drizzle.config.pg.ts",
-    "db:generate:mysql": "drizzle-kit generate --config=drizzle.config.mysql.ts",
-    "db:studio:pg": "drizzle-kit studio --config=drizzle.config.pg.ts",
-    "db:studio:mysql": "drizzle-kit studio --config=drizzle.config.mysql.ts"
+    "db:push:pg": "cross-env DB_TYPE=postgresql drizzle-kit push",
+    "db:push:mysql": "cross-env DB_TYPE=mysql drizzle-kit push",
+    "db:generate:pg": "cross-env DB_TYPE=postgresql drizzle-kit generate",
+    "db:generate:mysql": "cross-env DB_TYPE=mysql drizzle-kit generate",
+    "db:studio:pg": "cross-env DB_TYPE=postgresql drizzle-kit studio",
+    "db:studio:mysql": "cross-env DB_TYPE=mysql drizzle-kit studio"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
