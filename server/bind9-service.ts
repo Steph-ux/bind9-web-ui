@@ -427,6 +427,24 @@ class Bind9Service {
         return resolvedCommand;
     }
 
+    private resolveLocalDevPath(filePath: string): string {
+        if (!filePath) return filePath;
+        if (process.platform === "win32" && this.mode !== "ssh") {
+            const normalized = filePath.replace(/\\/g, "/");
+            if (
+                normalized.startsWith("/etc/bind") ||
+                normalized.startsWith("/var/cache/bind") ||
+                normalized.startsWith("/var/log/named")
+            ) {
+                const candidate = path.resolve(process.cwd(), "tasks/prod-bind-config" + normalized);
+                if (fs.existsSync(candidate) || fs.existsSync(path.dirname(candidate))) {
+                    return candidate;
+                }
+            }
+        }
+        return filePath;
+    }
+
     async canWritePath(filePath: string): Promise<boolean> {
         if (!filePath) return false;
 
@@ -446,12 +464,13 @@ class Bind9Service {
             return (await this.getPrivilegedCopyCommand()) !== null;
         }
 
+        const effectivePath = this.resolveLocalDevPath(filePath);
         try {
-            await fsPromises.access(filePath, fs.constants.W_OK);
+            await fsPromises.access(effectivePath, fs.constants.W_OK);
             return true;
         } catch {
             try {
-                await fsPromises.access(path.posix.dirname(filePath), fs.constants.W_OK);
+                await fsPromises.access(path.dirname(effectivePath), fs.constants.W_OK);
                 return true;
             } catch {
                 return false;
@@ -714,7 +733,8 @@ class Bind9Service {
             }
             return sshManager.readFile(filePath);
         }
-        return fsPromises.readFile(filePath, "utf-8");
+        const effective = this.resolveLocalDevPath(filePath);
+        return fsPromises.readFile(effective, "utf-8");
     }
 
     /** Write a file (locally or via SSH/SFTP) â€” tries SFTP first, falls back to sudo tee */
@@ -735,8 +755,10 @@ class Bind9Service {
             this.managementSummaryCache = null;
             return;
         }
+        const effective = this.resolveLocalDevPath(filePath);
         try {
-            await fsPromises.writeFile(filePath, content, "utf-8");
+            await fsPromises.mkdir(path.dirname(effective), { recursive: true });
+            await fsPromises.writeFile(effective, content, "utf-8");
         } catch (err: any) {
             if (process.platform === "linux" && process.getuid && process.getuid() !== 0) {
                 const tmpFile = `/tmp/bind9admin_${Date.now()}_${path.basename(filePath)}.tmp`;
@@ -809,6 +831,10 @@ class Bind9Service {
     /** Check if BIND9/rndc is available */
     async isAvailable(): Promise<boolean> {
         if (this.available !== null) return this.available;
+        if (process.platform === "win32" && this.mode !== "ssh") {
+            this.available = true;
+            return true;
+        }
         if (this.mode === "ssh" && !sshManager.getState().connected) {
             return false;
         }
@@ -828,6 +854,10 @@ class Bind9Service {
         // Shell metacharacters (; | & $ ` ! () <> etc.) are blocked
         if (!/^[a-zA-Z0-9.\/_ -]+$/.test(command)) {
             throw new Error(`Invalid rndc command: contains disallowed characters`);
+        }
+        if (process.platform === "win32" && this.mode !== "ssh") {
+            console.log(`[bind9] Local dev: mock rndc ${command}`);
+            return "server reload successful";
         }
         try {
             const { stdout, stderr } = await this.execCommand(`${RNDC_BIN} ${command}`, true);
@@ -906,6 +936,10 @@ class Bind9Service {
         const safePath = filePath.replace(/["'\n\r]/g, "");
         if (!safePath) {
             throw new Error("Zone file path is required");
+        }
+        if (process.platform === "win32" && this.mode !== "ssh") {
+            console.log(`[bind9] Local dev: skipping native named-checkzone for ${safeDomain}`);
+            return;
         }
         try {
             await this.execCommand(`${NAMED_CHECKZONE} ${safeDomain} ${safePath}`, true);
@@ -2044,10 +2078,16 @@ zone "${safeDomain}" {
 
     // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    private generateSerial(): string {
+    generateSerial(currentSerial?: string): string {
         const now = new Date();
-        const date = now.toISOString().slice(0, 10).replace(/-/g, "");
-        return `${date}01`;
+        const datePrefix = now.toISOString().slice(0, 10).replace(/-/g, "");
+        if (currentSerial && currentSerial.startsWith(datePrefix)) {
+            const currentNum = parseInt(currentSerial.slice(datePrefix.length), 10);
+            if (!isNaN(currentNum)) {
+                return `${datePrefix}${String(currentNum + 1).padStart(2, "0")}`;
+            }
+        }
+        return `${datePrefix}01`;
     }
 
     private parseZoneFile(content: string): Array<{ name: string; type: string; value: string; ttl: number; priority?: number }> {

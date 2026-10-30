@@ -69,6 +69,7 @@ const writeZoneState = async (
     filePath: string;
     adminEmail: string | null;
     replicationEnabled: boolean | null;
+    serial?: string | null;
   },
   records: Array<{ name: string; type: string; value: string; ttl: number; priority: number | null }>,
 ) => {
@@ -80,9 +81,7 @@ const writeZoneState = async (
   }
 
   await bind9Service.assertWritablePath(zone.filePath, `write zone file for ${zone.domain}`);
-  const serial =
-    new Date().toISOString().slice(0, 10).replace(/-/g, "") +
-    String(Math.floor(Math.random() * 99) + 1).padStart(2, "0");
+  const serial = bind9Service.generateSerial(zone.serial || undefined);
 
   await bind9Service.writeZoneFile(zone.filePath, zone.domain, toBindZoneRecords(records), serial, {
     adminEmail: zone.adminEmail || undefined,
