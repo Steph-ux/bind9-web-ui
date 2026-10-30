@@ -108,7 +108,7 @@ cleanupInterval.unref?.();
 export function setupAuth(app: Express) {
     const isProduction = app.get("env") === "production";
     const sessionTtlMs = 24 * 60 * 60 * 1000;
-    const sessionCookieName = isProduction ? "__Host-bind9admin.sid" : "bind9admin.sid";
+    const sessionCookieName = "bind9admin.sid";
     const MemoryStore = createMemoryStore(session);
     const sessionStore = new MemoryStore({
         checkPeriod: sessionTtlMs,
@@ -136,9 +136,9 @@ export function setupAuth(app: Express) {
         unset: "destroy",
         store: sessionStore,
         cookie: {
-            secure: isProduction,
+            secure: isProduction ? "auto" : false,
             httpOnly: true,
-            sameSite: isProduction ? "strict" : "lax",
+            sameSite: "lax",
             path: "/",
             maxAge: sessionTtlMs,
         },

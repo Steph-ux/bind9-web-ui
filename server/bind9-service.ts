@@ -794,6 +794,9 @@ class Bind9Service {
     /** Check if BIND9/rndc is available */
     async isAvailable(): Promise<boolean> {
         if (this.available !== null) return this.available;
+        if (this.mode === "ssh" && !sshManager.getState().connected) {
+            return false;
+        }
         try {
             await this.execCommand(`${RNDC_BIN} status`, true);
             this.available = true;
