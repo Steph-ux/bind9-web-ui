@@ -127,6 +127,45 @@ export interface Translations {
     forwarders: string;
     accessControls: string;
   };
+  rpz: {
+    title: string;
+    subtitle: string;
+    totalRules: string;
+    blockedNxdomain: string;
+    blockedNodata: string;
+    redirected: string;
+    addNewRule: string;
+    blockOrRedirect: string;
+    domainName: string;
+    wildcardsSupported: string;
+    action: string;
+    blockNxdomain: string;
+    blockNodata: string;
+    redirect: string;
+    redirectTarget: string;
+    commentOptional: string;
+    reasonPlaceholder: string;
+    addRuleBtn: string;
+    quickActions: string;
+    syncFromBind: string;
+    clearAllRules: string;
+    activeRules: string;
+    allTypes: string;
+    searchPlaceholder: string;
+    domainCol: string;
+    typeCol: string;
+    targetCol: string;
+    commentCol: string;
+    actionsCol: string;
+    noRules: string;
+    noRulesDesc: string;
+    previous: string;
+    next: string;
+    deleteTitle: string;
+    deleteDesc: string;
+    clearTitle: string;
+    clearDesc: string;
+  };
   logs: {
     title: string;
     subtitle: string;
@@ -266,6 +305,45 @@ const translations: Record<Language, Translations> = {
       forwarders: "Redirecteurs Globaux (Forwarders)",
       accessControls: "Contrôles d'Accès Globaux",
     },
+    rpz: {
+      title: "Pare-feu DNS (RPZ)",
+      subtitle: "Filtrage préventif des menaces et contrôle des domaines indésirables par Response Policy Zones.",
+      totalRules: "Règles RPZ Actives",
+      blockedNxdomain: "Bloqués (NXDOMAIN)",
+      blockedNodata: "Silencieux (NODATA)",
+      redirected: "Redirigés (CNAME)",
+      addNewRule: "Ajouter une règle",
+      blockOrRedirect: "Bloquer ou rediriger un domaine",
+      domainName: "Nom de domaine",
+      wildcardsSupported: "Les jokers comme *.example.com sont pris en charge automatiquement.",
+      action: "Action",
+      blockNxdomain: "Bloquer (NXDOMAIN)",
+      blockNodata: "Bloquer en silence (NODATA)",
+      redirect: "Rediriger (CNAME / IP)",
+      redirectTarget: "Cible de redirection (IP ou FQDN)",
+      commentOptional: "Commentaire (Optionnel)",
+      reasonPlaceholder: "Motif de filtrage...",
+      addRuleBtn: "Ajouter la règle",
+      quickActions: "Actions Rapides",
+      syncFromBind: "Synchroniser depuis le fichier de zone",
+      clearAllRules: "Purger toutes les règles",
+      activeRules: "Règles RPZ Actives",
+      allTypes: "Tous les types",
+      searchPlaceholder: "Rechercher un domaine...",
+      domainCol: "Domaine",
+      typeCol: "Action / Type",
+      targetCol: "Cible",
+      commentCol: "Commentaire",
+      actionsCol: "Actions",
+      noRules: "Aucune règle RPZ",
+      noRulesDesc: "Ajoutez une règle manuellement ou synchronisez avec le serveur BIND9.",
+      previous: "Précédent",
+      next: "Suivant",
+      deleteTitle: "Supprimer la règle RPZ",
+      deleteDesc: "Êtes-vous sûr de vouloir supprimer cette règle ? Les requêtes vers ce domaine ne seront plus filtrées par cette politique.",
+      clearTitle: "Purger toutes les règles",
+      clearDesc: "Cette action supprimera toutes les règles de la base de données. Êtes-vous sûr ?",
+    },
     logs: {
       title: "Logs & Audit",
       subtitle: "Journalisation en continu des requêtes, rechargements et alertes de sécurité.",
@@ -402,6 +480,45 @@ const translations: Record<Language, Translations> = {
       capabilities: "Administration Capabilities",
       forwarders: "Global Forwarders",
       accessControls: "Global Access Controls",
+    },
+    rpz: {
+      title: "DNS Firewall (RPZ)",
+      subtitle: "Proactive threat filtering and unwanted domain control via Response Policy Zones.",
+      totalRules: "Active RPZ Rules",
+      blockedNxdomain: "Blocked (NXDOMAIN)",
+      blockedNodata: "Silent Block (NODATA)",
+      redirected: "Redirected (CNAME)",
+      addNewRule: "Add New Rule",
+      blockOrRedirect: "Block or redirect a domain",
+      domainName: "Domain Name",
+      wildcardsSupported: "Wildcards like *.example.com are supported automatically.",
+      action: "Action",
+      blockNxdomain: "Block (NXDOMAIN)",
+      blockNodata: "Silent Block (NODATA)",
+      redirect: "Redirect (CNAME / IP)",
+      redirectTarget: "Redirect Target (IP or FQDN)",
+      commentOptional: "Comment (Optional)",
+      reasonPlaceholder: "Reason for blocking...",
+      addRuleBtn: "Add Rule",
+      quickActions: "Quick Actions",
+      syncFromBind: "Sync from BIND9 Zone File",
+      clearAllRules: "Clear All Rules",
+      activeRules: "Active RPZ Rules",
+      allTypes: "All Types",
+      searchPlaceholder: "Search domain...",
+      domainCol: "Domain",
+      typeCol: "Action / Type",
+      targetCol: "Target",
+      commentCol: "Comment",
+      actionsCol: "Actions",
+      noRules: "No RPZ rules",
+      noRulesDesc: "Add a rule manually or sync from your BIND9 server zone file.",
+      previous: "Previous",
+      next: "Next",
+      deleteTitle: "Delete RPZ Rule",
+      deleteDesc: "Are you sure you want to delete this rule? Queries to this domain will no longer be filtered by this policy.",
+      clearTitle: "Clear All Rules",
+      clearDesc: "This action will remove all rules from the database. Are you sure?",
     },
     logs: {
       title: "Logs & Audit",

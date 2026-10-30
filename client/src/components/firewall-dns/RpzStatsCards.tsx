@@ -1,6 +1,7 @@
-import { Globe, Shield } from "lucide-react";
+import { Ban, CornerUpRight, Globe, Shield } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricCard } from "@/components/layout/MetricCard";
+import { useI18n } from "@/lib/i18n";
 import type { RpzStats } from "./types";
 
 type RpzStatsCardsProps = {
@@ -8,44 +9,38 @@ type RpzStatsCardsProps = {
 };
 
 export function RpzStatsCards({ stats }: RpzStatsCardsProps) {
+    const { t, language } = useI18n();
+
     return (
-        <div className="grid gap-4 md:grid-cols-4">
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total Rules</CardTitle>
-                    <Shield className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                    <div className="text-2xl font-bold">{stats?.total ?? 0}</div>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Blocked (NXDOMAIN)</CardTitle>
-                    <Globe className="h-4 w-4 text-destructive" />
-                </CardHeader>
-                <CardContent>
-                    <div className="text-2xl font-bold">{stats?.nxdomain ?? 0}</div>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">No Data (NODATA)</CardTitle>
-                    <Globe className="h-4 w-4 text-orange-500" />
-                </CardHeader>
-                <CardContent>
-                    <div className="text-2xl font-bold">{stats?.nodata ?? 0}</div>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Redirected</CardTitle>
-                    <Globe className="h-4 w-4 text-blue-500" />
-                </CardHeader>
-                <CardContent>
-                    <div className="text-2xl font-bold">{stats?.redirect ?? 0}</div>
-                </CardContent>
-            </Card>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+                label={t.rpz.totalRules}
+                value={stats?.total ?? 0}
+                description={language === "fr" ? "Catalogue RPZ actif" : "Active RPZ catalog"}
+                icon={Shield}
+                tone="default"
+            />
+            <MetricCard
+                label={t.rpz.blockedNxdomain}
+                value={stats?.nxdomain ?? 0}
+                description={language === "fr" ? "Politique NXDOMAIN" : "NXDOMAIN policy"}
+                icon={Ban}
+                tone="danger"
+            />
+            <MetricCard
+                label={t.rpz.blockedNodata}
+                value={stats?.nodata ?? 0}
+                description={language === "fr" ? "Politique NODATA" : "NODATA policy"}
+                icon={Globe}
+                tone="warning"
+            />
+            <MetricCard
+                label={t.rpz.redirected}
+                value={stats?.redirect ?? 0}
+                description={language === "fr" ? "Redirection CNAME / A" : "CNAME / A redirection"}
+                icon={CornerUpRight}
+                tone="success"
+            />
         </div>
     );
 }

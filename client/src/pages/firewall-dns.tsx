@@ -8,6 +8,7 @@ import { RpzImportDialog } from "@/components/firewall-dns/RpzImportDialog";
 import { RpzRuleFormCard } from "@/components/firewall-dns/RpzRuleFormCard";
 import { RpzRulesTableCard } from "@/components/firewall-dns/RpzRulesTableCard";
 import { RpzStatsCards } from "@/components/firewall-dns/RpzStatsCards";
+import { useI18n } from "@/lib/i18n";
 import type { RpzEntryDraft, RpzTypeFilter } from "@/components/firewall-dns/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -39,6 +40,7 @@ const EMPTY_ENTRY: RpzEntryDraft = {
 };
 
 export default function FirewallDNS() {
+    const { t, language } = useI18n();
     const { toast } = useToast();
     const queryClient = useQueryClient();
 
@@ -318,14 +320,9 @@ export default function FirewallDNS() {
         <DashboardLayout>
             <div className="space-y-6">
                 <PageHeader
-                    title="DNS Firewall (RPZ)"
-                    description="Manage Response Policy Zones to block, redirect or null-route malicious domains."
+                    title={t.rpz.title}
+                    description={t.rpz.subtitle}
                     icon={Shield}
-                    badge={
-                        <Badge variant="outline">
-                            {stats?.total ?? 0} rule{(stats?.total ?? 0) !== 1 ? "s" : ""}
-                        </Badge>
-                    }
                     actions={
                         <div className="flex items-center gap-2">
                             <RpzImportDialog
@@ -356,16 +353,14 @@ export default function FirewallDNS() {
                     }
                 />
 
-                <Alert>
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle>How it works</AlertTitle>
-                    <AlertDescription>
-                        DNS Firewall rules intercept queries for specific domains.{" "}
-                        <span className="font-semibold">NXDOMAIN</span> returns "Not Found",{" "}
-                        <span className="font-semibold">NODATA</span> returns no records, and{" "}
-                        <span className="font-semibold">REDIRECT</span> sends traffic to a different IP or domain.
-                    </AlertDescription>
-                </Alert>
+                <div className="rounded-xl border border-border/50 bg-card/50 px-3.5 py-2.5 text-xs text-muted-foreground flex items-center gap-2.5">
+                    <AlertTriangle className="h-4 w-4 text-primary shrink-0" />
+                    <span>
+                        {language === "fr"
+                            ? "Le pare-feu DNS RPZ intercepte les requêtes vers les domaines ciblés : NXDOMAIN bloque l'accès (introuvable), NODATA bloque les enregistrements et REDIRECT redirige vers une IP ou domaine de sécurité."
+                            : "DNS Firewall rules intercept queries for target domains: NXDOMAIN returns Not Found, NODATA returns no records, and REDIRECT routes traffic to a sinkhole IP."}
+                    </span>
+                </div>
 
                 {rpzSummary?.configured ? (
                     <Alert>
@@ -384,9 +379,9 @@ export default function FirewallDNS() {
 
                 <RpzStatsCards stats={stats} />
 
-                <div className="grid gap-6 md:grid-cols-12">
+                <div className="grid gap-5 lg:grid-cols-12 items-start">
                     <RpzRuleFormCard
-                        className="md:col-span-4"
+                        className="lg:col-span-4 h-fit lg:sticky lg:top-16"
                         entry={newEntry}
                         onEntryChange={setNewEntry}
                         onSubmit={handleSubmit}
@@ -399,7 +394,7 @@ export default function FirewallDNS() {
                     />
 
                     <RpzRulesTableCard
-                        className="md:col-span-8"
+                        className="lg:col-span-8"
                         entries={entries}
                         totalEntries={totalEntries}
                         page={page}
@@ -420,13 +415,11 @@ export default function FirewallDNS() {
             <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Delete DNS Firewall Rule</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Are you sure you want to delete this rule? This action cannot be undone.
-                        </AlertDialogDescription>
+                        <AlertDialogTitle>{t.rpz.deleteTitle}</AlertDialogTitle>
+                        <AlertDialogDescription>{t.rpz.deleteDesc}</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
                         <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
@@ -440,14 +433,13 @@ export default function FirewallDNS() {
             <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Clear All DNS Firewall Rules</AlertDialogTitle>
+                        <AlertDialogTitle>{t.rpz.clearTitle}</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Are you sure you want to delete all {stats?.total ?? 0} rules? This will remove the entire RPZ
-                            blocklist and cannot be undone.
+                            {t.rpz.clearDesc}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
                         <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             onClick={() => clearAllMutation.mutate()}

@@ -297,44 +297,7 @@ export async function registerRoutes(
   registerZoneRoutes({ app, requireViewer, requireOperator, safeError });
 
   // â”€â”€ Restore SSH connections on startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  try {
-    const allConns = await storage.getConnections();
-    // Register all connections in the pool
-    for (const conn of allConns) {
-      sshManager.register(conn.id, {
-        host: conn.host,
-        port: conn.port,
-        username: conn.username,
-        authType: conn.authType as "password" | "key",
-        password: conn.password || undefined,
-        privateKey: conn.privateKey || undefined,
-      });
-    }
-    // Connect all registered connections
-    for (const conn of allConns) {
-      try {
-        await sshManager.connectById(conn.id);
-        await storage.updateConnection(conn.id, { lastStatus: "connected" });
-        console.log(`[startup] SSH connection restored: ${conn.name} (${conn.host})`);
-      } catch (e: any) {
-        await storage.updateConnection(conn.id, { lastStatus: "failed" });
-        console.log(`[startup] SSH connection failed for ${conn.name}: ${e.message}`);
-      }
-    }
-    // Set the active connection for bind9-service
-    const activeConn = allConns.find(c => c.isActive);
-    if (activeConn) {
-      sshManager.setActive(activeConn.id);
-      bind9Service.configure({
-        mode: "ssh",
-        confDir: activeConn.bind9ConfDir || undefined,
-        zoneDir: activeConn.bind9ZoneDir || undefined,
-        rndcBin: activeConn.rndcBin || undefined,
-      });
-    }
-  } catch (e: any) {
-    console.log(`[startup] No active connection: ${e.message}`);
-  }
+  // Native local BIND9 appliance mode
 
   // â”€â”€ Auto-sync ACLs and Keys on startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
