@@ -1,4 +1,4 @@
-﻿// Copyright Â(c) 2025 Stephane ASSOGBA
+// Copyright Â(c) 2025 Stephane ASSOGBA
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import http from "http";
@@ -21,6 +21,7 @@ import { registerOperationsRoutes } from "./operations-routes";
 import { registerReplicationRoutes } from "./replication-routes";
 import { registerRpzRoutes } from "./rpz-routes";
 import { registerSystemRoutes } from "./system-routes";
+import { registerHostRoutes } from "./host-routes";
 import { registerUserManagementRoutes } from "./user-management-routes";
 import { registerZoneRoutes } from "./zone-routes";
 
@@ -213,7 +214,11 @@ export async function registerRoutes(
   };
 
   const verifySessionCookie = (cookie: string, callback: (res: boolean, code?: number, message?: string) => void) => {
-    if (!cookie.includes("connect.sid")) {
+    const hasSessionCookie =
+      /(?:^|;\s*)(?:__Host-)?(?:bind9admin|connect)\.sid=/.test(cookie) ||
+      cookie.includes("bind9admin.sid") ||
+      cookie.includes("connect.sid");
+    if (!hasSessionCookie) {
       return callback(false, 4001, "Authentication required");
     }
     const req = http.request({
@@ -267,6 +272,14 @@ export async function registerRoutes(
   });
 
   registerSystemRoutes({
+    app,
+    requireViewer,
+    requireOperator,
+    requireAdmin,
+    safeError,
+  });
+
+  registerHostRoutes({
     app,
     requireViewer,
     requireOperator,
@@ -542,6 +555,20 @@ export async function registerRoutes(
     server: httpServer,
     path: "/ws/logs",
     verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
+      if (info.origin) {
+        try {
+          const originUrl = new URL(info.origin);
+          const hostHeader = info.req.headers?.host;
+          if (hostHeader) {
+            const hostClean = hostHeader.split(":")[0].toLowerCase();
+            if (originUrl.hostname.toLowerCase() !== hostClean && originUrl.hostname !== "127.0.0.1" && originUrl.hostname !== "localhost") {
+              return callback(false, 4003, "Forbidden cross-origin WebSocket request");
+            }
+          }
+        } catch {
+          return callback(false, 4003, "Invalid origin header");
+        }
+      }
       const cookie = info.req.headers?.cookie || "";
       verifySessionCookie(cookie, callback);
     },
@@ -563,8 +590,21 @@ export async function registerRoutes(
   const replWss = new WebSocketServer({
     server: httpServer,
     path: "/ws/replication",
-    verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
-      // Same auth as log WS â€” cookie-based
+        verifyClient: (info: { origin: string; secure: boolean; req: any }, callback: (res: boolean, code?: number, message?: string) => void) => {
+      if (info.origin) {
+        try {
+          const originUrl = new URL(info.origin);
+          const hostHeader = info.req.headers?.host;
+          if (hostHeader) {
+            const hostClean = hostHeader.split(":")[0].toLowerCase();
+            if (originUrl.hostname.toLowerCase() !== hostClean && originUrl.hostname !== "127.0.0.1" && originUrl.hostname !== "localhost") {
+              return callback(false, 4003, "Forbidden cross-origin WebSocket request");
+            }
+          }
+        } catch {
+          return callback(false, 4003, "Invalid origin header");
+        }
+      }
       const cookie = info.req.headers?.cookie || "";
       verifySessionCookie(cookie, callback);
     },

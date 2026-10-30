@@ -84,13 +84,32 @@ export const zones = sqliteTable("zones", {
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
-export const insertZoneSchema = createInsertSchema(zones).pick({
-  domain: true,
-  type: true,
-  adminEmail: true,
-  masterServers: true,
-  forwarders: true,
-});
+export const domainSchema = z
+  .string()
+  .trim()
+  .min(1, "Domain is required")
+  .max(253, "Domain name cannot exceed 253 characters")
+  .refine(
+    (value) => {
+      if (value.includes("/") || value.includes("\\") || value.includes("..") || value.includes("\0")) {
+        return false;
+      }
+      return /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-_]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-_]{0,61}[a-zA-Z0-9])?\.?$/.test(value);
+    },
+    "Invalid domain format. Domain must be a valid DNS FQDN or reverse ARPA name without directory traversal characters"
+  );
+
+export const insertZoneSchema = createInsertSchema(zones)
+  .pick({
+    domain: true,
+    type: true,
+    adminEmail: true,
+    masterServers: true,
+    forwarders: true,
+  })
+  .extend({
+    domain: domainSchema,
+  });
 export type InsertZone = z.infer<typeof insertZoneSchema>;
 export type Zone = typeof zones.$inferSelect;
 

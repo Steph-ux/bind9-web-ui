@@ -1,4 +1,4 @@
-﻿import fs from "fs/promises";
+import fs from "fs/promises";
 import path from "path";
 import { storage } from "./storage";
 import { bind9Service } from "./bind9-service";
@@ -130,11 +130,12 @@ class BackupService {
     const configs: Record<string, string> = {};
     if (!(await bind9Service.isAvailable())) return configs;
 
+    const confDir = process.env.BIND9_CONF_DIR || "/etc/bind";
     const confFiles = [
-      { name: "named.conf.options", path: "/etc/bind/named.conf.options" },
-      { name: "named.conf.local", path: "/etc/bind/named.conf.local" },
-      { name: "named.conf.acls", path: "/etc/bind/named.conf.acls" },
-      { name: "named.conf", path: "/etc/bind/named.conf" },
+      { name: "named.conf.options", path: path.posix.join(confDir, "named.conf.options") },
+      { name: "named.conf.local", path: path.posix.join(confDir, "named.conf.local") },
+      { name: "named.conf.acls", path: path.posix.join(confDir, "named.conf.acls") },
+      { name: "named.conf", path: path.posix.join(confDir, "named.conf") },
     ];
 
     for (const file of confFiles) {

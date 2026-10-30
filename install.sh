@@ -25,7 +25,7 @@ SERVER_NAME="${SERVER_NAME:-_}"
 TLS_CERT="${TLS_CERT:-/etc/ssl/certs/${APP_NAME}.crt}"
 TLS_KEY="${TLS_KEY:-/etc/ssl/private/${APP_NAME}.key}"
 DISABLE_DEFAULT_SITE="${DISABLE_DEFAULT_SITE:-0}"
-LOCAL_BIND_ACCESS="${LOCAL_BIND_ACCESS:-0}"
+LOCAL_BIND_ACCESS="${LOCAL_BIND_ACCESS:-1}"
 BIND_GROUP="${BIND_GROUP:-bind}"
 SYSTEMD_READWRITE_PATHS="$INSTALL_DIR/data"
 SYSTEMD_SUPPLEMENTARY_GROUPS=""
@@ -162,6 +162,21 @@ sync_application() {
 
   mkdir -p "$INSTALL_DIR/data/backups"
   chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
+}
+
+
+configure_sudoers() {
+  log "Configuring sudoers permissions for $SERVICE_USER"
+  local sudoers_file="/etc/sudoers.d/${APP_NAME}"
+  cat > "$sudoers_file" <<EOF
+# Privileges for BIND9 Web UI host service management and automated installation
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start bind9, /usr/bin/systemctl stop bind9, /usr/bin/systemctl restart bind9, /usr/bin/systemctl reload bind9, /usr/bin/systemctl enable bind9, /usr/bin/systemctl is-active bind9, /usr/bin/systemctl is-enabled bind9, /usr/bin/systemctl status bind9, /usr/bin/systemctl show * bind9
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start named, /usr/bin/systemctl stop named, /usr/bin/systemctl restart named, /usr/bin/systemctl reload named, /usr/bin/systemctl enable named, /usr/bin/systemctl is-active named, /usr/bin/systemctl is-enabled named, /usr/bin/systemctl status named, /usr/bin/systemctl show * named
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/sbin/named-checkconf *, /usr/sbin/named-checkzone *, /usr/sbin/rndc *, /usr/sbin/rndc-confgen *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get *, /usr/bin/apt-get *, /usr/bin/dnf *, /usr/bin/yum *, /usr/bin/apk *, /usr/bin/pacman *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/* /etc/bind/*, /usr/bin/cp /tmp/* /etc/named/*, /usr/bin/rm -f /tmp/*, /usr/bin/chown * /etc/bind*, /usr/bin/chmod * /etc/bind*, /usr/bin/chown * /var/cache/bind*, /usr/bin/chmod * /var/cache/bind*, /usr/bin/mkdir -p /etc/bind*, /usr/bin/mkdir -p /var/cache/bind*
+EOF
+  chmod 440 "$sudoers_file"
 }
 
 configure_local_bind_access() {
@@ -302,8 +317,8 @@ EnvironmentFile=$ENV_FILE
 ExecStart=/usr/bin/node $INSTALL_DIR/dist/index.cjs
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
+NoNewPrivileges=false
+PrivateTmp=false
 ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=$SYSTEMD_READWRITE_PATHS
@@ -522,6 +537,7 @@ main() {
   ensure_service_user
   sync_application
   configure_local_bind_access
+  configure_sudoers
   configure_environment
   build_application
   install_systemd_unit

@@ -22,7 +22,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { getBindInfo, getStatus, type BindInfoData, type StatusData } from "@/lib/api";
+import { getBindInfo, getStatus, getHostDetection, type BindInfoData, type StatusData } from "@/lib/api";
+import { BindHostWizardDialog, BindServiceActions, DnsQueryTesterCard } from "@/components/host";
+import { Wrench } from "lucide-react";
 
 interface StatusSnapshot {
   status: StatusData;
@@ -79,6 +81,12 @@ export default function Status() {
             : null,
       };
     },
+    refetchInterval: 10_000,
+  });
+
+  const { data: hostDetection, refetch: refetchHost } = useQuery({
+    queryKey: ["host-detection"],
+    queryFn: getHostDetection,
     refetchInterval: 10_000,
   });
 
@@ -164,6 +172,7 @@ export default function Status() {
             </Badge>
           }
           actions={
+            <>
             <Button
               variant="outline"
               className="h-10 gap-2 rounded-xl border-border/70 bg-background/70 shadow-none"
@@ -177,7 +186,29 @@ export default function Status() {
               )}
               Refresh
             </Button>
+            <BindHostWizardDialog
+              detection={hostDetection || null}
+              onRefresh={() => {
+                refetchHost();
+                refetch();
+              }}
+              triggerButton={
+                <Button className="h-10 gap-2 rounded-xl bg-primary hover:bg-primary/90 text-white shadow-none">
+                  <Wrench className="h-4 w-4" />
+                  Assistant BIND9
+                </Button>
+              }
+            />
+            </>
           }
+        />
+
+        <BindServiceActions
+          detection={hostDetection || null}
+          onRefresh={() => {
+            refetchHost();
+            refetch();
+          }}
         />
 
         {bindInfoError ? (
@@ -656,6 +687,7 @@ export default function Status() {
             </CardContent>
           </Card>
         ) : null}
+        <DnsQueryTesterCard />
       </div>
     </DashboardLayout>
   );

@@ -21,7 +21,10 @@ import { PageHeader, PageState } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboard, executeRndc } from "@/lib/api";
+import { getDashboard, executeRndc, getHostDetection } from "@/lib/api";
+import { AlertCircle, Wrench } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { BindHostWizardDialog, DnsQueryTesterCard } from "@/components/host";
 import { useToast } from "@/hooks/use-toast";
 
 const RecordDistributionCard = lazy(async () => {
@@ -64,6 +67,12 @@ export default function Dashboard() {
   } = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboard,
+    refetchInterval: 10_000,
+  });
+
+  const { data: hostDetection, refetch: refetchHost } = useQuery({
+    queryKey: ["host-detection"],
+    queryFn: getHostDetection,
     refetchInterval: 10_000,
   });
 
@@ -165,7 +174,7 @@ export default function Dashboard() {
                 <span className="hidden sm:inline">Exporter rapport</span>
               </Button>
               <Button
-                className="h-10 gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-indigo-600"
+                className="h-10 gap-2 rounded-xl bg-primary text-primary-foreground font-medium shadow-sm hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-all"
                 onClick={() => refetch()}
                 disabled={isFetching}
               >
@@ -176,12 +185,48 @@ export default function Dashboard() {
           }
         />
 
+        {/* Host BIND9 Needs Installation or Initialization Banner */}
+        {hostDetection && (hostDetection.needsInstallation || hostDetection.needsInitialization) && (
+          <Alert className="border-indigo-500/40 bg-indigo-500/10 text-foreground flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-2xl shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 shrink-0">
+                <Wrench className="h-5 w-5" />
+              </div>
+              <div>
+                <AlertTitle className="text-sm font-bold text-foreground">
+                  {hostDetection.needsInstallation
+                    ? "Configuration Serveur : BIND9 n'est pas encore installé sur ce système"
+                    : "Configuration Requise : L'arborescence ou la configuration BIND9 doit être initialisée"}
+                </AlertTitle>
+                <AlertDescription className="text-xs text-muted-foreground mt-0.5">
+                  {hostDetection.needsInstallation
+                    ? `Le binaire named est absent sur ${hostDetection.os.distro}. Utilisez l'assistant intégré pour installer les paquets automatiquement.`
+                    : "Les fichiers named.conf.options ou named.conf.local sont manquants. L'assistant va configurer les profils DNS (Autoritaire, Cacheur ou Hybride)."}
+                </AlertDescription>
+              </div>
+            </div>
+            <BindHostWizardDialog
+              detection={hostDetection}
+              onRefresh={() => {
+                refetchHost();
+                refetch();
+              }}
+              triggerButton={
+                <Button className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 shrink-0 font-medium shadow-sm transition-all">
+                  <Wrench className="h-4 w-4" />
+                  Lancer l'Assistant BIND9
+                </Button>
+              }
+            />
+          </Alert>
+        )}
+
         <DashboardMetricsGrid data={data} />
 
         {/* Quick DNS Actions Panel */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Link href="/zones">
-            <div className="group cursor-pointer rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 via-background to-background p-4 transition-all duration-200 hover:border-indigo-500/40 hover:shadow-lg hover:shadow-indigo-500/5">
+            <div className="group cursor-pointer rounded-2xl border border-border/70 bg-card/80 p-4 transition-all duration-200 hover:border-primary/50 hover:bg-muted/40 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400">
                   <Plus className="h-5 w-5" />
@@ -194,7 +239,7 @@ export default function Dashboard() {
           </Link>
           <div
             onClick={handleRndcReload}
-            className="group cursor-pointer rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-background to-background p-4 transition-all duration-200 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/5"
+            className="group cursor-pointer rounded-2xl border border-border/70 bg-card/80 p-4 transition-all duration-200 hover:border-emerald-500/50 hover:bg-muted/40 shadow-sm"
           >
             <div className="flex items-center justify-between">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
@@ -207,7 +252,7 @@ export default function Dashboard() {
           </div>
           <div
             onClick={handleRndcFlush}
-            className="group cursor-pointer rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/10 via-background to-background p-4 transition-all duration-200 hover:border-sky-500/40 hover:shadow-lg hover:shadow-sky-500/5"
+            className="group cursor-pointer rounded-2xl border border-border/70 bg-card/80 p-4 transition-all duration-200 hover:border-sky-500/50 hover:bg-muted/40 shadow-sm"
           >
             <div className="flex items-center justify-between">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
@@ -219,7 +264,7 @@ export default function Dashboard() {
             <p className="mt-0.5 text-xs text-muted-foreground">Vider le cache des requetes recursives</p>
           </div>
           <Link href="/firewall-rpz">
-            <div className="group cursor-pointer rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-background to-background p-4 transition-all duration-200 hover:border-amber-500/40 hover:shadow-lg hover:shadow-amber-500/5">
+            <div className="group cursor-pointer rounded-2xl border border-border/70 bg-card/80 p-4 transition-all duration-200 hover:border-amber-500/50 hover:bg-muted/40 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400">
                   <ShieldCheck className="h-5 w-5" />
@@ -236,8 +281,10 @@ export default function Dashboard() {
           <Suspense fallback={<RecordDistributionFallback />}>
             <RecordDistributionCard data={data} />
           </Suspense>
-          <BindStatusCard data={data} />
+          <BindStatusCard data={data} detection={hostDetection} onRefresh={refetchHost} />
         </div>
+
+        <DnsQueryTesterCard />
 
         <RecentLogsCard logs={data.recentLogs} />
       </div>

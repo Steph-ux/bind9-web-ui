@@ -797,3 +797,103 @@ export const restoreBackup = (id: string) =>
 export const deleteBackup = (id: string) =>
     request<{ success: boolean; message: string }>(`/backups/${id}`, { method: "DELETE" });
 
+
+// Host BIND9 Lifecycle & Management
+export interface HostOsInfo {
+    platform: string;
+    distro: string;
+    version: string;
+    pkgManager: 'apt' | 'dnf' | 'yum' | 'apk' | 'pacman' | 'unknown';
+    isLinux: boolean;
+}
+
+export interface HostBind9Detection {
+    os: HostOsInfo;
+    bind9: {
+        isInstalled: boolean;
+        namedBin: string | null;
+        rndcBin: string | null;
+        version: string;
+        serviceName: string;
+        serviceStatus: 'active' | 'inactive' | 'failed' | 'not-installed' | 'unknown';
+        serviceEnabled: boolean;
+        mainPid: number | null;
+    };
+    config: {
+        confDir: string;
+        hasNamedConf: boolean;
+        hasNamedConfOptions: boolean;
+        hasNamedConfLocal: boolean;
+        hasRndcKey: boolean;
+        isSyntaxValid: boolean;
+        syntaxError?: string;
+    };
+    ports: {
+        port53Listening: boolean;
+        listeners: string[];
+        hasSystemdResolvedConflict: boolean;
+    };
+    needsInstallation: boolean;
+    needsInitialization: boolean;
+}
+
+export interface InstallProgress {
+    status: 'idle' | 'running' | 'success' | 'error';
+    startedAt: string | null;
+    completedAt: string | null;
+    logs: string[];
+    error?: string;
+}
+
+export interface SetupProfileOptions {
+    profile: 'authoritative' | 'resolver' | 'hybrid';
+    forwarders?: string[];
+    forwardOnly?: boolean;
+    listenV4?: string;
+    listenV6?: string;
+    allowQuery?: string;
+    allowRecursion?: string;
+    dnssecValidation?: boolean;
+}
+
+export interface DnsQueryResult {
+    domain: string;
+    type: string;
+    server: string;
+    status: string;
+    queryTimeMs: number;
+    answers: Array<{
+        name: string;
+        type: string;
+        ttl: number;
+        value: string;
+    }>;
+    rawOutput?: string;
+}
+
+export const getHostDetection = () =>
+    request<HostBind9Detection>('/host/bind-detection');
+
+export const installHostBind9 = () =>
+    request<{ success: boolean; message: string }>('/host/bind-install', { method: 'POST' });
+
+export const getHostInstallStatus = () =>
+    request<InstallProgress>('/host/bind-install-status');
+
+export const initHostBind9 = (data: SetupProfileOptions) =>
+    request<{ success: boolean; message: string; details: any }>('/host/bind-init', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+
+export const controlHostService = (action: 'start' | 'stop' | 'restart' | 'reload') =>
+    request<{ success: boolean; message: string; output: string }>('/host/service-control', {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+    });
+
+export const testDnsQuery = (domain: string, type = 'A', server = '127.0.0.1') =>
+    request<DnsQueryResult>('/host/dns-test', {
+        method: 'POST',
+        body: JSON.stringify({ domain, type, server }),
+    });

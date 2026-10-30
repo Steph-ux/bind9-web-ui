@@ -58,6 +58,17 @@ This project fills that gap with a full web UI focused on operational safety and
 
 ## Core Features
 
+### Native BIND9 Host Appliance & In-UI Installer
+
+- **Runs directly on the BIND9 server**: Acts as a native server control plane (Appliance mode).
+- **1-Click automated BIND9 installation**: Automatically detects whether BIND9 is present on the host; if missing, runs automated package installation across Debian, Ubuntu, RHEL, Rocky, AlmaLinux, CentOS, Fedora, and Alpine.
+- **Guided BIND9 Setup Wizard**: Generates `named.conf.options`, `named.conf.local`, default RFC zones, directory structures, and `rndc.key` based on tailored profiles:
+  - *Authoritative Server* (enterprise DNS hosting with recursion hardening)
+  - *Caching / Recursive Resolver* (with forwarders and LAN recursion)
+  - *Hybrid Server* (local authoritative zones + upstream resolution)
+- **Direct Systemd Service Controls**: Start, Stop, Restart, and Reload (`rndc reload`) BIND9 service directly from the UI.
+- **Interactive DNS Query Tester**: Built-in `dig` / native resolver query tool to test live resolution on `127.0.0.1:53` without leaving the browser.
+
 ### DNS management
 
 - Create, edit, and delete DNS zones

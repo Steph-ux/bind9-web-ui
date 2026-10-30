@@ -279,7 +279,7 @@ export default function Zones() {
               )}
               {canManageDNS && (
                 <Button
-                  className="gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-indigo-600"
+                  className="gap-2 rounded-xl bg-primary text-primary-foreground font-medium shadow-sm hover:bg-primary/90 transition-all"
                   onClick={() => setIsDialogOpen(true)}
                 >
                   <Plus className="h-4 w-4" />

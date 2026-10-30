@@ -1,4 +1,4 @@
-﻿// Copyright Â(c) 2025 Stephane ASSOGBA
+// Copyright Â(c) 2025 Stephane ASSOGBA
 /**
  * BIND9 Integration Service
  * Interacts with a real BIND9 installation via rndc, zone files and system commands.
@@ -459,7 +459,48 @@ class Bind9Service {
         }
     }
 
+    /**
+     * Counter-Logic Security Guard: Enforce strict path containment.
+     * Prevents arbitrary file reads/writes outside authorized BIND directories.
+     */
+    private isAllowedPath(filePath: string): boolean {
+        if (!filePath) return false;
+
+        // Windows local development allowance for tests and mock paths
+        if (process.platform === "win32") {
+            const resolved = path.resolve(filePath).toLowerCase();
+            const cwd = process.cwd().toLowerCase();
+            const temp = path.resolve(process.env.TEMP || "C:\\Windows\\Temp").toLowerCase();
+            if (resolved.startsWith(cwd) || resolved.startsWith(temp)) return true;
+        }
+
+        const normalized = filePath.replace(/\\/g, "/");
+        if (normalized.split("/").includes("..") || normalized.includes("\0")) {
+            return false;
+        }
+
+        const allowedDirs = [
+            (BIND9_CONF_DIR || "/etc/bind").replace(/\\/g, "/"),
+            (BIND9_ZONE_DIR || "/var/cache/bind").replace(/\\/g, "/"),
+            "/var/cache/bind",
+            "/var/named",
+            "/etc/bind",
+            "/etc/named",
+            "/var/log/named",
+            "/tmp",
+        ];
+
+        return allowedDirs.some((dir) => {
+            const cleanDir = dir.endsWith("/") ? dir : dir + "/";
+            return normalized.startsWith(cleanDir) || normalized === dir;
+        });
+    }
+
     async assertWritablePath(filePath: string, purpose: string): Promise<void> {
+        if (!this.isAllowedPath(filePath)) {
+            throw new Error(`Security violation: ${filePath} is outside authorized BIND9 directories`);
+        }
+
         if (await this.canWritePath(filePath)) {
             return;
         }
@@ -527,8 +568,15 @@ class Bind9Service {
             ? (layout.reverseDir || fallbackDir)
             : (layout.forwardDir || fallbackDir);
 
-        const baseName = options.hintBaseName?.trim() || domain;
-        return path.posix.join(targetDir, baseName);
+        const rawBase = options.hintBaseName?.trim() || domain;
+        const safeBaseName = path.posix.basename(rawBase).replace(/[^a-zA-Z0-9._-]/g, "_");
+        const resolvedPath = path.posix.join(targetDir, safeBaseName);
+
+        if (!this.isAllowedPath(resolvedPath)) {
+            throw new Error(`Security violation: preferred zone file path ${resolvedPath} is outside authorized BIND directories`);
+        }
+
+        return resolvedPath;
     }
 
     async getManagementSummary(): Promise<Bind9ManagementSummary> {
@@ -624,7 +672,11 @@ class Bind9Service {
             const result = await sshManager.exec(resolvedCommand);
             return { stdout: result.stdout, stderr: result.stderr };
         }
-        return execAsync(command);
+        let finalCmd = command;
+        if (useSudo && process.platform === "linux" && process.getuid && process.getuid() !== 0) {
+            finalCmd = `sudo -n ${command}`;
+        }
+        return execAsync(finalCmd);
     }
 
     /** Execute a command on a specific SSH connection by ID */
@@ -655,6 +707,9 @@ class Bind9Service {
 
     /** Write a file (locally or via SSH/SFTP) â€” tries SFTP first, falls back to sudo tee */
     private async writeRemoteFile(filePath: string, content: string): Promise<void> {
+        if (!this.isAllowedPath(filePath)) {
+            throw new Error(`Security violation: writing to path outside authorized BIND directories is blocked: ${filePath}`);
+        }
         if (this.mode === "ssh" && sshManager.isConfigured()) {
             try {
                 await sshManager.writeFile(filePath, content);
@@ -665,7 +720,22 @@ class Bind9Service {
             this.managementSummaryCache = null;
             return;
         }
-        await fsPromises.writeFile(filePath, content, "utf-8");
+        try {
+            await fsPromises.writeFile(filePath, content, "utf-8");
+        } catch (err: any) {
+            if (process.platform === "linux" && process.getuid && process.getuid() !== 0) {
+                const tmpFile = `/tmp/bind9admin_${Date.now()}_${path.basename(filePath)}.tmp`;
+                await fsPromises.writeFile(tmpFile, content, "utf-8");
+                try {
+                    await execAsync(`sudo -n cp ${this.quoteShellArg(tmpFile)} ${this.quoteShellArg(filePath)} && sudo -n rm -f ${this.quoteShellArg(tmpFile)}`);
+                    try { await execAsync(`sudo -n chown bind:bind ${this.quoteShellArg(filePath)} 2>/dev/null || sudo -n chown named:named ${this.quoteShellArg(filePath)} 2>/dev/null || true`); } catch {}
+                } finally {
+                    try { await fsPromises.unlink(tmpFile); } catch {}
+                }
+            } else {
+                throw err;
+            }
+        }
         this.managementSummaryCache = null;
     }
 
