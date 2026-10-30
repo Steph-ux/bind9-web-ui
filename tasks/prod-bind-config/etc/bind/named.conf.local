@@ -1,0 +1,40 @@
+zone "intra.isoceltelecom.com" IN {
+    type master;
+    file "/var/cache/bind/zones/forward/intra.isoceltelecom.com";
+    allow-transfer { 192.168.11.106; };
+    allow-update { none; };
+};
+
+zone "_msdcs.intra.isoceltelecom.com" IN {
+    type forward;
+    forward only;
+    forwarders { 192.168.11.110; };
+};
+
+zone "11.168.192.in-addr.arpa" IN {
+    type master;
+    file "/var/cache/bind/zones/reverse/intra.isoceltelecom.com";
+    allow-transfer { 192.168.11.106; };
+    allow-update { none; };
+};
+
+zone "rpz.intra" IN {
+    type master;
+    file "/var/cache/bind/zones/rpz.intra";
+    allow-transfer { 192.168.11.106; };
+    allow-update { none; };
+    allow-query { localhost; 192.168.11.106; };
+};
+
+zone "rpz.urlhaus.zone" IN {
+    type master;
+    file "/var/cache/bind/zones/urlhaus.rpz";
+    allow-transfer { 192.168.11.106; };
+    allow-update { none; };
+    allow-query { localhost; 192.168.11.106; };
+};
+
+zone "isoceltelecom.com" IN {
+    type forward;
+    forwarders { 192.168.11.231; 192.168.11.232; };
+};

@@ -369,9 +369,7 @@ export default function FirewallDNS() {
                         <AlertDescription>
                             {t.rpz.serverDetectedDesc}
                             <span className="mx-1 font-mono font-medium">{rpzSummary.zoneName}</span>.
-                            {language === "fr"
-                                ? " Cet écran maintient l'inventaire synchronisé avec un marqueur de zone source pour chaque règle. Les nouvelles règles et imports sont assignés à la zone RPZ primaire gérée sauf si une zone source existe déjà."
-                                : " This screen keeps the synchronized inventory with a source-zone marker for each rule. New rules and imports are assigned to the primary managed RPZ zone unless a source zone already exists."}
+                            {" "}{t.rpz.serverDetectedInventory}
                             {multipleRpzZones ? ` ${t.rpz.serverDetectedMultiple}` : ""}
                         </AlertDescription>
                     </Alert>
@@ -381,7 +379,7 @@ export default function FirewallDNS() {
 
                 <div className="grid gap-5 lg:grid-cols-12 items-start">
                     <RpzRuleFormCard
-                        className="lg:col-span-4 h-fit lg:sticky lg:top-16"
+                        className="lg:col-span-4 h-fit"
                         entry={newEntry}
                         onEntryChange={setNewEntry}
                         onSubmit={handleSubmit}

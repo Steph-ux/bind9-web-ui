@@ -1,0 +1,75 @@
+options {
+    directory "/var/cache/bind";
+
+    recursion yes;
+    allow-recursion { trusted; };
+    allow-query { trusted; };
+    listen-on { 192.168.11.103; 192.168.18.9; 127.0.0.1; };
+
+    forwarders {
+        8.8.8.8;
+        8.8.4.4;
+    };
+
+    response-policy {
+        zone "rpz.intra";
+        zone "rpz.urlhaus.zone";
+    };
+
+    dnssec-validation auto;
+    listen-on-v6 { none; };
+};
+
+logging {
+    channel query_log {
+        file "/var/log/named/data/query.log" versions 3 size 10m;
+        severity info;
+        print-time yes;
+        print-severity yes;
+        print-category yes;
+    };
+    category queries { query_log; };
+
+    channel error_log {
+        file "/var/log/named/data/error.log" versions 3 size 10m;
+        severity debug;
+        print-time yes;
+        print-severity yes;
+        print-category yes;
+    };
+    category default { error_log; };
+
+    channel notification_log {
+        file "/var/log/named/data/notification.log" versions 3 size 10m;
+        severity debug;
+        print-time yes;
+        print-severity yes;
+        print-category yes;
+    };
+    category notify { notification_log; };
+
+    channel rate_limiting_log {
+        file "/var/log/named/data/rate_limiting.log" versions 3 size 10m;
+        severity debug;
+        print-time yes;
+        print-severity yes;
+        print-category yes;
+    };
+    category rate-limit { rate_limiting_log; };
+
+    channel client_security_log {
+        file "/var/log/named/data/security.log" versions 3 size 30m;
+        severity dynamic;
+        print-time yes;
+    };
+    category security { client_security_log; };
+
+    channel rpz_log {
+        file "/var/log/named/rpz.log" versions unlimited size 100m;
+        severity info;
+        print-time yes;
+        print-category yes;
+        print-severity yes;
+    };
+    category rpz { rpz_log; };
+};

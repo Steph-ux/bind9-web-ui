@@ -183,6 +183,7 @@ export interface Translations {
     clearDesc: string;
     serverDetectedTitle: string;
     serverDetectedDesc: string;
+    serverDetectedInventory: string;
     serverDetectedMultiple: string;
     deleteRuleBtn: string;
     clearAllRulesBtn: string;
@@ -431,6 +432,7 @@ const translations: Record<Language, Translations> = {
       clearDesc: "Cette action supprimera toutes les règles de la base de données. Êtes-vous sûr ?",
       serverDetectedTitle: "Zone RPZ Serveur Détectée",
       serverDetectedDesc: "Le serveur actif expose déjà l'ensemble de zones de politique de réponse suivant :",
+      serverDetectedInventory: "Cet écran maintient l'inventaire synchronisé avec un marqueur de zone source pour chaque règle. Les nouvelles règles et imports sont assignés à la zone RPZ primaire gérée sauf si une zone source existe déjà.",
       serverDetectedMultiple: "Plusieurs zones RPZ sont actives, le tableau affiche donc la zone d'origine de chaque règle synchronisée.",
       deleteRuleBtn: "Supprimer la règle",
       clearAllRulesBtn: "Purger toutes les règles",
@@ -677,6 +679,7 @@ const translations: Record<Language, Translations> = {
       clearDesc: "This action will remove all rules from the database. Are you sure?",
       serverDetectedTitle: "Server-side RPZ detected",
       serverDetectedDesc: "The active server already exposes the following response-policy zone set:",
+      serverDetectedInventory: "This screen keeps the synchronized inventory with a source-zone marker for each rule. New rules and imports are assigned to the primary managed RPZ zone unless a source zone already exists.",
       serverDetectedMultiple: "Multiple RPZ zones are active, so the table shows which zone each synchronized rule came from.",
       deleteRuleBtn: "Delete Rule",
       clearAllRulesBtn: "Clear All Rules",
@@ -758,8 +761,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     if (saved === "en" || saved === "fr") {
       return saved;
     }
-    const navLang = navigator.language.slice(0, 2);
-    return navLang === "en" ? "en" : "fr";
+    return "fr";
   });
 
   const setLanguage = (lang: Language) => {

@@ -333,7 +333,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_26%),radial-gradient(circle_at_top_right,hsl(var(--accent)/0.1),transparent_22%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--background)))] bg-background text-foreground">
       <aside
         className={[
-          "hidden border-r border-sidebar-border/70 bg-sidebar/80 backdrop-blur-xl lg:flex lg:flex-col sticky top-0 h-screen z-30",
+          "hidden border-r border-sidebar-border/70 bg-sidebar/80 backdrop-blur-xl lg:flex lg:flex-col fixed inset-y-0 left-0 h-screen z-30",
           sidebarCollapsed ? "w-[64px]" : "w-[240px]",
         ].join(" ")}
       >
@@ -410,7 +410,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div
+        className={[
+          "flex min-w-0 flex-1 flex-col transition-all duration-200",
+          sidebarCollapsed ? "lg:pl-[64px]" : "lg:pl-[240px]",
+        ].join(" ")}
+      >
         <header className="sticky top-0 z-20 border-b border-border/60 bg-background/78 backdrop-blur-xl">
           <div className="flex h-13 items-center gap-2.5 px-3.5 sm:px-5">
             <Button

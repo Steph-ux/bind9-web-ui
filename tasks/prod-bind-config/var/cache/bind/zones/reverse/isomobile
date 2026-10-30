@@ -1,0 +1,19 @@
+;
+; BIND reverse data file for local loopback interface
+;
+$TTL	604800
+@	IN	SOA	dnsrpz.intra.isoceltelecom.com. sysadmin.isoceltelecom.com. (
+			2025092901	; Serial
+			3600		; Refresh
+			900		; Retry
+			1209600		; Expire
+			300 )	        ; Negative Cache TTL
+;
+@	IN	NS	dnsrpz.intra.isoceltelecom.com.
+@       IN      NS      dnsrpz02.intra.isoceltelecom.com.
+
+103	IN	PTR	dnsrpz.intra.isoceltelecom.com.
+106     IN      PTR     dnsrpz02.intra.isoceltelecom.com.
+
+94      IN      PTR     isopay-stage.intra.isoceltelecom.com.
+94      IN      PTR     isopay-manager-stage.intra.isoceltelecom.com.

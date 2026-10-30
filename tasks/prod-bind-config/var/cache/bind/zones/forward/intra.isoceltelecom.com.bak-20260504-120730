@@ -1,0 +1,53 @@
+; Forward zone for intra.isoceltelecom.com
+$TTL 604800
+$ORIGIN intra.isoceltelecom.com.
+@ IN SOA dnsrpz.intra.isoceltelecom.com. hostmaster.intra.isoceltelecom.com. (
+        2026050401 ; Serial
+        3600 ; Refresh
+        900 ; Retry
+        1209600 ; Expire
+        86400 ; Minimum TTL
+)
+
+@                           IN  NS  dnsrpz.intra.isoceltelecom.com.
+@                           IN  NS  dnsrpz02.intra.isoceltelecom.com.
+@                           IN  A   192.168.11.110
+3cx-iso                     IN  A   192.168.11.218
+3iapps2                     IN  A   192.168.11.113
+allot-dsc                   IN  A   192.168.11.195
+arad01                      IN  A   192.168.11.102
+aradial                     IN  A   192.168.11.102
+bugtracker                  IN  A   192.168.11.59
+customer                    IN  A   192.168.11.44
+dax3iapps                   IN  A   192.168.11.88
+dns1                        IN  A   192.168.11.53
+dnsrpz                      IN  A   192.168.11.103
+dnsrpz02                    IN  A   192.168.11.106
+ds                          IN  A   192.168.11.35
+ds-2                        IN  A   192.168.11.36
+erp                         IN  A   192.168.11.78
+erp-ventures                IN  A   192.168.11.78
+fs01                        IN  A   192.168.11.40
+glpi                        IN  A   192.168.11.138
+iapps-stage                 IN  A   192.168.11.140
+intra                       IN  A   192.168.11.110
+iors-stage.intra            IN  A   192.168.11.140
+ipam                        IN  A   192.168.11.12
+iso-agency-stage            IN  A   192.168.11.140
+isoerp                      IN  A   192.168.11.208
+isopay-manager              IN  A   192.168.11.18
+isopay-manager-stage        IN  A   192.168.11.140
+isopay-manager-stage        IN  A   192.168.19.94
+isopay-stage                IN  A   192.168.11.140
+isopay-stage                IN  A   192.168.19.94
+isospot-sandbox-env         IN  A   192.168.11.37
+isospot-admin               IN  CNAME isospot-sandbox-env.intra.isoceltelecom.com.
+itmsv-stage.intra           IN  A   192.168.11.140
+nagios-core0                IN  A   192.168.11.82
+netbox                      IN  A   192.168.11.47
+pmanager                    IN  A   192.168.11.40
+portal-isospot              IN  CNAME isospot-sandbox-env.intra.isoceltelecom.com.
+solarwinds                  IN  A   192.168.11.205
+ssp                         IN  A   192.168.11.101
+wg-manager-isospot          IN  CNAME isospot-sandbox-env.intra.isoceltelecom.com.
+zabbix-isospot              IN  CNAME isospot-sandbox-env.intra.isoceltelecom.com.

@@ -1,0 +1,50 @@
+; Reverse zone for 192.168.11.0/24
+$TTL 604800
+$ORIGIN 11.168.192.in-addr.arpa.
+@ IN SOA dnsrpz.intra.isoceltelecom.com. hostmaster.intra.isoceltelecom.com. (
+        2026042704 ; Serial
+        3600 ; Refresh
+        900 ; Retry
+        1209600 ; Expire
+        86400 ; Minimum TTL
+)
+
+@    IN  NS   dnsrpz.intra.isoceltelecom.com.
+@    IN  NS   dnsrpz02.intra.isoceltelecom.com.
+12   IN  PTR  ipam.intra.isoceltelecom.com.
+18   IN  PTR  isopay-manager.intra.isoceltelecom.com.
+35   IN  PTR  ds.intra.isoceltelecom.com.
+36   IN  PTR  ds-2.intra.isoceltelecom.com.
+37   IN  PTR  isospot-admin.intra.isoceltelecom.com.
+37   IN  PTR  portal-isospot.intra.isoceltelecom.com.
+37   IN  PTR  wg-manager-isospot.intra.isoceltelecom.com.
+37   IN  PTR  zabbix-isospot.intra.isoceltelecom.com.
+40   IN  PTR  fs01.intra.isoceltelecom.com.
+44   IN  PTR  customer.intra.isoceltelecom.com.
+47   IN  PTR  netbox.intra.isoceltelecom.com.
+50   IN  PTR  otobo.intra.isoceltelecom.com.
+53   IN  PTR  dns1.intra.isoceltelecom.com.
+59   IN  PTR  bugtracker.intra.isoceltelecom.com.
+78   IN  PTR  erp.intra.isoceltelecom.com.
+82   IN  PTR  nagios-core0.intra.isoceltelecom.com.
+88   IN  PTR  dax3iapps.intra.isoceltelecom.com.
+101  IN  PTR  ssp.intra.isoceltelecom.com.
+102  IN  PTR  aradial.intra.isoceltelecom.com.
+103  IN  PTR  dnsrpz.intra.isoceltelecom.com.
+106  IN  PTR  dnsrpz02.intra.isoceltelecom.com.
+110  IN  PTR  intra.isoceltelecom.com.
+113  IN  PTR  3iapps2.intra.isoceltelecom.com.
+138  IN  PTR  glpi.intra.isoceltelecom.com.
+140  IN  PTR  iapps-stage.intra.isoceltelecom.com.
+140  IN  PTR  iors-stage.intra.isoceltelecom.com.
+140  IN  PTR  iso-agency-stage.intra.isoceltelecom.com.
+140  IN  PTR  isopay-manager-stage.intra.isoceltelecom.com.
+140  IN  PTR  isopay-stage.intra.isoceltelecom.com.
+140  IN  PTR  itmsv-stage.intra.isoceltelecom.com.
+195  IN  PTR  allot-dsc.intra.isoceltelecom.com.
+205  IN  PTR  solarwinds.intra.isoceltelecom.com.
+208  IN  PTR  isoerp.intra.isoceltelecom.com.
+218  IN  PTR  3cx-iso.intra.isoceltelecom.com.
+235  IN  PTR  ipa-mas.intra.isoceltelecom.com.
+236  IN  PTR  ipa-rep.intra.isoceltelecom.com.
+237  IN  PTR  ipa.intra.isoceltelecom.com.

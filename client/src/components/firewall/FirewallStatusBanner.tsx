@@ -66,18 +66,21 @@ export function FirewallStatusBanner({
           <div>
             <h5 className="mb-1 flex items-center gap-2 text-sm font-bold tracking-tight text-foreground">
               {status.active ? t.firewall.statusActive : t.firewall.statusInactive}
-              {status.active ? (
+              <Badge
+                variant="outline"
+                className={`text-[10px] font-medium px-2 py-0.5 ${
+                  status.active
+                    ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                    : "bg-rose-500/10 text-rose-500 border-rose-500/30"
+                }`}
+              >
                 <span
-                  className="relative ml-1 inline-block"
-                  style={{ width: 8, height: 8 }}
-                >
-                  <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-75" />
-                  <span
-                    className="relative inline-block rounded-full bg-emerald-500"
-                    style={{ width: 8, height: 8 }}
-                  />
-                </span>
-              ) : null}
+                  className={`inline-block mr-1.5 h-1.5 w-1.5 rounded-full ${
+                    status.active ? "bg-emerald-500" : "bg-rose-500"
+                  }`}
+                />
+                {status.active ? t.common.active : t.common.inactive}
+              </Badge>
             </h5>
             <p className="mb-0 max-w-xl text-xs text-muted-foreground leading-relaxed">
               {status.active

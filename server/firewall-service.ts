@@ -2,6 +2,8 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
+import fs from "fs";
+import path from "path";
 import { sshManager } from "./ssh-manager";
 
 const execAsync = promisify(exec);
@@ -312,6 +314,41 @@ class FirewallService {
 
     private execMock(command: string): string {
         console.log(`[Mock Firewall] Executing: ${command}`);
+        if (command.includes("===UFW===")) {
+            const nftFile = path.resolve(process.cwd(), "tasks/prod-bind-config/etc/nftables.conf");
+            if (fs.existsSync(nftFile)) {
+                return `===UFW===
+INSTALLED
+Status: inactive
+===FIREWALLD===
+MISSING
+===NFT===
+INSTALLED
+HAS_RULES
+===IPT===
+INSTALLED
+(policy ACCEPT 0 packets, 0 bytes)
+===END===`;
+            }
+            return `===UFW===
+MISSING
+===FIREWALLD===
+MISSING
+===NFT===
+MISSING
+===IPT===
+MISSING
+===END===`;
+        }
+
+        if (command.includes("nft list ruleset")) {
+            const nftFile = path.resolve(process.cwd(), "tasks/prod-bind-config/etc/nftables.conf");
+            if (fs.existsSync(nftFile)) {
+                return fs.readFileSync(nftFile, "utf-8");
+            }
+            return "";
+        }
+
         if (command.includes("status numbered")) {
             if (!this.mockActive) return "Status: inactive";
             let output = "Status: active\n\n     To                         Action      From\n     --                         ------      ----\n";
@@ -787,37 +824,63 @@ class FirewallService {
         let id = 1;
 
         if (active) {
-            // Parse nft ruleset - extract basic allow/deny rules
-            // Format: ip saddr X tcp dport { 22, 53 } accept
-            // or: tcp dport 22 accept
-            const ruleRegex = /(?:ip\s+saddr\s+(\S+)\s+)?(?:ip6?\s+saddr\s+(\S+)\s+)?(?:(tcp|udp)\s+)?dport\s+\{?\s*([\d,\s]+)\s*\}?\s+(accept|drop|reject)/g;
-            let match;
-            while ((match = ruleRegex.exec(output)) !== null) {
-                const src = match[1] || match[2] || "Anywhere";
-                const proto = match[3] || "tcp";
-                const ports = match[4].split(",").map(p => p.trim()).filter(Boolean);
-                const action = match[5] === "accept" ? "ALLOW" : match[5] === "drop" ? "DENY" : "REJECT";
+            for (const rawLine of output.split("\n")) {
+                const line = rawLine.trim();
+                if (!line || line.startsWith("#") || line.startsWith("table") || line.startsWith("chain") || line.startsWith("flush") || line.startsWith("}") || line.startsWith("{")) {
+                    continue;
+                }
 
-                for (const port of ports) {
+                const actionMatch = line.match(/\b(accept|drop|reject)\b/i);
+                if (!actionMatch) continue;
+
+                const rawAction = actionMatch[1].toLowerCase();
+                const action: "ALLOW" | "DENY" | "REJECT" = rawAction === "accept" ? "ALLOW" : rawAction === "drop" ? "DENY" : "REJECT";
+
+                // Ignore internal loopback or established state
+                if (line.includes("iif lo") || line.includes('iif "lo"') || line.includes("ct state established")) {
+                    continue;
+                }
+
+                const ifaceMatch = line.match(/iifname\s+"([^"]+)"/);
+                const iface = ifaceMatch ? ifaceMatch[1] : undefined;
+
+                const saddrMatch = line.match(/ip6?\s+saddr\s+([0-9a-fA-F.:/]+)/);
+                const from = saddrMatch ? saddrMatch[1] : "Anywhere";
+                const ipv6 = from.includes(":") || line.includes("ip6") || line.includes("icmpv6");
+
+                const dportMatch = line.match(/(tcp|udp)\s+dport\s+(\d+)/);
+                if (dportMatch) {
+                    const proto = dportMatch[1].toLowerCase();
+                    const port = dportMatch[2];
+                    const service = port === "22" ? "ssh" : port === "53" ? "dns" : port === "10050" ? "zabbix" : undefined;
                     rules.push({
                         id: id++,
                         to: `${port}/${proto}`,
-                        action: action as any,
-                        from: src === "0.0.0.0/0" || src === "::/0" ? "Anywhere" : src,
-                        ipv6: src.includes(":"),
-                        direction: "in" as RuleDirection,
-                        ruleType: "port" as RuleType,
+                        action,
+                        from,
+                        ipv6,
+                        direction: "in",
+                        ruleType: "port",
                         proto,
+                        service,
+                        interface: iface
                     });
+                    continue;
                 }
-            }
 
-            // Also catch simple "accept" / "drop" in input hooks (established/related)
-            const hookRegex = /chain\s+(\w+)\s*\{[^}]*type\s+filter\s+hook\s+(\w+)\s+priority\s+\w+\s*;\s*policy\s+(\w+)/g;
-            while ((match = hookRegex.exec(output)) !== null) {
-                // If policy is drop and no specific rules, firewall is active with default deny
-                if (match[3] === "drop" && rules.length === 0) {
-                    // Default deny - active but no explicit allow rules parsed
+                if (line.includes("icmp")) {
+                    rules.push({
+                        id: id++,
+                        to: "ICMP",
+                        action,
+                        from,
+                        ipv6,
+                        direction: "in",
+                        ruleType: "icmp",
+                        proto: "icmp",
+                        interface: iface
+                    });
+                    continue;
                 }
             }
         }
@@ -957,6 +1020,11 @@ class FirewallService {
     async getStatus(): Promise<FirewallStatus> {
         try {
             const { active: backend, available } = await this.detectBackend();
+
+            if (backend === "none") {
+                const firstAvailable = available[0] || "none";
+                return { active: false, rules: [], installed: available.length > 0, backend: firstAvailable, availableBackends: available };
+            }
 
             switch (backend) {
                 case "ufw": return await this.getStatusUfw(available);
