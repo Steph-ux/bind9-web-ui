@@ -16,7 +16,6 @@ const AuthPage = lazy(() => import("@/pages/auth-page"));
 const BlacklistPage = lazy(() => import("@/pages/blacklist"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password-page"));
 const Config = lazy(() => import("@/pages/config"));
-const Connections = lazy(() => import("@/pages/connections"));
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const FirewallPage = lazy(() => import("@/pages/firewall"));
 const FirewallDNS = lazy(() => import("@/pages/firewall-dns"));
@@ -51,7 +50,6 @@ function Router() {
       <ProtectedRoute path="/logs" component={Logs} />
       <ProtectedRoute path="/acls" component={ACLs} />
       <ProtectedRoute path="/status" component={Status} />
-      <ProtectedRoute path="/connections" component={Connections} adminOnly />
       <ProtectedRoute path="/users" component={UsersPage} adminOnly />
       <ProtectedRoute path="/firewall" component={FirewallPage} adminOnly />
       <ProtectedRoute path="/firewall-rpz" component={FirewallDNS} adminOnly />

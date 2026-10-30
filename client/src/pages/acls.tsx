@@ -320,11 +320,7 @@ export default function ACLs() {
           title="Listes de Controle (ACL) & Cles TSIG"
           description="Gestion des regles de filtrage reseau et des cles cryptographiques de transfert de zone."
           icon={Shield}
-          badge={
-            <Badge variant="outline" className="border-primary/20 bg-primary/10 text-[10px] text-primary">
-              Appliance locale
-            </Badge>
-          }
+
           actions={
             <div className="flex flex-wrap gap-2">
               <Button

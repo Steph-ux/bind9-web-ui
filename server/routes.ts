@@ -16,7 +16,6 @@ import { z } from "zod";
 
 import { registerAdminSecurityRoutes } from "./admin-security-routes";
 import { registerBindSecurityRoutes } from "./bind-security-routes";
-import { registerConnectionRoutes } from "./connection-routes";
 import { registerOperationsRoutes } from "./operations-routes";
 import { registerReplicationRoutes } from "./replication-routes";
 import { registerRpzRoutes } from "./rpz-routes";
@@ -249,14 +248,7 @@ export async function registerRoutes(
 
   registerAdminSecurityRoutes({ app, requireAdmin, requireOperator, safeError });
 
-  registerConnectionRoutes({
-    app,
-    requireAdmin,
-    requireAuth,
-    safeError,
-    refreshAclsFromBind,
-    refreshKeysFromBind,
-  });
+
 
   registerReplicationRoutes({ app, requireAdmin, requireOperator, safeError });
 

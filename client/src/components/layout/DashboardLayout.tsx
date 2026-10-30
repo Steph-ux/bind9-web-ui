@@ -104,7 +104,6 @@ const routeLabels: Array<{ match: (path: string) => boolean; label: string }> = 
   { match: (path) => path === "/logs", label: "Logs & Audit" },
   { match: (path) => path === "/acls", label: "ACLs & Cles" },
   { match: (path) => path === "/status", label: "Statut Serveur" },
-  { match: (path) => path === "/connections", label: "Connexions" },
   { match: (path) => path === "/users", label: "Utilisateurs" },
   { match: (path) => path === "/firewall", label: "Pare-feu Reseau" },
   { match: (path) => path === "/firewall-rpz", label: "Pare-feu DNS RPZ" },
@@ -436,24 +435,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               )}
             </Button>
 
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/75">
-                {t.nav.adminSubtitle}
-              </div>
-              <div className="flex items-center gap-2">
-                <h2 className="truncate text-lg font-semibold tracking-[-0.03em]">
-                  {currentRouteLabel}
-                </h2>
-                {user?.role ? (
-                  <Badge
-                    variant="outline"
-                    className="hidden border-border/70 bg-background/70 capitalize text-[11px] sm:inline-flex"
-                  >
-                    {user.role}
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
+            <div className="min-w-0 flex-1" />
 
             {user?.role === "admin" && (
               <Button
