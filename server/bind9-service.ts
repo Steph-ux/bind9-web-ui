@@ -666,7 +666,10 @@ class Bind9Service {
 
     /** Execute a shell command (locally or via SSH) */
     private async execCommand(command: string, useSudo = false): Promise<{ stdout: string; stderr: string }> {
-        if (this.mode === "ssh" && sshManager.isConfigured()) {
+        if (this.mode === "ssh") {
+            if (!sshManager.getState().connected) {
+                throw new Error("SSH is not connected");
+            }
             let resolvedCommand = await this.resolveRemoteCommand(command);
             if (useSudo) resolvedCommand = `sudo -n ${resolvedCommand}`;
             const result = await sshManager.exec(resolvedCommand);
@@ -699,7 +702,10 @@ class Bind9Service {
 
     /** Read a file (locally or via SSH/SFTP) */
     private async readRemoteFile(filePath: string): Promise<string> {
-        if (this.mode === "ssh" && sshManager.isConfigured()) {
+        if (this.mode === "ssh") {
+            if (!sshManager.getState().connected) {
+                throw new Error("SSH is not connected");
+            }
             return sshManager.readFile(filePath);
         }
         return fsPromises.readFile(filePath, "utf-8");
@@ -710,7 +716,10 @@ class Bind9Service {
         if (!this.isAllowedPath(filePath)) {
             throw new Error(`Security violation: writing to path outside authorized BIND directories is blocked: ${filePath}`);
         }
-        if (this.mode === "ssh" && sshManager.isConfigured()) {
+        if (this.mode === "ssh") {
+            if (!sshManager.getState().connected) {
+                throw new Error("SSH is not connected");
+            }
             try {
                 await sshManager.writeFile(filePath, content);
             } catch {
@@ -1137,8 +1146,11 @@ zone "${safeDomain}" {
     /** Get system metrics â€” local uses Node.js os, SSH uses remote commands */
     async getSystemMetrics(): Promise<SystemMetrics> {
         try {
-            if (this.mode === "ssh" && sshManager.isConfigured()) {
-                return await this.getRemoteSystemMetrics();
+            if (this.mode === "ssh") {
+                if (sshManager.getState().connected) {
+                    return await this.getRemoteSystemMetrics();
+                }
+                return this.getEmptySystemMetrics();
             }
             return this.getLocalSystemMetrics();
         } catch (error) {
@@ -1278,7 +1290,10 @@ zone "${safeDomain}" {
 
     /** Get system uptime â€” local or remote */
     async getUptime(): Promise<string> {
-        if (this.mode === "ssh" && sshManager.isConfigured()) {
+        if (this.mode === "ssh") {
+            if (!sshManager.getState().connected) {
+                return "N/A (SSH non connecté)";
+            }
             try {
                 const result = await this.execCommand("uptime -p 2>/dev/null || uptime");
                 const output = result.stdout.trim();
@@ -1294,7 +1309,10 @@ zone "${safeDomain}" {
 
     /** Get hostname â€” local or remote */
     async getHostname(): Promise<string> {
-        if (this.mode === "ssh" && sshManager.isConfigured()) {
+        if (this.mode === "ssh") {
+            if (!sshManager.getState().connected) {
+                return "hôte distant (non connecté)";
+            }
             try {
                 const result = await this.execCommand("hostname");
                 return result.stdout.trim();

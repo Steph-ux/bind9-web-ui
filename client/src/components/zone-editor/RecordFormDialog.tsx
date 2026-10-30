@@ -340,9 +340,9 @@ export function RecordFormDialog({
                     : values.type === "AAAA"
                     ? "2001:db8::1"
                     : values.type === "CNAME"
-                    ? "serveur.isoceltelecom.com."
+                    ? "ns1.example.com."
                     : values.type === "MX"
-                    ? "mail.isoceltelecom.com."
+                    ? "mail.example.com."
                     : "Valeur de l'enregistrement"
                 }
               />
@@ -352,9 +352,9 @@ export function RecordFormDialog({
 
           {/* TXT Wizard Helpers (SPF, DMARC, DKIM) */}
           {values.type === "TXT" && (
-            <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-3">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="flex items-center gap-1.5 text-xs font-bold text-purple-400">
+                <span className="flex items-center gap-1.5 text-xs font-bold text-primary">
                   <Wand2 className="h-3.5 w-3.5" />
                   Assistants de Securite Messagerie (TXT)
                 </span>
@@ -363,7 +363,7 @@ export function RecordFormDialog({
                     type="button"
                     onClick={() => setActiveWizard(activeWizard === "spf" ? "none" : "spf")}
                     className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-all ${
-                      activeWizard === "spf" ? "bg-purple-600 text-white" : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      activeWizard === "spf" ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     SPF
@@ -372,7 +372,7 @@ export function RecordFormDialog({
                     type="button"
                     onClick={() => setActiveWizard(activeWizard === "dmarc" ? "none" : "dmarc")}
                     className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-all ${
-                      activeWizard === "dmarc" ? "bg-purple-600 text-white" : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      activeWizard === "dmarc" ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     DMARC
@@ -381,7 +381,7 @@ export function RecordFormDialog({
                     type="button"
                     onClick={() => setActiveWizard(activeWizard === "dkim" ? "none" : "dkim")}
                     className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-all ${
-                      activeWizard === "dkim" ? "bg-purple-600 text-white" : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      activeWizard === "dkim" ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     DKIM

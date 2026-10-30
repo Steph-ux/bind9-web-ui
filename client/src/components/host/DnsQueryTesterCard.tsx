@@ -93,7 +93,7 @@ export function DnsQueryTesterCard() {
             <Input
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
-              placeholder="Nom de domaine (ex: isocel.bj, mail.mon-domaine.lan)"
+              placeholder="Nom de domaine (ex: example.com, ns1.mon-domaine.lan)"
               className="font-mono text-xs"
             />
           </div>

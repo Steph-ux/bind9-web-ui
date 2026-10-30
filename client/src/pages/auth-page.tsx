@@ -137,57 +137,53 @@ export default function AuthPage() {
       </div>
 
       {/* Right Hero Branding Panel */}
-      <div className="hidden lg:flex flex-col justify-between p-12 flex-1 relative overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white">
-        {/* Glow ambient background elements */}
-        <div className="absolute top-1/4 right-1/4 w-96 h-96 rounded-full bg-indigo-600/10 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/4 left-1/3 w-80 h-80 rounded-full bg-purple-600/10 blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex items-center justify-between">
-          <Badge variant="outline" className="border-indigo-500/30 bg-indigo-500/10 text-indigo-300 font-mono text-xs px-3 py-1">
-            Production Cluster :: ISOCEL TELECOM
+      <div className="hidden lg:flex flex-col justify-between p-12 flex-1 relative bg-card border-l border-border/60 text-card-foreground">
+        <div className="flex items-center justify-between">
+          <Badge variant="outline" className="border-border bg-muted/40 text-foreground font-mono text-xs px-3 py-1">
+            Appliance BIND9 Enterprise
           </Badge>
-          <span className="text-xs font-mono text-slate-400">BIND 9.18 Enterprise</span>
+          <span className="text-xs font-mono text-muted-foreground">BIND 9.18+ Control Plane</span>
         </div>
 
-        <div className="relative z-10 max-w-xl my-auto">
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-300 mb-6">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Infrastructure DNS Résiliente & Filtrage RPZ
+        <div className="max-w-xl my-auto">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1 text-xs font-medium text-foreground mb-6">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Architecture DNS Haute Disponibilite & Pare-feu RPZ
           </div>
 
-          <h1 className="text-4xl lg:text-5xl font-black tracking-tight leading-tight text-white mb-4">
-            Pilotez votre infrastructure DNS en temps réel.
+          <h1 className="text-4xl lg:text-5xl font-black tracking-tight leading-tight text-foreground mb-4">
+            Console d'administration native BIND9.
           </h1>
-          <p className="text-slate-300 text-base leading-relaxed mb-8">
-            Console d'administration unifiée pour le déploiement sécurisé des zones directes et inverses, l'application instantanée des règles RPZ, et la synchronisation continue multi-serveurs.
+          <p className="text-muted-foreground text-base leading-relaxed mb-8">
+            Console d'administration unifiee pour le deploiement securise des zones directes et inverses, l'application instantanee des regles RPZ et la supervision d'infrastructure.
           </p>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-              <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm mb-1">
+            <div className="rounded-xl border border-border/60 bg-background/80 p-4">
+              <div className="flex items-center gap-2 text-primary font-semibold text-sm mb-1">
                 <Globe className="h-4 w-4" />
                 Zones & Enregistrements
               </div>
-              <p className="text-xs text-slate-400">
-                Assistants intelligents SPF, DMARC, DKIM et validation en temps réel.
+              <p className="text-xs text-muted-foreground">
+                Assistants intelligents SPF, DMARC, DKIM et validation syntaxique automatique.
               </p>
             </div>
 
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-              <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm mb-1">
+            <div className="rounded-xl border border-border/60 bg-background/80 p-4">
+              <div className="flex items-center gap-2 text-emerald-500 font-semibold text-sm mb-1">
                 <Shield className="h-4 w-4" />
                 Pare-feu RPZ & ACL
               </div>
-              <p className="text-xs text-slate-400">
-                Blocage proactif des menaces et contrôle granulaire des transferts TSIG.
+              <p className="text-xs text-muted-foreground">
+                Blocage proactif des menaces et controle granulaire des transferts TSIG.
               </p>
             </div>
           </div>
         </div>
 
-        <div className="relative z-10 flex items-center justify-between pt-6 border-t border-white/10 text-xs text-slate-400">
+        <div className="flex items-center justify-between pt-6 border-t border-border/60 text-xs text-muted-foreground">
           <span>Plateforme BIND9 Admin Control Plane</span>
-          <span>© 2026 Stephane ASSOGBA</span>
+          <span>(c) 2026 Stephane ASSOGBA</span>
         </div>
       </div>
     </div>
