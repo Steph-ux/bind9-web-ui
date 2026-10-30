@@ -812,16 +812,128 @@ MISSING
 
     // â”€â”€ nftables Implementation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+    private async detectNftContext(): Promise<{ family: string; table: string; chain: string }> {
+        try {
+            const out = await this.execCommand("sudo -n nft -a list ruleset 2>/dev/null || sudo -n nft list ruleset 2>/dev/null || true");
+            const tableMatch = out.match(/table\s+(inet|ip|ip6)\s+([a-zA-Z0-9_\-]+)\s*\{/);
+            const family = tableMatch ? tableMatch[1] : "inet";
+            const table = tableMatch ? tableMatch[2] : "firewall";
+
+            const chainMatch = out.match(/chain\s+([a-zA-Z0-9_\-]+)\s*\{[^}]*hook\s+input/);
+            const chain = chainMatch ? chainMatch[1] : "input";
+            return { family, table, chain };
+        } catch {
+            return { family: "inet", table: "firewall", chain: "input" };
+        }
+    }
+
+    private buildNftRule(params: AddRuleParams): string {
+        const { toPort, proto, action, fromIp, ruleType, toPortEnd, service, interface_: iface, rateLimit, icmpType, log, comment, rawRule } = params;
+        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Action non valide: ${action}`);
+        const nftAction = action === "allow" ? "accept" : action === "deny" ? "drop" : "reject";
+
+        if (ruleType === "raw" && rawRule) {
+            return validateRawRule(rawRule, "nftables");
+        }
+
+        const parts: string[] = [];
+
+        // 1. Interface (ex: iifname "ens18")
+        if (iface && iface !== "any") {
+            parts.push(`iifname "${shellSafe(iface)}"`);
+        }
+
+        // 2. Source IP (ex: ip saddr 192.168.10.51)
+        if (fromIp && fromIp !== "any" && fromIp !== "0.0.0.0/0" && fromIp !== "::/0") {
+            const safeIp = validateIp(fromIp);
+            const family = safeIp.includes(":") ? "ip6" : "ip";
+            parts.push(`${family} saddr ${safeIp}`);
+        }
+
+        // 3. Traffic type
+        if (ruleType === "icmp") {
+            const safeIcmp = ALLOWED_ICMP_TYPES.includes(icmpType || "") ? icmpType : "echo-request";
+            parts.push("ip protocol icmp");
+        } else if (ruleType === "service") {
+            const svcToPort: Record<string, { port: string; proto: string }> = {
+                ssh: { port: "22", proto: "tcp" },
+                dns: { port: "53", proto: "tcp" },
+                http: { port: "80", proto: "tcp" },
+                https: { port: "443", proto: "tcp" },
+                zabbix: { port: "10050", proto: "tcp" },
+                mysql: { port: "3306", proto: "tcp" },
+                postgresql: { port: "5432", proto: "tcp" },
+                redis: { port: "6379", proto: "tcp" },
+                mongodb: { port: "27017", proto: "tcp" },
+                ntp: { port: "123", proto: "udp" },
+                snmp: { port: "161", proto: "udp" },
+                openvpn: { port: "1194", proto: "udp" },
+                wireguard: { port: "51820", proto: "udp" },
+            };
+            const resolved = svcToPort[service || ""] || { port: validatePort(toPort), proto: proto || "tcp" };
+            parts.push(`${resolved.proto} dport ${resolved.port}`);
+        } else if (ruleType === "portRange") {
+            const safeStart = validatePort(toPort);
+            const safeEnd = validatePort(toPortEnd || toPort);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Protocole non valide: ${proto}`);
+            parts.push(`${proto} dport ${safeStart}-${safeEnd}`);
+        } else if (ruleType === "multiPort") {
+            if (!/^\d+(,\d+)*$/.test(toPort)) throw new Error("Format multi-ports invalide (ex: 80,443)");
+            const ports = toPort.split(",").map(p => validatePort(p.trim())).filter(Boolean);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Protocole non valide: ${proto}`);
+            parts.push(`${proto} dport { ${ports.join(", ")} }`);
+        } else {
+            const safePort = validatePort(toPort);
+            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Protocole non valide: ${proto}`);
+            parts.push(`${proto} dport ${safePort}`);
+        }
+
+        // 4. Rate limit
+        if (rateLimit && action === "allow") {
+            parts.push(`limit rate ${shellSafe(rateLimit)}`);
+        }
+
+        // 5. Log
+        if (log) {
+            parts.push(`log prefix "[NFT] "`);
+        }
+
+        // 6. Action
+        parts.push(nftAction);
+
+        // 7. Comment
+        if (comment) {
+            parts.push(`comment "${shellSafeComment(comment)}"`);
+        }
+
+        return parts.join(" ");
+    }
+
+    private isMatchingNftLine(line: string, rule: FirewallRule): boolean {
+        if (!line || line.startsWith("#")) return false;
+        if (rule.ruleType === "icmp" && line.includes("icmp")) return true;
+        if (rule.ruleType === "port") {
+            const [port] = rule.to.split("/");
+            if (line.includes(`dport ${port}`)) {
+                if (rule.from && rule.from !== "Anywhere") {
+                    return line.includes(rule.from);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     private async getStatusNftables(available: FirewallBackend[]): Promise<FirewallStatus> {
         let output: string;
         try {
-            output = await this.execCommand("sudo -n nft list ruleset 2>/dev/null");
+            output = await this.execCommand("sudo -n nft -a list ruleset 2>/dev/null || sudo -n nft list ruleset 2>/dev/null");
         } catch {
             return { active: false, rules: [], installed: true, backend: "nftables", availableBackends: available };
         }
         const active = output.trim().length > 0 && output.includes("chain");
         const rules: FirewallRule[] = [];
-        let id = 1;
+        let autoId = 1;
 
         if (active) {
             for (const rawLine of output.split("\n")) {
@@ -841,6 +953,10 @@ MISSING
                     continue;
                 }
 
+                // Handle extraction
+                const handleMatch = line.match(/#\s*handle\s+(\d+)/);
+                const ruleId = handleMatch ? parseInt(handleMatch[1], 10) : autoId++;
+
                 const ifaceMatch = line.match(/iifname\s+"([^"]+)"/);
                 const iface = ifaceMatch ? ifaceMatch[1] : undefined;
 
@@ -854,7 +970,7 @@ MISSING
                     const port = dportMatch[2];
                     const service = port === "22" ? "ssh" : port === "53" ? "dns" : port === "10050" ? "zabbix" : undefined;
                     rules.push({
-                        id: id++,
+                        id: ruleId,
                         to: `${port}/${proto}`,
                         action,
                         from,
@@ -870,7 +986,7 @@ MISSING
 
                 if (line.includes("icmp")) {
                     rules.push({
-                        id: id++,
+                        id: ruleId,
                         to: "ICMP",
                         action,
                         from,
@@ -889,13 +1005,15 @@ MISSING
 
     private async toggleNftables(enable: boolean): Promise<void> {
         if (enable) {
-            // Create a basic nftables ruleset with default deny + SSH allow
-            const ruleset = `table inet filter {
+            const ruleset = `table inet firewall {
     chain input {
         type filter hook input priority 0; policy drop;
         ct state established,related accept
         iif lo accept
+        ip protocol icmp accept
         tcp dport 22 accept
+        tcp dport 53 accept
+        udp dport 53 accept
     }
     chain forward {
         type filter hook forward priority 0; policy drop;
@@ -904,118 +1022,116 @@ MISSING
         type filter hook output priority 0; policy accept;
     }
 }`;
-            // Write to a temp file then load it
             await this.execCommand(`echo '${ruleset.replace(/'/g, "'\\''")}' | sudo -n nft -f -`);
+            try {
+                await this.execCommand("sudo -n sh -c 'nft list ruleset > /etc/nftables.conf'");
+            } catch {}
         } else {
             await this.execCommand("sudo -n nft flush ruleset");
         }
     }
 
     private async addRuleNftables(params: AddRuleParams): Promise<void> {
-        const { toPort, proto, action, fromIp, direction, ruleType, toPortEnd, service, interface_: iface, rateLimit, icmpType, log, comment, rawRule } = params;
-        if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`Invalid action: ${action}`);
-        const nftAction = action === "allow" ? "accept" : action === "deny" ? "drop" : "reject";
-        const chain = direction === "out" ? "output" : "input";
+        const ruleStr = this.buildNftRule(params);
 
-        // Raw rule
-        if (ruleType === "raw" && rawRule) {
-            await this.execCommand(`sudo -n nft ${validateRawRule(rawRule, "nftables")}`);
-            return;
-        }
-
-        // ICMP rule
-        if (ruleType === "icmp") {
-            const safeIcmp = ALLOWED_ICMP_TYPES.includes(icmpType || "") ? icmpType : "echo-request";
-            let cmd = `sudo -n nft add rule inet filter ${chain}`;
-            if (fromIp && fromIp !== "any") {
-                const safeIp = validateIp(fromIp);
-                const family = safeIp.includes(":") ? "ip6" : "ip";
-                cmd += ` ${family} saddr ${safeIp}`;
+        if (os.platform() === "win32" && !sshManager.isConfigured()) {
+            const nftFile = path.resolve(process.cwd(), "tasks/prod-bind-config/etc/nftables.conf");
+            if (fs.existsSync(nftFile)) {
+                const content = fs.readFileSync(nftFile, "utf-8");
+                const lines = content.split("\n");
+                let insertIdx = -1;
+                for (let i = 0; i < lines.length; i++) {
+                    const trimmed = lines[i].trim();
+                    if (trimmed.startsWith("log prefix") || trimmed.startsWith("reject with") || (trimmed === "}" && insertIdx === -1)) {
+                        insertIdx = i;
+                        break;
+                    }
+                }
+                if (insertIdx === -1) insertIdx = lines.length - 1;
+                lines.splice(insertIdx, 0, `        ${ruleStr}`);
+                fs.writeFileSync(nftFile, lines.join("\n"), "utf-8");
+                return;
             }
-            cmd += ` icmp type ${shellSafe(safeIcmp!)} ${nftAction}`;
-            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
-            if (log) cmd += ` log prefix "[NFT-ICMP] "`;
-            await this.execCommand(cmd);
-            return;
+            throw new Error("Fichier de configuration nftables introuvable.");
         }
 
-        // Service rule â€” resolve to port
-        if (ruleType === "service") {
-            const svcToPort: Record<string, string> = { ssh: "22", http: "80", https: "443", dns: "53", ftp: "21", smtp: "25", smtps: "465", imap: "143", imaps: "993", pop3: "110", pop3s: "995", mysql: "3306", postgresql: "5432", redis: "6379", mongodb: "27017", nfs: "2049", samba: "139", ntp: "123", syslog: "514", snmp: "161", rsync: "873", vnc: "5900", rdp: "3389", openvpn: "1194", wireguard: "51820" };
-            const resolvedPort = svcToPort[service || ""] || toPort;
-            const safePort = validatePort(resolvedPort);
-            let cmd = `sudo -n nft add rule inet filter ${chain}`;
-            if (fromIp && fromIp !== "any") {
-                const safeIp = validateIp(fromIp);
-                const family = safeIp.includes(":") ? "ip6" : "ip";
-                cmd += ` ${family} saddr ${safeIp}`;
-            }
-            cmd += ` tcp dport ${safePort} ${nftAction}`;
-            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
-            if (rateLimit && action === "allow") cmd += ` limit rate ${shellSafe(rateLimit)}`;
-            if (log) cmd += ` log prefix "[NFT-SVC] "`;
-            await this.execCommand(cmd);
-            return;
+        // Linux / Production / SSH
+        const ctx = await this.detectNftContext();
+        const rulesetOut = await this.execCommand("sudo -n nft -a list ruleset 2>/dev/null || true");
+        const rejectMatch = rulesetOut.match(/reject\s+[^\n]+#\s*handle\s+(\d+)/);
+
+        let cmd: string;
+        if (rejectMatch) {
+            const rejectHandle = rejectMatch[1];
+            cmd = `sudo -n nft insert rule ${ctx.family} ${ctx.table} ${ctx.chain} position ${rejectHandle} ${ruleStr}`;
+        } else {
+            cmd = `sudo -n nft add rule ${ctx.family} ${ctx.table} ${ctx.chain} ${ruleStr}`;
         }
 
-        // Port range rule
-        if (ruleType === "portRange") {
-            const safeStart = validatePort(toPort);
-            const safeEnd = validatePort(toPortEnd || toPort);
-            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-            let cmd = `sudo -n nft add rule inet filter ${chain}`;
-            if (fromIp && fromIp !== "any") {
-                const safeIp = validateIp(fromIp);
-                const family = safeIp.includes(":") ? "ip6" : "ip";
-                cmd += ` ${family} saddr ${safeIp}`;
-            }
-            cmd += ` ${proto} dport ${safeStart}-${safeEnd} ${nftAction}`;
-            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
-            if (log) cmd += ` log prefix "[NFT-RANGE] "`;
-            await this.execCommand(cmd);
-            return;
-        }
-
-        // Multi-port rule
-        if (ruleType === "multiPort") {
-            if (!/^\d+(,\d+)*$/.test(toPort)) throw new Error("Multi-port requires comma-separated port numbers");
-            if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-            const ports = toPort.split(",").map(p => p.trim()).filter(Boolean);
-            let cmd = `sudo -n nft add rule inet filter ${chain}`;
-            if (fromIp && fromIp !== "any") {
-                const safeIp = validateIp(fromIp);
-                const family = safeIp.includes(":") ? "ip6" : "ip";
-                cmd += ` ${family} saddr ${safeIp}`;
-            }
-            cmd += ` ${proto} dport { ${ports.join(", ")} } ${nftAction}`;
-            if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
-            if (log) cmd += ` log prefix "[NFT-MPORT] "`;
-            await this.execCommand(cmd);
-            return;
-        }
-
-        // Standard port rule
-        const safePort = validatePort(toPort);
-        if (!ALLOWED_PROTOS.includes(proto as any)) throw new Error(`Invalid protocol: ${proto}`);
-        let cmd = `sudo -n nft add rule inet filter ${chain}`;
-        if (fromIp && fromIp !== "any") {
-            const safeIp = validateIp(fromIp);
-            const family = safeIp.includes(":") ? "ip6" : "ip";
-            cmd += ` ${family} saddr ${safeIp}`;
-        }
-        cmd += ` ${proto} dport ${safePort} ${nftAction}`;
-        if (iface) cmd += ` iif "${shellSafe(iface!)}"`;
-        if (rateLimit && action === "allow") cmd += ` limit rate ${shellSafe(rateLimit)}`;
-        if (log) cmd += ` log prefix "[NFT] "`;
         await this.execCommand(cmd);
+
+        // Persist to /etc/nftables.conf and verify
+        try {
+            await this.execCommand("sudo -n sh -c 'nft list ruleset > /etc/nftables.conf'");
+            await this.execCommand("sudo -n nft -c -f /etc/nftables.conf");
+        } catch (persistErr: any) {
+            console.warn(`[firewall] Règle appliquée en mémoire mais échec de persistance: ${persistErr.message}`);
+        }
     }
 
-    private async deleteRuleNftables(_id: number): Promise<void> {
-        // nftables rule deletion requires handle - complex to map by ID
-        throw new Error("nftables rule deletion requires the rule handle. Use 'nft delete rule' directly.");
-    }
+    private async deleteRuleNftables(id: number): Promise<void> {
+        if (!Number.isInteger(id) || id < 1) throw new Error("Identifiant de règle non valide");
 
-    // â”€â”€ Unified API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        if (os.platform() === "win32" && !sshManager.isConfigured()) {
+            const nftFile = path.resolve(process.cwd(), "tasks/prod-bind-config/etc/nftables.conf");
+            if (fs.existsSync(nftFile)) {
+                const { rules } = await this.getStatusNftables(["nftables"]);
+                const targetRule = rules.find(r => r.id === id);
+                if (!targetRule) throw new Error(`Règle ID ${id} introuvable`);
+
+                const content = fs.readFileSync(nftFile, "utf-8");
+                const lines = content.split("\n");
+                let removed = false;
+                const newLines: string[] = [];
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!removed && this.isMatchingNftLine(trimmed, targetRule)) {
+                        removed = true;
+                        continue;
+                    }
+                    newLines.push(line);
+                }
+
+                fs.writeFileSync(nftFile, newLines.join("\n"), "utf-8");
+                return;
+            }
+            throw new Error("Fichier de configuration nftables introuvable.");
+        }
+
+        // Linux / Production / SSH
+        const { rules } = await this.getStatusNftables(["nftables"]);
+        const targetRule = rules.find(r => r.id === id);
+
+        // Security check: never delete the last SSH allow rule!
+        if (targetRule && (targetRule.to === "22/tcp" || targetRule.service === "ssh") && targetRule.action === "ALLOW") {
+            const sshRules = rules.filter(r => (r.to === "22/tcp" || r.service === "ssh") && r.action === "ALLOW");
+            if (sshRules.length <= 1) {
+                throw new Error("Garde-fou de sécurité : Impossible de supprimer la seule règle SSH active (risque de coupure immédiate de l'accès).");
+            }
+        }
+
+        const ctx = await this.detectNftContext();
+        await this.execCommand(`sudo -n nft delete rule ${ctx.family} ${ctx.table} ${ctx.chain} handle ${id}`);
+
+        // Persist to /etc/nftables.conf and verify
+        try {
+            await this.execCommand("sudo -n sh -c 'nft list ruleset > /etc/nftables.conf'");
+            await this.execCommand("sudo -n nft -c -f /etc/nftables.conf");
+        } catch (persistErr: any) {
+            console.warn(`[firewall] Règle supprimée en mémoire mais échec de persistance: ${persistErr.message}`);
+        }
+    }
 
     async getStatus(): Promise<FirewallStatus> {
         try {

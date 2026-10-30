@@ -80,16 +80,16 @@ export const KNOWN_SERVICES = [
 ] as const;
 
 export const ICMP_TYPES = [
-  { value: "echo-request", label: "Echo Request (Ping)" },
-  { value: "echo-reply", label: "Echo Reply" },
-  { value: "destination-unreachable", label: "Destination Unreachable" },
-  { value: "time-exceeded", label: "Time Exceeded" },
-  { value: "redirect", label: "Redirect" },
-  { value: "router-advertisement", label: "Router Advertisement" },
-  { value: "router-solicitation", label: "Router Solicitation" },
-  { value: "parameter-problem", label: "Parameter Problem" },
-  { value: "timestamp-request", label: "Timestamp Request" },
-  { value: "timestamp-reply", label: "Timestamp Reply" },
+  { value: "echo-request", label: "Echo Request (Ping entrant)" },
+  { value: "echo-reply", label: "Echo Reply (Réponse Ping)" },
+  { value: "destination-unreachable", label: "Destination Inaccessible" },
+  { value: "time-exceeded", label: "Délai Dépassé (TTL Exceeded)" },
+  { value: "redirect", label: "Redirection ICMP" },
+  { value: "router-advertisement", label: "Annonce Routeur" },
+  { value: "router-solicitation", label: "Sollicitation Routeur" },
+  { value: "parameter-problem", label: "Problème de Paramètre" },
+  { value: "timestamp-request", label: "Horodatage ICMP" },
+  { value: "timestamp-reply", label: "Réponse Horodatage" },
 ] as const;
 
 export const RATE_LIMIT_PRESETS = [
@@ -101,12 +101,12 @@ export const RATE_LIMIT_PRESETS = [
 ] as const;
 
 export const RULE_TYPE_CONFIG: FirewallRuleTypeOption[] = [
-  { value: "port", label: "Port", icon: Network, desc: "Single port rule" },
-  { value: "service", label: "Service", icon: Zap, desc: "Predefined service" },
-  { value: "portRange", label: "Port Range", icon: Activity, desc: "Range of ports" },
-  { value: "multiPort", label: "Multi-Port", icon: Radio, desc: "Multiple ports" },
-  { value: "icmp", label: "ICMP", icon: MessageSquare, desc: "ICMP protocol" },
-  { value: "raw", label: "Raw Rule", icon: FileCode, desc: "Custom command" },
+  { value: "port", label: "Port Unique", icon: Network, desc: "Règle sur un port TCP/UDP" },
+  { value: "service", label: "Service", icon: Zap, desc: "Service standard (DNS, SSH, HTTP...)" },
+  { value: "portRange", label: "Plage de Ports", icon: Activity, desc: "Plage de ports continus" },
+  { value: "multiPort", label: "Multi-Ports", icon: Radio, desc: "Plusieurs ports séparés par virgules" },
+  { value: "icmp", label: "ICMP / Ping", icon: MessageSquare, desc: "Protocole ICMP (diagnostics réseau)" },
+  { value: "raw", label: "Règle Brute", icon: FileCode, desc: "Syntaxe nftables avancée" },
 ];
 
 export function ruleTypeLabel(ruleType: string): string {
