@@ -154,7 +154,7 @@ function NavButton({
     <Link href={item.href} onClick={onNavigate}>
       <button
         className={[
-          "flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-sm font-medium transition-all duration-150",
+          "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-xs font-medium transition-all duration-150",
           active
             ? "bg-sidebar-accent/90 text-sidebar-accent-foreground shadow-[inset_0_1px_0_hsl(var(--primary)/0.2),0_10px_30px_hsl(var(--background)/0.18)] ring-1 ring-white/5"
             : "text-sidebar-foreground/70 hover:bg-sidebar-accent/55 hover:text-sidebar-accent-foreground",
@@ -335,17 +335,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <aside
         className={[
           "hidden border-r border-sidebar-border/70 bg-sidebar/80 backdrop-blur-xl lg:flex lg:flex-col",
-          sidebarCollapsed ? "w-[92px]" : "w-[280px]",
+          sidebarCollapsed ? "w-[64px]" : "w-[240px]",
         ].join(" ")}
       >
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/70 px-4">
+        <div className="flex h-13 items-center gap-2.5 border-b border-sidebar-border/70 px-3.5">
           <Link href="/" className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 text-white shadow-[0_0_24px_rgba(99,102,241,0.35)]">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 text-white shadow-[0_0_24px_rgba(99,102,241,0.35)]">
               <span className="text-sm font-bold tracking-tight">DNS</span>
             </div>
             {!sidebarCollapsed ? (
               <div className="min-w-0">
-                <div className="truncate text-base font-semibold tracking-[-0.03em] text-sidebar-foreground">
+                <div className="truncate text-sm font-bold tracking-tight text-sidebar-foreground">
                   BIND9 Config
                 </div>
                 <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
@@ -382,11 +382,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </ScrollArea>
 
-        <div className="border-t border-sidebar-border/70 px-4 py-4">
+        <div className="border-t border-sidebar-border/70 px-3 py-2.5">
           {!sidebarCollapsed ? (
             <div className="linear-panel rounded-2xl px-3 py-3">
               <div className="flex items-center gap-3">
-                <Avatar className="h-9 w-9">
+                <Avatar className="h-7 w-7">
                   <AvatarFallback className="bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-xs text-primary-foreground">
                     {user?.username?.slice(0, 2).toUpperCase()}
                   </AvatarFallback>
@@ -401,7 +401,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
           ) : (
             <div className="flex justify-center">
-              <Avatar className="h-9 w-9">
+              <Avatar className="h-7 w-7">
                 <AvatarFallback className="bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-xs text-primary-foreground">
                   {user?.username?.slice(0, 2).toUpperCase()}
                 </AvatarFallback>
@@ -413,7 +413,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 border-b border-border/60 bg-background/78 backdrop-blur-xl">
-          <div className="flex h-16 items-center gap-3 px-4 sm:px-6">
+          <div className="flex h-13 items-center gap-2.5 px-3.5 sm:px-5">
             <Button
               variant="ghost"
               size="icon"
@@ -555,7 +555,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="rounded-full p-0">
-                  <Avatar className="h-9 w-9">
+                  <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-xs text-primary-foreground">
                       {user?.username?.slice(0, 2).toUpperCase()}
                     </AvatarFallback>
@@ -564,7 +564,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="flex items-center gap-3">
-                  <Avatar className="h-9 w-9">
+                  <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-[linear-gradient(180deg,hsl(var(--primary)/0.95),hsl(var(--accent)/0.84))] text-xs text-primary-foreground">
                       {user?.username?.slice(0, 2).toUpperCase()}
                     </AvatarFallback>
@@ -591,7 +591,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 px-4 py-8 sm:px-6">{children}</main>
+        <main className="min-w-0 flex-1 px-3.5 py-4 sm:px-5 sm:py-4">{children}</main>
       </div>
 
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>

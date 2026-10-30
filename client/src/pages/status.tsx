@@ -262,22 +262,16 @@ export default function Status() {
             </CardHeader>
             <CardContent className="grid gap-3 pt-4 sm:grid-cols-2">
               <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
-                <div className="font-mono font-semibold">{status.connectionMode?.toUpperCase() || "LOCAL"}</div>
+                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Architecture</div>
+                <div className="font-mono font-semibold">Appliance Locale</div>
               </div>
               <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                 <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Target</div>
                 <div className="truncate font-mono font-semibold">{targetLabel}</div>
               </div>
               <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">SSH State</div>
-                <div className="font-mono font-semibold">
-                  {status.sshState?.connected
-                    ? "Connected"
-                    : status.sshState?.configured
-                      ? "Configured"
-                      : "Local only"}
-                </div>
+                <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Service DNS</div>
+                <div className="font-mono font-semibold">named.service (systemd)</div>
               </div>
               <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                 <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">BIND Access</div>

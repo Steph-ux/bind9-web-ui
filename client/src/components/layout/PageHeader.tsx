@@ -1,4 +1,4 @@
-﻿import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -22,26 +22,26 @@ export function PageHeader({
   return (
     <section
       className={cn(
-        "flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between",
+        "flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between",
         className,
       )}
     >
-      <div className="min-w-0 space-y-3">
-        <div className="flex items-center gap-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2.5">
           {Icon ? (
-            <div className="linear-panel flex h-11 w-11 items-center justify-center rounded-2xl text-primary">
-              <Icon className="h-5 w-5" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+              <Icon className="h-4 w-4" />
             </div>
           ) : null}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-[-0.05em] sm:text-3xl">
+              <h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">
                 {title}
               </h1>
               {badge}
             </div>
             {description ? (
-              <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
+              <p className="max-w-2xl text-xs text-muted-foreground leading-normal line-clamp-1 mt-0.5">
                 {description}
               </p>
             ) : null}
@@ -50,9 +50,8 @@ export function PageHeader({
       </div>
 
       {actions ? (
-        <div className="flex flex-wrap items-center gap-2.5">{actions}</div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>
       ) : null}
     </section>
   );
 }
-

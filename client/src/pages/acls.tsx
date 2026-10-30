@@ -154,10 +154,7 @@ export default function ACLs() {
   const aclList = data?.acls ?? [];
   const keyList = data?.keys ?? [];
   const status = data?.status ?? null;
-  const targetLabel =
-    status?.connectionMode === "ssh" && status?.sshState?.host
-      ? status.sshState.host
-      : status?.hostname || "current server";
+  const targetLabel = status?.hostname || "Serveur local";
   const management = status?.management;
   const aclCapabilityReason = getAclCapabilityReason(status, canManageDNS);
   const keyCapabilityReason = getKeyCapabilityReason(status, canManageDNS);
@@ -324,8 +321,8 @@ export default function ACLs() {
           description="Gestion des regles de filtrage reseau et des cles cryptographiques de transfert de zone."
           icon={Shield}
           badge={
-            <Badge variant="outline" className="border-border/70 bg-background/70">
-              {status?.connectionMode === "ssh" ? "Serveur distant" : "Serveur local"}
+            <Badge variant="outline" className="border-primary/20 bg-primary/10 text-[10px] text-primary">
+              Appliance locale
             </Badge>
           }
           actions={
@@ -382,33 +379,26 @@ export default function ACLs() {
           />
         </div>
 
-        <Card className="linear-panel border-border/60 bg-card/78 shadow-none">
-          <CardHeader className="border-b border-border/60">
-            <CardTitle className="text-base tracking-[-0.04em]">Managed Scope</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Target</div>
-              <div className="truncate font-mono font-semibold">{targetLabel}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/60 px-3.5 py-2.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground">Hôte cible :</span>
+            <span className="font-mono text-foreground font-medium">{targetLabel}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span>named.conf.acls :</span>
+              <span className={management?.writablePaths.namedConfAcls ? "font-medium text-emerald-500" : "font-medium text-amber-500"}>
+                {management?.writablePaths.namedConfAcls ? "Écriture" : "Lecture seule"}
+              </span>
             </div>
-            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
-              <div className="font-mono font-semibold">{status?.connectionMode?.toUpperCase() || "LOCAL"}</div>
+            <div className="flex items-center gap-1.5">
+              <span>named.conf.keys :</span>
+              <span className={management?.writablePaths.namedConfKeys ? "font-medium text-emerald-500" : "font-medium text-amber-500"}>
+                {management?.writablePaths.namedConfKeys ? "Écriture" : "Lecture seule"}
+              </span>
             </div>
-            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">ACL File</div>
-              <div className="font-mono font-semibold">
-                {management?.writablePaths.namedConfAcls ? "Writable" : management ? "Read-only" : "Unknown"}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Keys File</div>
-              <div className="font-mono font-semibold">
-                {management?.writablePaths.namedConfKeys ? "Writable" : management ? "Read-only" : "Unknown"}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         
 

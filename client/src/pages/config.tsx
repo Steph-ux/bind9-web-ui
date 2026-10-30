@@ -325,15 +325,13 @@ export default function Config() {
           </CardHeader>
           <CardContent className="grid gap-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Mode</div>
-              <div className="font-mono font-semibold">{statusSnapshot?.connectionMode?.toUpperCase() || "LOCAL"}</div>
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Architecture</div>
+                <div className="font-mono font-semibold">Appliance Locale</div>
             </div>
             <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">SSH Link</div>
-              <div className="font-mono font-semibold">
-                {statusSnapshot?.sshState?.connected ? "Connected" : statusSnapshot?.sshState?.configured ? "Configured" : "Local only"}
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Moteur BIND9</div>
+                <div className="font-mono font-semibold">Appliance Locale</div>
               </div>
-            </div>
             <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
               <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">BIND Access</div>
               <div className="font-mono font-semibold">
