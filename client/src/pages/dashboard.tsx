@@ -26,6 +26,7 @@ import { AlertCircle, Wrench } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { BindHostWizardDialog, DnsQueryTesterCard } from "@/components/host";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n } from "@/lib/i18n";
 
 const RecordDistributionCard = lazy(async () => {
   const module = await import("@/components/dashboard/RecordDistributionCard");
@@ -54,6 +55,7 @@ function RecordDistributionFallback() {
 }
 
 export default function Dashboard() {
+  const { t, language } = useI18n();
   const { toast } = useToast();
   const [reloading, setReloading] = useState(false);
   const [flushing, setFlushing] = useState(false);
@@ -147,22 +149,9 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="Supervision BIND9 & Control Plane"
-          description="Metriques en direct, etat de sante du cluster DNS et activite recente des requetes autoritaires."
+          title={t.dashboard.title}
+          description={t.dashboard.subtitle}
           icon={Server}
-          badge={
-            <Badge variant="outline" className="gap-2 border-border/70 bg-background/80 py-1 px-3">
-              <span
-                className={[
-                  "h-2 w-2 rounded-full",
-                  data.bind9.running ? "bg-emerald-500 animate-pulse" : "bg-amber-500",
-                ].join(" ")}
-              />
-              <span className="font-mono text-xs font-semibold">
-                {data.bind9.running ? "BIND9 En Ligne (v9.18)" : "BIND9 Non Détecté"}
-              </span>
-            </Badge>
-          }
           actions={
             <>
               <Button
@@ -171,7 +160,7 @@ export default function Dashboard() {
                 onClick={() => exportDashboardReport(data)}
               >
                 <Download className="h-4 w-4" />
-                <span className="hidden sm:inline">Exporter rapport</span>
+                <span className="hidden sm:inline">{t.common.exportReport}</span>
               </Button>
               <Button
                 className="h-10 gap-2 rounded-xl bg-primary text-primary-foreground font-medium shadow-sm hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-all"
@@ -179,7 +168,7 @@ export default function Dashboard() {
                 disabled={isFetching}
               >
                 <RefreshCw className={["h-4 w-4", isFetching ? "animate-spin" : ""].join(" ")} />
-                <span>{isFetching ? "Actualisation..." : "Actualiser"}</span>
+                <span>{isFetching ? t.common.refreshing : t.common.refresh}</span>
               </Button>
             </>
           }
