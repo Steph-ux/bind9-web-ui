@@ -193,7 +193,6 @@ Bind-Config/
 ├── shared/              # Shared schemas and types
 ├── data/                # SQLite database and local data
 ├── script/              # Build scripts
-├── DESIGN.md            # Active design system direction
 └── README.md
 ```
 
