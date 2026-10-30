@@ -1,12 +1,12 @@
 # BIND9 Web UI
 
-Self-hosted DNS control panel for BIND9.
+Self-hosted DNS control panel and native appliance for BIND9.
 
-BIND9 Web UI helps DNS operators manage BIND9 without hand-editing every zone and configuration file. It supports local management and remote management over SSH, with a dashboard for zones, records, ACLs, TSIG keys, RPZ, replication, backups, user access, and operational visibility.
+BIND9 Web UI transforms any Linux server running BIND9 into an intuitive, automated DNS appliance. It supports direct host management (local appliance mode) as well as centralized multi-server management over SSH, providing a dashboard for zones, records, ACLs, TSIG keys, RPZ firewalls, replication, automated backups, user roles, and operational health.
 
 Copyright (c) 2025 Stephane ASSOGBA
 
-<!-- keywords: bind9 web ui, dns manager, dns control panel, self hosted dns -->
+<!-- keywords: bind9 web ui, dns manager, dns control panel, self hosted dns, bind9 appliance -->
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white)
 ![Express](https://img.shields.io/badge/Express-5.0-000?logo=express)
@@ -16,220 +16,26 @@ Copyright (c) 2025 Stephane ASSOGBA
 ![MySQL](https://img.shields.io/badge/MySQL-Supported-4479A1?logo=mysql&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-## Quick Links
+---
 
-- [One-command install](#production-install)
-- [Production install](#production-install)
-- [Install options](#install-options)
-- [Install on the BIND server](#install-on-the-bind-server)
-- [Manual development start](#manual-development-start)
-- [Environment variables](#environment-variables)
-- [Remote BIND permissions](#remote-bind-permissions)
-- [Recommended production setup](#recommended-production-setup)
-- [Contributing](#contributing)
+## Table of Contents
 
-## One-Command Install
+- [Quick Start (Production Install)](#quick-start-production-install)
+- [Core Features](#core-features)
+- [Architecture & Operating Modes](#architecture--operating-modes)
+- [Configuration & Environment](#configuration--environment)
+- [Database Backends](#database-backends)
+- [Remote SSH BIND Permissions](#remote-bind-permissions)
+- [Zone Reloading & Propagation](#zone-reloading--propagation)
+- [Security Architecture](#security-architecture)
+- [Development & Building](#development--building)
+- [License](#license)
 
-On Debian or Ubuntu:
+---
 
-```bash
-git clone https://github.com/Steph-ux/bind9-web-ui.git && cd bind9-web-ui && sudo bash install.sh
-```
+## Quick Start (Production Install)
 
-The installer can deploy behind nginx, Apache, or no reverse proxy, and can run on the same host as BIND9 or on a separate management server.
-
-## Why This Exists
-
-BIND9 is one of the most capable DNS servers available, but it still lacks an official management interface. In practice that means:
-
-- manual edits in multiple configuration files
-- easy-to-miss syntax mistakes
-- weak visibility across zones, access control, and runtime state
-- awkward remote administration when BIND runs on another host
-
-This project fills that gap with a full web UI focused on operational safety and day-to-day administration.
-
-## Who It Is For
-
-- DNS administrators who run BIND9 in production or labs
-- Teams that want a self-hosted DNS management interface
-- Operators managing several BIND9 servers from one UI
-- Environments that need local control instead of a SaaS DNS platform
-
-## Core Features
-
-### Native BIND9 Host Appliance & In-UI Installer
-
-- **Runs directly on the BIND9 server**: Acts as a native server control plane (Appliance mode).
-- **1-Click automated BIND9 installation**: Automatically detects whether BIND9 is present on the host; if missing, runs automated package installation across Debian, Ubuntu, RHEL, Rocky, AlmaLinux, CentOS, Fedora, and Alpine.
-- **Guided BIND9 Setup Wizard**: Generates `named.conf.options`, `named.conf.local`, default RFC zones, directory structures, and `rndc.key` based on tailored profiles:
-  - *Authoritative Server* (enterprise DNS hosting with recursion hardening)
-  - *Caching / Recursive Resolver* (with forwarders and LAN recursion)
-  - *Hybrid Server* (local authoritative zones + upstream resolution)
-- **Direct Systemd Service Controls**: Start, Stop, Restart, and Reload (`rndc reload`) BIND9 service directly from the UI.
-- **Interactive DNS Query Tester**: Built-in `dig` / native resolver query tool to test live resolution on `127.0.0.1:53` without leaving the browser.
-
-### DNS management
-
-- Create, edit, and delete DNS zones
-- Manage records for `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR`, `SRV`, and more
-- Generate and parse BIND zone files automatically
-- Create reverse DNS and PTR records automatically when appropriate
-- Import existing zones and managed includes from an existing BIND installation
-
-### Access control and key management
-
-- Manage ACLs through dedicated BIND include files
-- Manage TSIG keys through dedicated include files
-- Configure zone transfer authorization more safely
-
-### RPZ / DNS firewall
-
-- Manage Response Policy Zone entries from the UI
-- Import RPZ data from text, zone-file style content, or remote URLs
-- Handle large blocklists with pagination and batch processing
-- Keep RPZ data synchronized with BIND-managed files
-
-### Remote server management
-
-- Add multiple BIND servers over SSH
-- Detect platform details and common BIND paths automatically
-- Switch the active target between local mode and remote mode
-- Run configuration reads, writes, validation, and `rndc` operations against the active target
-
-### Replication and operations
-
-- Register secondary or replication targets
-- Maintain zone-to-server bindings
-- Run sync operations and conflict detection
-- Send BIND notify actions where applicable
-
-### Monitoring and maintenance
-
-- Dashboard with server, DNS, and operational summaries
-- Status view for service health and runtime information
-- Real-time logs
-- Backups and restore flows
-- Configuration snapshots
-- User management and API tokens
-
-### Security controls
-
-- Session-based authentication
-- Role-based access control for admin, operator, and viewer roles
-- Forced password rotation for bootstrap users
-- Validation and sanitization across BIND-facing inputs
-- CSRF-aware authenticated mutations
-- SSRF protections for remote fetch and notification features
-
-## Management Model
-
-The application supports two operating modes.
-
-### Local mode
-
-The web UI runs on the same host as BIND9 and interacts with:
-
-- BIND configuration files
-- zone files
-- `rndc`
-- validation binaries such as `named-checkconf` and `named-checkzone`
-
-### Remote SSH mode
-
-The web UI runs on a separate host and connects to a BIND server over SSH. The application executes commands and manages files remotely through the active SSH connection.
-
-This is the mode used when the UI is deployed on a central management server and your BIND servers live elsewhere.
-
-## Important BIND Integration Notes
-
-This project does not try to rewrite arbitrary BIND layouts blindly. A few conventions matter if you want the UI to manage everything cleanly.
-
-### Managed include files
-
-ACLs and TSIG keys are managed through dedicated include files:
-
-- `named.conf.acls`
-- `named.conf.keys`
-
-Your main BIND configuration should include them, for example:
-
-```conf
-include "/etc/bind/named.conf.acls";
-include "/etc/bind/named.conf.keys";
-```
-
-If an ACL exists only inside `named.conf.options`, BIND will use it, but the ACL page in the UI will not import it as a managed ACL until it is moved to `named.conf.acls`.
-
-### Existing manual changes
-
-The UI can import and reflect existing BIND configuration, but if you modify files manually outside the UI, the safest workflow is:
-
-1. make the manual BIND change
-2. validate it on the server
-3. use the relevant sync or refresh flow in the UI
-
-### Structural zone edits
-
-Record-level edits are first-class in the UI. Some deeper structural zone changes are still safer to perform directly in BIND and then sync back into the application.
-
-## Tech Stack
-
-| Layer | Technologies |
-|---|---|
-| Frontend | React 19, Vite 7, TypeScript, Tailwind CSS 4, shadcn/ui, Wouter |
-| Backend | Node.js, Express 5, TypeScript |
-| Data | SQLite by default, with PostgreSQL and MySQL support via Drizzle ORM |
-| Realtime | WebSocket (`ws`) |
-| Remote access | `ssh2` |
-| Validation | Zod, drizzle-zod |
-
-## Project Structure
-
-```text
-Bind-Config/
-├── client/              # React frontend
-├── server/              # Express backend and BIND services
-├── shared/              # Shared schemas and types
-├── data/                # SQLite database and local data
-├── script/              # Build scripts
-└── README.md
-```
-
-## Requirements
-
-### Development
-
-- Node.js 20+ recommended
-- npm
-- build tools required by native dependencies such as `better-sqlite3`
-
-On Debian or Ubuntu:
-
-```bash
-sudo apt update
-sudo apt install -y build-essential python3
-```
-
-### BIND target
-
-For local mode:
-
-- a host with BIND9 installed
-- access to BIND config and zone directories
-- `rndc`, `named-checkconf`, and `named-checkzone`
-
-For remote mode:
-
-- SSH access to the target server
-- a user with sufficient file and command permissions
-- passwordless `sudo` for required BIND operations if the user is not already privileged
-
-## Quick Start
-
-### Production install
-
-On Debian or Ubuntu:
+On Debian, Ubuntu, or compatible Linux systems:
 
 ```bash
 git clone https://github.com/Steph-ux/bind9-web-ui.git
@@ -237,329 +43,240 @@ cd bind9-web-ui
 sudo bash install.sh
 ```
 
-As a single shell line:
+### What the installer does by default:
+- Installs the application to `/opt/bind9-web-ui` as a systemd service (`bind9-web-ui`)
+- Enables local BIND9 management permissions and sudoers rules for service management
+- Configures an HTTPS reverse proxy (Nginx or Apache) on `https://<server-ip>:8443`
+- Initializes a local SQLite database and generates a bootstrap administrator password in `/root/bind9-web-ui-bootstrap-admin.txt`
 
+### Installer Customization Flags:
 ```bash
-git clone https://github.com/Steph-ux/bind9-web-ui.git && cd bind9-web-ui && sudo bash install.sh
-```
+# Custom initial admin password
+sudo env DEFAULT_ADMIN_PASSWORD='YourStrongPassword' bash install.sh
 
-Default install:
-
-- app installed in `/opt/bind9-web-ui`
-- env file in `/etc/bind9-web-ui.env`
-- systemd service `bind9-web-ui`
-- nginx reverse proxy on `https://<server-ip>:8443`
-- Node.js listens locally on `127.0.0.1:3001`
-- generated admin password stored in `/root/bind9-web-ui-bootstrap-admin.txt`
-
-### Install options
-
-Set the initial admin password:
-
-```bash
-sudo env DEFAULT_ADMIN_PASSWORD='change-me-now' bash install.sh
-```
-
-Use Apache instead of nginx:
-
-```bash
-sudo env WEB_SERVER=apache bash install.sh
-```
-
-Use nginx on ports 80/443:
-
-```bash
+# Use standard HTTPS port (443) with custom domain
 sudo env WEB_SERVER=nginx WEB_HTTP_PORT=80 WEB_HTTPS_PORT=443 SERVER_NAME=dns.example.com bash install.sh
-```
 
-Use Apache on ports 80/443:
-
-```bash
-sudo env WEB_SERVER=apache WEB_HTTP_PORT=80 WEB_HTTPS_PORT=443 SERVER_NAME=dns.example.com bash install.sh
-```
-
-Install without nginx/apache:
-
-```bash
+# Deploy without reverse proxy (bring your own TLS proxy)
 sudo env WEB_SERVER=none bash install.sh
 ```
 
-`WEB_SERVER` can be `nginx`, `apache`, or `none`. If `WEB_SERVER=none`, put your own TLS reverse proxy in front of the Node.js service.
+---
 
-To replace the default web site on the server:
+## Core Features
 
-```bash
-sudo env DISABLE_DEFAULT_SITE=1 WEB_HTTP_PORT=80 WEB_HTTPS_PORT=443 SERVER_NAME=dns.example.com bash install.sh
-```
+### Native BIND9 Host Appliance & In-UI Installer
+- **Host Detection**: Automatically identifies the Linux distribution, package manager (`apt`, `dnf`, `yum`, `apk`, `pacman`), BIND9 service state, listening ports, and conflict detection with `systemd-resolved`.
+- **1-Click Package Installation**: Installs BIND9 and core utilities directly from the web interface if not yet present on the host.
+- **Guided Setup Wizard**: Scaffolds BIND9 configurations (`named.conf.options`, `named.conf.local`, `named.conf.acls`, `rndc.key`) with three profiles:
+  - **Authoritative Server**: Enterprise DNS hosting with hardened recursion controls.
+  - **Caching / Recursive Resolver**: Configured forwarders, DNSSEC validation, and LAN access controls.
+  - **Hybrid Server**: Local authoritative zones with recursive upstream resolution.
+- **Service Lifecycle Control**: Start, Stop, Restart, and Reload (`rndc reload`) BIND9 systemd services from the dashboard.
+- **Interactive DNS Query Tester**: Built-in `dig` / native resolver query tool to test live resolution on `127.0.0.1:53` without opening a terminal.
 
-### Install on the BIND server
+### Comprehensive DNS Zone Management
+- Create, modify, and delete forward and reverse DNS zones (`master`, `slave`, `forward`).
+- Full record editor supporting `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR`, `SRV`, `CAA`, `TLSA`, `DS`, and `DNSKEY`.
+- Automatic reverse zone and PTR record calculation from network CIDR notation.
+- Automated zone file generation, parsing, serial bumping, and syntax validation via `named-checkzone`.
 
-If the Web UI runs on the same host as BIND9:
+### RPZ (Response Policy Zone) / DNS Firewall
+- Manage DNS firewall rules directly from the web interface.
+- Block, redirect, or drop malicious domains and IP addresses.
+- Bulk import capabilities from plain text blocklists, zone files, or remote URLs.
 
-```bash
-sudo env LOCAL_BIND_ACCESS=1 bash install.sh
-```
+### Security, ACLs & TSIG Keys
+- Dedicated management for BIND9 Access Control Lists (`named.conf.acls`).
+- TSIG Key generation and deployment (`named.conf.keys`) with HMAC-SHA256 / SHA512 support for secure transfers.
 
-This lets systemd write to the configured BIND directories and adds the service user to the BIND group when it exists. If BIND files are root-only, local writes may still fail; use an SSH connection to `localhost` with sudo, or adjust permissions deliberately.
+### Multi-Server Remote Management over SSH
+- Manage multiple remote BIND9 instances from a single central web panel.
+- Automatic remote path detection and configuration sync over SFTP / SSH execution.
+- Real-time switching between local appliance mode and remote targets.
 
-### Manual development start
+### High Availability, Replication & Backups
+- Secondary server replication tracking and zone-to-server binding.
+- Manual and scheduled automated backups (full system, zones only, or configuration files).
+- One-click restore workflow with timestamped snapshots.
 
-### 1. Clone the repository
+---
 
-```bash
-git clone https://github.com/Steph-ux/bind9-web-ui.git
-cd bind9-web-ui
-```
+## Architecture & Operating Modes
 
-### 2. Install dependencies
-
-```bash
-npm install
-```
-
-### 3. Initialize the database
-
-```bash
-npm run db:push
-```
-
-### 4. Start development mode
-
-On Windows:
-
-```bash
-npm run dev
-```
-
-Then open:
+BIND9 Web UI operates under two paradigms:
 
 ```text
-http://localhost:3001
+Local Appliance Mode:
+[ BIND9 Web UI ] <--- (Local FS / sudo / rndc) ---> [ Local BIND9 Service ]
+
+Central Management Mode:
+[ BIND9 Web UI ] <--- (SSH / SFTP / sudo) ---> [ Remote BIND9 Server 1 ]
+                 <--- (SSH / SFTP / sudo) ---> [ Remote BIND9 Server 2 ]
 ```
 
-### 5. First login
+### Managed Include Files
+To prevent overwriting custom BIND options, the Web UI utilizes dedicated modular includes:
+- `named.conf.local` : Managed forward and reverse zone declarations
+- `named.conf.acls` : Defined access control lists
+- `named.conf.keys` : Defined TSIG keys
 
-On first startup, a bootstrap `admin` account is created automatically.
-
-- Username: `admin`
-- Password: the value of `DEFAULT_ADMIN_PASSWORD`, if set
-- Otherwise: a generated bootstrap password is created
-
-In production, the bootstrap password is not written to logs. Set `DEFAULT_ADMIN_PASSWORD` before first startup if you want a known initial password.
-
-## Production Build
-
-Build the application:
-
-```bash
-npm run build
+Ensure your primary `named.conf` includes these files:
+```conf
+include "/etc/bind/named.conf.local";
+include "/etc/bind/named.conf.acls";
+include "/etc/bind/named.conf.keys";
 ```
 
-Start the compiled server:
+---
 
-```bash
-node dist/index.cjs
-```
+## Configuration & Environment
 
-Set `NODE_ENV=production` in your environment or service manager.
-
-Note:
-
-- `npm start` is currently written for Windows-style environment variable syntax
-- for Linux services, prefer setting `NODE_ENV=production` in systemd, Docker, or your shell and launching `node dist/index.cjs`
-
-## Environment Variables
-
-The repository already includes an `.env.example`.
+Environment settings can be defined in `.env` (development) or `/etc/bind9-web-ui.env` (production):
 
 | Variable | Default | Description |
 |---|---|---|
-| `HOST` | `0.0.0.0` | Bind address for the Node.js server |
-| `PORT` | `3001` | HTTP port for the application |
-| `NODE_ENV` | `development` | Runtime mode |
-| `SESSION_SECRET` | random in development | Mandatory in production |
-| `DB_TYPE` | `sqlite` | `sqlite`, `postgresql`, or `mysql` |
-| `DATABASE_URL` | `data/bind9admin.db` | SQLite path or database connection URL |
-| `BACKUP_DIR` | `data/backups` | Runtime backup directory |
-| `BIND9_CONF_DIR` | `/etc/bind` | Local-mode BIND config directory |
-| `BIND9_ZONE_DIR` | `/var/cache/bind` | Local-mode zone directory |
-| `RNDC_BIN` | `rndc` | Path to the `rndc` binary |
-| `NAMED_CHECKCONF` | `named-checkconf` | Path to the config validation binary |
-| `DEFAULT_ADMIN_PASSWORD` | unset | Optional initial bootstrap admin password |
+| `HOST` | `0.0.0.0` | Bind address for the Node.js HTTP server |
+| `PORT` | `3001` | Internal HTTP port |
+| `NODE_ENV` | `production` | Runtime mode (`production` or `development`) |
+| `SESSION_SECRET` | Auto-generated | Secret key for HTTP session encryption (mandatory in production) |
+| `DB_TYPE` | `sqlite` | Database engine: `sqlite`, `postgresql`, or `mysql` |
+| `DATABASE_URL` | `data/bind9admin.db` | SQLite file path or external database connection URI |
+| `BIND9_CONF_DIR` | `/etc/bind` | Path to BIND9 configuration directory |
+| `BIND9_ZONE_DIR` | `/var/cache/bind` | Path to BIND9 zone file storage |
+| `RNDC_BIN` | `rndc` | Path or name of the `rndc` binary |
+| `DEFAULT_ADMIN_PASSWORD` | unset | Initial bootstrap admin password |
+
+---
 
 ## Database Backends
 
-SQLite is the default and easiest option. PostgreSQL and MySQL are also supported.
-
-### SQLite
-
-No extra setup is required beyond:
-
+### 1. SQLite (Default)
+Zero configuration required. Data is stored in `data/bind9admin.db`.
 ```bash
 npm run db:push
 ```
 
-### PostgreSQL
-
-Set:
-
+### 2. PostgreSQL
 ```bash
 DB_TYPE=postgresql
-DATABASE_URL=postgresql://user:password@host:5432/dbname
+DATABASE_URL=postgresql://user:password@localhost:5432/bind9admin
 ```
-
-Then push the schema.
-
-On Windows:
-
+Push the schema:
 ```bash
 npm run db:push:pg
 ```
 
-On Linux:
-
-```bash
-DB_TYPE=postgresql npx drizzle-kit push --config=drizzle.config.pg.ts
-```
-
-### MySQL
-
-Set:
-
+### 3. MySQL
 ```bash
 DB_TYPE=mysql
-DATABASE_URL=mysql://user:password@host:3306/dbname
+DATABASE_URL=mysql://user:password@localhost:3306/bind9admin
 ```
-
-Then push the schema.
-
-On Windows:
-
+Push the schema:
 ```bash
 npm run db:push:mysql
 ```
 
-On Linux:
-
-```bash
-DB_TYPE=mysql npx drizzle-kit push --config=drizzle.config.mysql.ts
-```
-
-## Development Scripts
-
-| Script | Purpose |
-|---|---|
-| `npm run dev` | Start the server in development mode |
-| `npm run dev:client` | Start only the Vite client |
-| `npm run build` | Build the client and server for production |
-| `npm start` | Windows-oriented production start shortcut |
-| `npm run check` | Run TypeScript checks |
-| `npm run db:push` | Push the SQLite schema |
-| `npm run db:push:pg` | Push the PostgreSQL schema |
-| `npm run db:push:mysql` | Push the MySQL schema |
+---
 
 ## Remote BIND Permissions
 
-For remote SSH management, the SSH user may need passwordless `sudo` for BIND commands and safe file operations. A typical example looks like this:
+When managing remote BIND servers over SSH with a non-root user, grant the required non-interactive `sudo` permissions in `/etc/sudoers.d/bind9-web-ui`:
 
-```bash
-<user> ALL=(ALL) NOPASSWD: /usr/sbin/rndc, /usr/bin/named-checkconf, /usr/bin/named-checkzone, /bin/cp, /usr/bin/cp
+```sudoers
+<user> ALL=(ALL) NOPASSWD: /usr/sbin/rndc, /usr/bin/named-checkconf, /usr/bin/named-checkzone, /usr/bin/cp /tmp/* /etc/bind/*
 ```
 
-Adjust this to your platform and operational policy.
+---
 
-If you also use firewall management through the UI, you may need additional `sudo` permissions for tools such as:
+## Zone Reloading & Propagation
 
-- `ufw`
-- `nft`
-- `iptables`
-- `firewall-cmd`
-- `systemctl`
+When a record is updated in the Web UI, the zone file is validated and `rndc reload <domain>` is executed automatically.
 
-## BIND Reload After Web UI Changes
-
-When a record is created or updated from the Web UI, the zone file must be valid and BIND must reload the affected zone before clients can resolve the new data.
-
-If the zone file contains the new record but DNS queries still return `NXDOMAIN` or an older SOA serial, BIND is still serving the previous in-memory zone. Validate the zone and reload it:
-
+To verify manual changes outside the UI:
 ```bash
 sudo named-checkconf
-sudo named-checkzone intra.isoceltelecom.com /var/cache/bind/zones/forward/intra.isoceltelecom.com
-sudo rndc reload intra.isoceltelecom.com
+sudo named-checkzone example.com /var/cache/bind/db.example.com
+sudo rndc reload example.com
 ```
 
-For deployments where the Web UI writes BIND zone files directly, use an automatic reload guard so changes are applied only after validation succeeds:
+---
 
-```ini
-# /etc/systemd/system/bind-zones-auto-reload.service
-[Unit]
-Description=Validate and reload BIND zones after Web UI changes
-After=named.service
+## Security Architecture
 
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/bind-zones-reload-if-valid.sh
-```
+- **Role-Based Access Control (RBAC)**: Distinct permissions for `admin` (full access), `operator` (zone and service mutations), and `viewer` (read-only monitoring).
+- **Session Protection**: Hardened cookies with `HttpOnly`, `SameSite=Lax`, and `__Host-` prefix enforcement in production.
+- **Input Validation**: Strict RFC 1035 / ARPA validation via Zod schemas, blocking directory traversal (`../`) and shell injection.
+- **Path Containment**: File write operations are constrained strictly to authorized BIND directories (`/etc/bind`, `/etc/named`, `/var/cache/bind`, `/var/named`).
+- **CSRF & CSWSH Defense**: Browser origin verification on all state-mutating HTTP requests and WebSocket handshakes (`/ws/logs`, `/ws/replication`).
+- **Brute-Force Protection**: Integrated IP rate limiting and failed login ban management.
 
-```ini
-# /etc/systemd/system/bind-zones-auto-reload.path
-[Unit]
-Description=Watch BIND zone files for Web UI changes
+---
 
-[Path]
-PathChanged=/var/cache/bind/zones/forward/intra.isoceltelecom.com
-PathChanged=/var/cache/bind/zones/reverse/intra.isoceltelecom.com
-Unit=bind-zones-auto-reload.service
+## Development & Building
 
-[Install]
-WantedBy=multi-user.target
-```
+### Prerequisites
+- Node.js 20+
+- npm 10+
+- Build tools: `build-essential python3` (Debian/Ubuntu)
 
+### Running Locally
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now bind-zones-auto-reload.path
+# Clone repository
+git clone https://github.com/Steph-ux/bind9-web-ui.git
+cd bind9-web-ui
+
+# Install dependencies
+npm install
+
+# Initialize local SQLite database
+npm run db:push
+
+# Start development server
+npm run dev
 ```
 
-The reload script should run `named-checkconf`, validate every managed zone with `named-checkzone`, and then call `rndc reload <zone>`. This prevents the UI from reporting a saved record while BIND continues serving stale data.
+Open `http://localhost:3001` in your browser. Default login: `admin` (password generated in console on first run).
 
-## Security Highlights
+### Production Build
+```bash
+# Typecheck
+npm run check
 
-- Passwords are hashed using Node.js crypto primitives
-- Sessions are hardened with strict cookie settings in production
-- Login throttling and IP ban logic are built in
-- Mutating routes require authenticated, same-site-safe flows
-- API tokens support scoped access
-- BIND-facing input is validated and sanitized
-- Remote fetch and notification targets are checked to reduce SSRF risk
-- Sensitive fields are masked in API responses where appropriate
+# Compile client and server
+npm run build
 
-## Operational Notes
+# Start production server
+node dist/index.cjs
+```
 
-- The UI applies supported changes automatically to the active BIND target
-- Configuration writes are validated before reload or reconfigure actions are considered successful
-- If an operation fails, the UI is expected to surface the error instead of reporting a false success
-- Backups are stored under the application data directory
-- Real-time logs and status views are available even when some local-only BIND metrics are not
+---
 
-## Recommended Production Setup
+## Project Structure
 
-- run the web UI behind HTTPS
-- set a strong `SESSION_SECRET`
-- set `DEFAULT_ADMIN_PASSWORD` only for initial bootstrap, then rotate it
-- prefer SSH key authentication over password authentication
-- restrict SSH access tightly
-- keep remote sudo permissions minimal
-- use PostgreSQL or MySQL if you need a database backend beyond local SQLite
-- monitor the host and back up the application data directory
+```text
+Bind-Config/
+├── client/              # React frontend (Vite 7, Tailwind 4, Wouter)
+│   ├── src/components/  # Modular UI and domain components
+│   ├── src/pages/       # View pages (dashboard, zones, firewall, status)
+│   └── src/lib/         # API client and authentication context
+├── server/              # Express backend and appliance services
+│   ├── host-bind-manager.ts # Native BIND9 installer, wizard, and service management
+│   ├── bind9-service.ts     # Zone parser, file generator, and rndc execution
+│   └── routes.ts            # REST endpoints and WebSocket handlers
+├── shared/              # Shared TypeScript interfaces and Zod schemas
+├── install.sh           # Automated production appliance installer
+└── README.md
+```
+
+---
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), run `npm run check` before opening a pull request, and include enough context for DNS/BIND-related changes to be reviewed safely.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and verify type safety with `npm run check` before submitting a pull request.
 
-## Security
-
-Do not post secrets, real zone exports, private keys, or production screenshots in public issues. See [SECURITY.md](SECURITY.md) for reporting guidance.
+---
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+Distributed under the MIT License. See [LICENSE](LICENSE) for full details.
