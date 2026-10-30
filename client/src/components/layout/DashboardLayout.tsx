@@ -333,7 +333,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_26%),radial-gradient(circle_at_top_right,hsl(var(--accent)/0.1),transparent_22%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--background)))] bg-background text-foreground">
       <aside
         className={[
-          "hidden border-r border-sidebar-border/70 bg-sidebar/80 backdrop-blur-xl lg:flex lg:flex-col",
+          "hidden border-r border-sidebar-border/70 bg-sidebar/80 backdrop-blur-xl lg:flex lg:flex-col sticky top-0 h-screen z-30",
           sidebarCollapsed ? "w-[64px]" : "w-[240px]",
         ].join(" ")}
       >

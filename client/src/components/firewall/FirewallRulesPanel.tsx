@@ -13,6 +13,7 @@ import type { FirewallStatus } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useI18n } from "@/lib/i18n";
 
 import { ruleTypeLabel } from "./constants";
 
@@ -27,33 +28,43 @@ export function FirewallRulesPanel({
   onCreateRule,
   onDeleteRule,
 }: FirewallRulesPanelProps) {
+  const { t } = useI18n();
+
   return (
     <>
       <div className="mb-4 flex items-center justify-between">
-        <h5 className="flex items-center gap-2 font-semibold">
+        <h5 className="flex items-center gap-2 font-semibold text-sm">
           <Activity className="h-4 w-4 text-primary" />
-          {status.active ? "Active Rules" : "Configured Rules"}
+          {status.active ? t.firewall.activeRules : t.firewall.configuredRules}
           <Badge variant="secondary" className="font-mono text-xs">
             {status.rules.length}
           </Badge>
         </h5>
-        <Button className="gap-2" onClick={onCreateRule}>
+        <Button
+          className="gap-2 text-xs h-9"
+          onClick={onCreateRule}
+          disabled={!status.installed}
+        >
           <Plus className="h-4 w-4" />
-          Add Rule
+          {t.firewall.addRule}
         </Button>
       </div>
 
       {status.rules.length === 0 ? (
-        <Card className="border-dashed py-8 text-center">
+        <Card className="border-dashed py-8 text-center bg-card/50">
           <CardContent>
             <Activity className="mx-auto mb-3 h-10 w-10 text-muted-foreground/25" />
-            <h5 className="font-semibold">No Rules Defined</h5>
-            <p className="mb-4 text-muted-foreground">
-              Your firewall policy is empty. Add rules to explicitly allow traffic to your services.
+            <h5 className="font-semibold text-sm">{t.firewall.noRulesTitle}</h5>
+            <p className="mb-4 text-xs text-muted-foreground max-w-md mx-auto">
+              {status.installed
+                ? t.firewall.noRulesDesc
+                : t.firewall.installSupported}
             </p>
-            <Button variant="outline" onClick={onCreateRule}>
-              Create First Rule
-            </Button>
+            {status.installed && (
+              <Button variant="outline" size="sm" onClick={onCreateRule}>
+                {t.firewall.createFirstRule}
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -63,17 +74,17 @@ export function FirewallRulesPanel({
             const isLimit = rule.action === "LIMIT";
 
             return (
-              <Card key={rule.id} className="overflow-hidden">
+              <Card key={rule.id} className="overflow-hidden bg-card/75 border-border/60 shadow-none">
                 <CardContent className="p-4">
                   <div className="mb-3 flex items-start justify-between">
                     <div className="flex items-center gap-2">
                       <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-md ${
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg ${
                           isAllow
                             ? isLimit
-                              ? "bg-yellow-500/10 text-yellow-600"
-                              : "bg-green-500/10 text-green-600"
-                            : "bg-red-500/10 text-red-600"
+                              ? "bg-amber-500/10 text-amber-500"
+                              : "bg-emerald-500/10 text-emerald-500"
+                            : "bg-rose-500/10 text-rose-500"
                         }`}
                       >
                         {isAllow ? (
@@ -87,10 +98,10 @@ export function FirewallRulesPanel({
                         )}
                       </div>
                       <div>
-                        <code className="block text-base font-bold">
+                        <code className="block text-sm font-bold">
                           {rule.ruleType === "service" && rule.service ? rule.service : rule.to}
                         </code>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 mt-0.5">
                           <small className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                             {rule.action}
                           </small>
@@ -106,17 +117,17 @@ export function FirewallRulesPanel({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       onClick={() => onDeleteRule(rule.id)}
-                      title="Delete Rule"
+                      title={t.firewall.deleteRuleBtn}
                     >
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
 
-                  <div className="my-2 border-t" />
+                  <div className="my-2 border-t border-border/50" />
 
-                  <div className="space-y-1.5 text-sm">
+                  <div className="space-y-1.5 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1 text-muted-foreground">
                         {rule.direction === "out" ? (
@@ -124,9 +135,9 @@ export function FirewallRulesPanel({
                         ) : (
                           <ArrowRight className="h-3 w-3" />
                         )}
-                        From:
+                        {t.firewall.ruleFrom}
                       </span>
-                      <Badge variant="secondary" className="font-mono text-xs">
+                      <Badge variant="secondary" className="font-mono text-[11px]">
                         {rule.from}
                         {rule.ipv6 ? <span className="ml-1 opacity-60">(v6)</span> : null}
                       </Badge>
@@ -134,7 +145,7 @@ export function FirewallRulesPanel({
 
                     {rule.proto && rule.proto !== "any" ? (
                       <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Protocol:</span>
+                        <span className="text-muted-foreground">{t.firewall.ruleProtocol}</span>
                         <span className="font-mono text-xs">{rule.proto.toUpperCase()}</span>
                       </div>
                     ) : null}
@@ -173,14 +184,14 @@ export function FirewallRulesPanel({
                     ) : null}
 
                     {rule.comment ? (
-                      <div className="mt-1 border-t pt-1.5 text-xs italic text-muted-foreground">
+                      <div className="mt-1 border-t border-border/40 pt-1.5 text-[11px] italic text-muted-foreground">
                         "{rule.comment}"
                       </div>
                     ) : null}
                   </div>
 
-                  <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
-                    <span>Rule #{rule.id}</span>
+                  <div className="mt-2 flex justify-between text-[10px] text-muted-foreground/70 font-mono">
+                    <span>{t.firewall.ruleNum}{rule.id}</span>
                   </div>
                 </CardContent>
               </Card>

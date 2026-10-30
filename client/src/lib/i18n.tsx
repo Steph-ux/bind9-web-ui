@@ -166,6 +166,48 @@ export interface Translations {
     clearTitle: string;
     clearDesc: string;
   };
+  firewall: {
+    title: string;
+    subtitle: string;
+    protectionCard: string;
+    protectionActive: string;
+    protectionInactive: string;
+    protectionNotInstalled: string;
+    protectionActiveDesc: string;
+    protectionInactiveDesc: string;
+    backendCard: string;
+    backendUnavailable: string;
+    backendDesc: string;
+    loadedRulesCard: string;
+    loadedRulesDesc: string;
+    availableBackendsCard: string;
+    availableBackendsDesc: string;
+    statusActive: string;
+    statusInactive: string;
+    statusNotDetected: string;
+    notDetectedDesc: string;
+    installSupported: string;
+    protectedDesc: string;
+    exposedDesc: string;
+    updating: string;
+    enabled: string;
+    disabled: string;
+    activeOnStartup: string;
+    activeRules: string;
+    configuredRules: string;
+    addRule: string;
+    noRulesTitle: string;
+    noRulesDesc: string;
+    createFirstRule: string;
+    deleteRuleTitle: string;
+    deleteRuleDesc: string;
+    deleteRuleBtn: string;
+    ruleFrom: string;
+    ruleProtocol: string;
+    ruleNum: string;
+    ruleAction: string;
+    ruleDirection: string;
+  };
   logs: {
     title: string;
     subtitle: string;
@@ -344,6 +386,48 @@ const translations: Record<Language, Translations> = {
       clearTitle: "Purger toutes les règles",
       clearDesc: "Cette action supprimera toutes les règles de la base de données. Êtes-vous sûr ?",
     },
+    firewall: {
+      title: "Pare-feu Réseau",
+      subtitle: "Gestion de la protection réseau de l'hôte, sélection du moteur et règles de filtrage de paquets.",
+      protectionCard: "Protection Réseau",
+      protectionActive: "Active",
+      protectionInactive: "Inactive",
+      protectionNotInstalled: "Non Détecté",
+      protectionActiveDesc: "État opérationnel du pare-feu actif.",
+      protectionInactiveDesc: "Aucun moteur de pare-feu supporté détecté.",
+      backendCard: "Moteur Actif",
+      backendUnavailable: "Indisponible",
+      backendDesc: "option(s) de moteur détectée(s).",
+      loadedRulesCard: "Règles Chargées",
+      loadedRulesDesc: "Règles appliquées sur le moteur sélectionné.",
+      availableBackendsCard: "Moteurs Disponibles",
+      availableBackendsDesc: "Moteurs de filtrage supportés sur cet hôte.",
+      statusActive: "Pare-feu Actif",
+      statusInactive: "Pare-feu Inactif",
+      statusNotDetected: "Aucun Pare-feu Réseau Détecté",
+      notDetectedDesc: "Aucun moteur de pare-feu n'a été trouvé sur ce système. Installez l'un des moteurs supportés pour activer la protection :",
+      installSupported: "Installez l'un des moteurs supportés (UFW, firewalld, nftables, iptables).",
+      protectedDesc: "Votre système est protégé. Les connexions entrantes sont bloquées sauf autorisation explicite.",
+      exposedDesc: "Le système est actuellement exposé à tout le trafic entrant. Activez le pare-feu pour sécuriser vos interfaces réseau.",
+      updating: "Mise à jour...",
+      enabled: "Activé",
+      disabled: "Désactivé",
+      activeOnStartup: "Actif au démarrage",
+      activeRules: "Règles Actives",
+      configuredRules: "Règles Configurées",
+      addRule: "Ajouter une règle",
+      noRulesTitle: "Aucune règle définie",
+      noRulesDesc: "La politique de filtrage est vide. Ajoutez des règles pour autoriser le trafic vers vos services.",
+      createFirstRule: "Créer une première règle",
+      deleteRuleTitle: "Supprimer la règle de pare-feu",
+      deleteRuleDesc: "Êtes-vous sûr de vouloir supprimer cette règle de filtrage ? Cette action est irréversible.",
+      deleteRuleBtn: "Supprimer la règle",
+      ruleFrom: "Source :",
+      ruleProtocol: "Protocole :",
+      ruleNum: "Règle #",
+      ruleAction: "Action",
+      ruleDirection: "Direction",
+    },
     logs: {
       title: "Logs & Audit",
       subtitle: "Journalisation en continu des requêtes, rechargements et alertes de sécurité.",
@@ -519,6 +603,48 @@ const translations: Record<Language, Translations> = {
       deleteDesc: "Are you sure you want to delete this rule? Queries to this domain will no longer be filtered by this policy.",
       clearTitle: "Clear All Rules",
       clearDesc: "This action will remove all rules from the database. Are you sure?",
+    },
+    firewall: {
+      title: "Network Firewall",
+      subtitle: "Manage host network protection, backend selection and packet filtering rules.",
+      protectionCard: "Network Protection",
+      protectionActive: "Active",
+      protectionInactive: "Inactive",
+      protectionNotInstalled: "Not Detected",
+      protectionActiveDesc: "Current firewall operational state.",
+      protectionInactiveDesc: "No supported firewall backend detected.",
+      backendCard: "Active Backend",
+      backendUnavailable: "Unavailable",
+      backendDesc: "backend option(s) detected.",
+      loadedRulesCard: "Loaded Rules",
+      loadedRulesDesc: "Rules currently visible from the selected backend.",
+      availableBackendsCard: "Available Backends",
+      availableBackendsDesc: "Supported filtering engines detected on this host.",
+      statusActive: "Firewall is Active",
+      statusInactive: "Firewall is Inactive",
+      statusNotDetected: "Firewall Not Detected",
+      notDetectedDesc: "No firewall backend was found on this system. Install one of the supported backends to enable protection:",
+      installSupported: "Install one of the supported backends (UFW, firewalld, nftables, iptables).",
+      protectedDesc: "Your system is protected. Incoming connections are blocked unless explicitly allowed.",
+      exposedDesc: "Your system is currently exposed to all incoming traffic. Enable the firewall to secure your network.",
+      updating: "Updating...",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      activeOnStartup: "Active on Startup",
+      activeRules: "Active Rules",
+      configuredRules: "Configured Rules",
+      addRule: "Add Rule",
+      noRulesTitle: "No Rules Defined",
+      noRulesDesc: "Your firewall policy is empty. Add rules to explicitly allow traffic to your services.",
+      createFirstRule: "Create First Rule",
+      deleteRuleTitle: "Delete Firewall Rule",
+      deleteRuleDesc: "Are you sure you want to delete this firewall rule? This action cannot be undone.",
+      deleteRuleBtn: "Delete Rule",
+      ruleFrom: "From:",
+      ruleProtocol: "Protocol:",
+      ruleNum: "Rule #",
+      ruleAction: "Action",
+      ruleDirection: "Direction",
     },
     logs: {
       title: "Logs & Audit",

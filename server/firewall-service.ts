@@ -235,11 +235,7 @@ class FirewallService {
         try {
             output = await this.execCommand(script);
         } catch {
-            if (os.platform() === "win32" && !sshManager.isConfigured()) {
-                this.detectedBackend = "ufw";
-                this.detectedAvailable = ["ufw"];
-                return { active: "ufw", available: ["ufw"] };
-            }
+
             this.detectedBackend = "none";
             this.detectedAvailable = [];
             return { active: "none", available: [] };
@@ -289,14 +285,6 @@ class FirewallService {
         if (activeBackend === "none" && available.length > 0) {
             const preference: FirewallBackend[] = ["ufw", "firewalld", "nftables", "iptables"];
             activeBackend = preference.find(b => available.includes(b)) || "none";
-        }
-
-        // Windows without SSH: no real firewall backends, use mock UFW
-        if (available.length === 0 && os.platform() === "win32" && !sshManager.isConfigured()) {
-            this.detectedBackend = "ufw";
-            this.detectedAvailable = ["ufw"];
-            console.log(`[firewall] Windows mock mode: active=ufw, available=[ufw]`);
-            return { active: "ufw", available: ["ufw"] };
         }
 
         this.detectedBackend = activeBackend;
@@ -970,10 +958,6 @@ class FirewallService {
         try {
             const { active: backend, available } = await this.detectBackend();
 
-            if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
-                return { active: this.mockActive, rules: this.mockRules, installed: true, backend: "ufw", availableBackends: ["ufw"] };
-            }
-
             switch (backend) {
                 case "ufw": return await this.getStatusUfw(available);
                 case "firewalld": return await this.getStatusFirewalld(available);
@@ -988,9 +972,6 @@ class FirewallService {
             if (e.message.includes("command not found") || e.message.includes("not found")) {
                 return { active: false, rules: [], installed: false, backend: "none", availableBackends: [] };
             }
-            if (os.platform() === "win32" && !sshManager.isConfigured()) {
-                return { active: this.mockActive, rules: this.mockRules, installed: true, backend: "ufw", availableBackends: ["ufw"] };
-            }
             console.error("Failed to get firewall status:", e);
             throw e;
         }
@@ -998,11 +979,6 @@ class FirewallService {
 
     async toggle(enable: boolean): Promise<void> {
         const { active: backend } = await this.detectBackend();
-        if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
-            this.mockActive = enable;
-            console.log(`[Mock Firewall] Toggle: ${enable}`);
-            return;
-        }
         switch (backend) {
             case "ufw": return await this.toggleUfw(enable);
             case "firewalld": return await this.toggleFirewalld(enable);
@@ -1019,28 +995,6 @@ class FirewallService {
         const validatedParams: AddRuleParams = { ...params, direction, ruleType };
 
         const { active: backend } = await this.detectBackend();
-        if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
-            const newId = this.mockRules.length + 1;
-            const ruleAction = params.action === "allow" ? "ALLOW" as const : params.action === "deny" ? "DENY" as const : params.action === "reject" ? "REJECT" as const : "LIMIT" as const;
-            this.mockRules.push({
-                id: newId,
-                to: ruleType === "portRange" ? `${params.toPort}-${params.toPortEnd || params.toPort}` : params.toPort,
-                action: ruleAction,
-                from: params.fromIp === "any" ? "Anywhere" : params.fromIp,
-                ipv6: false,
-                direction, ruleType,
-                proto: params.proto || "tcp",
-                toPortEnd: params.toPortEnd,
-                service: params.service,
-                interface: params.interface_,
-                rateLimit: params.rateLimit,
-                icmpType: params.icmpType,
-                log: params.log,
-                comment: params.comment,
-            });
-            console.log(`[Mock Firewall] Add rule: ${params.action} ${ruleType} ${params.toPort} from ${params.fromIp}`);
-            return;
-        }
         switch (backend) {
             case "ufw": return await this.addRuleUfw(validatedParams);
             case "firewalld": return await this.addRuleFirewalld(validatedParams);
@@ -1052,11 +1006,6 @@ class FirewallService {
 
     async deleteRule(id: number): Promise<void> {
         const { active: backend } = await this.detectBackend();
-        if (backend === "none" && os.platform() === "win32" && !sshManager.isConfigured()) {
-            this.mockRules = this.mockRules.filter(r => r.id !== id);
-            console.log(`[Mock Firewall] Delete rule: ${id}`);
-            return;
-        }
         switch (backend) {
             case "ufw": return await this.deleteRuleUfw(id);
             case "firewalld": return await this.deleteRuleFirewalld(id);

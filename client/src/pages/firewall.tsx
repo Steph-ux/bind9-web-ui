@@ -18,6 +18,7 @@ import {
   type FirewallStatus,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-provider";
+import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,10 +38,11 @@ function createDefaultForm(): FirewallRuleFormState {
 }
 
 export default function FirewallPage() {
+  const { t, language } = useI18n();
   const [status, setStatus] = useState<FirewallStatus>({
     active: false,
     rules: [],
-    installed: true,
+    installed: false,
     backend: "none",
     availableBackends: [],
   });
@@ -222,8 +224,8 @@ export default function FirewallPage() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="Firewall"
-          description="Manage network protection, backend selection and packet filtering rules."
+          title={t.firewall.title}
+          description={t.firewall.subtitle}
           icon={Shield}
           badge={
             status.backend !== "none" ? (
@@ -234,30 +236,30 @@ export default function FirewallPage() {
           }
         />
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
-            label="Protection"
-            value={status.active ? "Active" : "Inactive"}
-            description={status.installed ? "Current firewall state." : "No supported backend detected."}
+            label={t.firewall.protectionCard}
+            value={status.installed ? (status.active ? t.firewall.protectionActive : t.firewall.protectionInactive) : t.firewall.protectionNotInstalled}
+            description={status.installed ? t.firewall.protectionActiveDesc : t.firewall.protectionInactiveDesc}
             icon={status.active ? ShieldCheck : ShieldAlert}
             tone={status.active ? "success" : "warning"}
           />
           <MetricCard
-            label="Backend"
-            value={status.backend === "none" ? "Unavailable" : status.backend.toUpperCase()}
-            description={`${status.availableBackends.length} backend option(s) detected.`}
+            label={t.firewall.backendCard}
+            value={status.backend === "none" ? t.firewall.backendUnavailable : status.backend.toUpperCase()}
+            description={`${status.availableBackends.length} ${t.firewall.backendDesc}`}
             icon={Network}
           />
           <MetricCard
-            label="Loaded Rules"
+            label={t.firewall.loadedRulesCard}
             value={status.rules.length}
-            description="Rules currently visible from the selected backend."
+            description={t.firewall.loadedRulesDesc}
             icon={Activity}
           />
           <MetricCard
-            label="Available Backends"
+            label={t.firewall.availableBackendsCard}
             value={status.availableBackends.length}
-            description="Supported engines detected on this host."
+            description={t.firewall.availableBackendsDesc}
             icon={Network}
           />
         </div>
@@ -298,13 +300,13 @@ export default function FirewallPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Firewall Rule</AlertDialogTitle>
+            <AlertDialogTitle>{t.firewall.deleteRuleTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this rule? This action cannot be undone.
+              {t.firewall.deleteRuleDesc}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
@@ -313,7 +315,7 @@ export default function FirewallPage() {
                 }
               }}
             >
-              Delete Rule
+              {t.firewall.deleteRuleBtn}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
