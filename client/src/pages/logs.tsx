@@ -357,61 +357,41 @@ export default function Logs() {
           }
         />
 
-        <Alert>
-          <Terminal className="h-4 w-4" />
-          <AlertTitle>{scopeDetails.title}</AlertTitle>
-          <AlertDescription>{scopeDetails.description}</AlertDescription>
-        </Alert>
+        
 
-        {logScope !== "app" && !loading && bindEntryCount === 0 ? (
-          <Alert>
-            <Terminal className="h-4 w-4" />
-            <AlertTitle>No exact BIND lines available</AlertTitle>
-            <AlertDescription>
-              The active target did not return readable BIND log lines for the current filters from known file tails or service journals.
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Visible logs"
+            label="Journaux visibles"
             value={logs.length}
-            description="Current result set after filtering"
+            description="Resultats apres filtrage"
             icon={Terminal}
             tone="success"
           />
           <MetricCard
-            label="Application entries"
+            label="Evenements app"
             value={appEntryCount}
-            description="Visible web UI log records"
+            description="Traces de l'interface web"
             icon={Terminal}
             tone="success"
           />
           <MetricCard
-            label="BIND entries"
+            label="Entrees BIND9"
             value={bindEntryCount}
-            description="Visible exact remote BIND lines"
+            description="Lignes du demon DNS"
             icon={Search}
             tone={bindEntryCount > 0 ? "success" : "default"}
           />
           <MetricCard
-            label="View mode"
+            label="Mode d'affichage"
             value={viewModeLabel}
             description={bindSources.length > 0 ? bindSources.join(", ") : "No BIND sources in the current result"}
             icon={Search}
           />
         </div>
 
-        {streamMode !== "live" && logScope !== "bind" ? (
-          <Alert>
-            <RefreshCw className="h-4 w-4" />
-            <AlertTitle>Live stream unavailable</AlertTitle>
-            <AlertDescription>
-              The application WebSocket stream is not currently active. The page is falling back to periodic polling so visibility remains available.
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        
 
         <Card className="linear-panel overflow-hidden border-border/60 bg-card/78 shadow-none">
           <CardHeader className="flex flex-col items-start justify-between gap-3 border-b border-border/60 p-4 md:flex-row md:items-center">
@@ -419,13 +399,13 @@ export default function Logs() {
               <Tabs value={logScope} onValueChange={(value) => setLogScope(value as LogScope)}>
                 <TabsList className="h-auto rounded-2xl border border-border/60 bg-card/70 p-1">
                   <TabsTrigger value="combined" className="rounded-xl">
-                    Combined
+                    Tous les flux
                   </TabsTrigger>
                   <TabsTrigger value="bind" className="rounded-xl">
-                    BIND Exact
+                    Demon BIND9
                   </TabsTrigger>
                   <TabsTrigger value="app" className="rounded-xl">
-                    App Only
+                    Applicatif
                   </TabsTrigger>
                 </TabsList>
               </Tabs>

@@ -4,6 +4,7 @@ import { Link, useLocation } from "wouter";
 import {
   Bell,
   Copy,
+  Languages,
   Globe,
   Key,
   LayoutDashboard,
@@ -31,6 +32,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-provider";
+import { useI18n } from "@/lib/i18n";
 import { getLogs, executeRndc, type LogData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -81,7 +83,6 @@ const adminSecurity: NavItem[] = [
 
 const adminOperations: NavItem[] = [
   { label: "Replication Cluster", href: "/replication", icon: Copy },
-  { label: "Noeuds SSH", href: "/connections", icon: Plug },
   { label: "Utilisateurs", href: "/users", icon: Users },
 ];
 
@@ -96,21 +97,21 @@ const LayoutNotificationsSheet = lazy(async () => {
 });
 
 const routeLabels: Array<{ match: (path: string) => boolean; label: string }> = [
-  { match: (path) => path === "/", label: "Overview" },
-  { match: (path) => path === "/zones", label: "Zones" },
-  { match: (path) => path.startsWith("/zones/"), label: "Zone Editor" },
+  { match: (path) => path === "/", label: "Vue d'ensemble" },
+  { match: (path) => path === "/zones", label: "Zones DNS" },
+  { match: (path) => path.startsWith("/zones/"), label: "Editeur de Zone" },
   { match: (path) => path === "/config", label: "Configuration" },
-  { match: (path) => path === "/logs", label: "Logs" },
-  { match: (path) => path === "/acls", label: "ACLs & Keys" },
-  { match: (path) => path === "/status", label: "Server Status" },
-  { match: (path) => path === "/connections", label: "Connections" },
-  { match: (path) => path === "/users", label: "Users" },
-  { match: (path) => path === "/firewall", label: "Firewall" },
-  { match: (path) => path === "/firewall-rpz", label: "DNS Firewall" },
-  { match: (path) => path === "/blacklist", label: "IP Blacklist" },
-  { match: (path) => path === "/api-tokens", label: "API Tokens" },
-  { match: (path) => path === "/replication", label: "Replication" },
-  { match: (path) => path === "/profile", label: "Profile" },
+  { match: (path) => path === "/logs", label: "Logs & Audit" },
+  { match: (path) => path === "/acls", label: "ACLs & Cles" },
+  { match: (path) => path === "/status", label: "Statut Serveur" },
+  { match: (path) => path === "/connections", label: "Connexions" },
+  { match: (path) => path === "/users", label: "Utilisateurs" },
+  { match: (path) => path === "/firewall", label: "Pare-feu Reseau" },
+  { match: (path) => path === "/firewall-rpz", label: "Pare-feu DNS RPZ" },
+  { match: (path) => path === "/blacklist", label: "Liste Noire IP" },
+  { match: (path) => path === "/api-tokens", label: "Jetons API" },
+  { match: (path) => path === "/replication", label: "Replication Cluster" },
+  { match: (path) => path === "/profile", label: "{t.nav.profile} Utilisateur" },
 ];
 
 function getShortcutLabel() {
@@ -171,14 +172,14 @@ function NavButton({
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
+  const { language, setLanguage, t } = useI18n();
 
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem("theme");
-    if (!saved || saved === "light") {
-      localStorage.setItem("theme", "dark");
-      return "dark";
+    if (saved && (saved === "light" || saved === "dark" || saved === "auto")) {
+      return saved;
     }
-    return saved;
+    return "dark";
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -216,14 +217,54 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   const shortcutLabel = getShortcutLabel();
-  const currentRouteLabel = getCurrentRouteLabel(location);
+
+  const coreNavigation: NavItem[] = [
+    { label: t.nav.overview, href: "/", icon: LayoutDashboard },
+    { label: t.nav.zones, href: "/zones", icon: Globe },
+    { label: t.nav.config, href: "/config", icon: Settings },
+    { label: t.nav.acls, href: "/acls", icon: Shield },
+    { label: t.nav.logs, href: "/logs", icon: Terminal },
+    { label: t.nav.status, href: "/status", icon: Server },
+  ];
+
+  const adminSecurity: NavItem[] = [
+    { label: t.nav.firewallRpz, href: "/firewall-rpz", icon: ShieldAlert },
+    { label: t.nav.blacklist, href: "/blacklist", icon: ShieldBan },
+    { label: t.nav.firewall, href: "/firewall", icon: ShieldCheck },
+    { label: t.nav.apiTokens, href: "/api-tokens", icon: Key },
+  ];
+
+  const adminOperations: NavItem[] = [
+    { label: t.nav.replication, href: "/replication", icon: Copy },
+    { label: t.nav.users, href: "/users", icon: Users },
+  ];
+
+  const routeLabelMap: Array<{ match: (path: string) => boolean; label: string }> = [
+    { match: (path) => path === "/", label: t.nav.overview },
+    { match: (path) => path === "/zones", label: t.nav.zones },
+    { match: (path) => path.startsWith("/zones/"), label: t.nav.zoneEditor },
+    { match: (path) => path === "/config", label: t.nav.config },
+    { match: (path) => path === "/logs", label: t.nav.logs },
+    { match: (path) => path === "/acls", label: t.nav.acls },
+    { match: (path) => path === "/status", label: t.nav.status },
+    { match: (path) => path === "/connections", label: t.nav.infrastructure },
+    { match: (path) => path === "/users", label: t.nav.users },
+    { match: (path) => path === "/firewall", label: t.nav.firewall },
+    { match: (path) => path === "/firewall-rpz", label: t.nav.firewallRpz },
+    { match: (path) => path === "/blacklist", label: t.nav.blacklist },
+    { match: (path) => path === "/api-tokens", label: t.nav.apiTokens },
+    { match: (path) => path === "/replication", label: t.nav.replication },
+    { match: (path) => path === "/profile", label: t.nav.profile },
+  ];
+
+  const currentRouteLabel = routeLabelMap.find((route) => route.match(location))?.label ?? t.nav.overview;
 
   const navSections: NavSection[] = [
-    { title: "DNS Management", items: coreNavigation },
+    { title: t.nav.dnsManagement, items: coreNavigation },
     ...(user?.role === "admin"
       ? [
-          { title: "Securite & Filtrage", items: adminSecurity },
-          { title: "Infrastructure", items: adminOperations },
+          { title: t.nav.securityFiltering, items: adminSecurity },
+          { title: t.nav.infrastructure, items: adminOperations },
         ]
       : []),
   ];
@@ -307,9 +348,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <div className="truncate text-base font-semibold tracking-[-0.03em] text-sidebar-foreground">
                   BIND9 Config
                 </div>
-                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Control Plane</span>
+                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  {t.nav.adminSubtitle}
                 </div>
               </div>
             ) : null}
@@ -398,7 +438,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
             <div className="min-w-0 flex-1">
               <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/75">
-                Control Panel
+                {t.nav.adminSubtitle}
               </div>
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-lg font-semibold tracking-[-0.03em]">
@@ -425,7 +465,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 title="Recharger immediatement la configuration BIND9 (rndc reload)"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${reloadingBind ? "animate-spin" : ""}`} />
-                <span className="text-xs font-medium">Recharger BIND9</span>
+                <span className="text-xs font-medium">{t.dashboard.reloadBind}</span>
               </Button>
             )}
 
@@ -436,7 +476,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onClick={() => setCommandOpen(true)}
             >
               <Search className="h-4 w-4" />
-              <span>Palette rapide</span>
+              <span>{t.nav.quickPalette}</span>
               <Kbd>{shortcutLabel}</Kbd>
             </Button>
 
@@ -448,6 +488,24 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             >
               <Search className="h-5 w-5" />
             </Button>
+
+            {/* Language Switcher */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-9 gap-1.5 rounded-xl px-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground">
+                  <Languages className="h-4 w-4" />
+                  <span className="uppercase">{language}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem className="gap-2 text-xs font-medium cursor-pointer" onClick={() => setLanguage("fr")}>
+                  <span className={language === "fr" ? "font-bold text-primary" : ""}>Français (FR)</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-2 text-xs font-medium cursor-pointer" onClick={() => setLanguage("en")}>
+                  <span className={language === "en" ? "font-bold text-primary" : ""}>English (EN)</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -464,15 +522,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <DropdownMenuContent align="end">
                 <DropdownMenuItem className="gap-2" onClick={() => setTheme("light")}>
                   <Sun className="h-4 w-4" />
-                  Light
+                  {t.theme.light}
                 </DropdownMenuItem>
                 <DropdownMenuItem className="gap-2" onClick={() => setTheme("dark")}>
                   <Moon className="h-4 w-4" />
-                  Dark
+                  {t.theme.dark}
                 </DropdownMenuItem>
                 <DropdownMenuItem className="gap-2" onClick={() => setTheme("auto")}>
                   <Monitor className="h-4 w-4" />
-                  Auto
+                  {t.theme.auto}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -519,14 +577,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="gap-2" onClick={() => setLocation("/profile")}>
                   <UserRound className="h-4 w-4" />
-                  Profile
+                  {t.nav.profile}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="gap-2 text-destructive focus:text-destructive"
                   onClick={() => logout()}
                 >
                   <LogOut className="h-4 w-4" />
-                  Logout
+                  {t.nav.logout}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -545,9 +603,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
               <div>
                 <div className="text-base font-semibold tracking-[-0.03em]">BIND9 Config</div>
-                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Control Plane</span>
+                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  {t.nav.adminSubtitle}
                 </div>
               </div>
             </SheetTitle>

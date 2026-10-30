@@ -320,12 +320,12 @@ export default function ACLs() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="ACLs & TSIG Keys"
-          description="Manage BIND access control lists and shared transfer secrets from the active target."
+          title="Listes de Controle (ACL) & Cles TSIG"
+          description="Gestion des regles de filtrage reseau et des cles cryptographiques de transfert de zone."
           icon={Shield}
           badge={
             <Badge variant="outline" className="border-border/70 bg-background/70">
-              {status?.connectionMode === "ssh" ? "SSH target" : "Local target"}
+              {status?.connectionMode === "ssh" ? "Serveur distant" : "Serveur local"}
             </Badge>
           }
           actions={
@@ -337,7 +337,7 @@ export default function ACLs() {
                 disabled={isFetching}
               >
                 <RefreshCw className={["h-4 w-4", isFetching ? "animate-spin" : ""].join(" ")} />
-                Refresh
+                Actualiser
               </Button>
               {canWriteAcls ? (
                 <Button
@@ -345,7 +345,7 @@ export default function ACLs() {
                   className="h-10 rounded-xl border-border/70 bg-background/70 shadow-none"
                   onClick={openTrustedTransferAcl}
                 >
-                  Create trusted-transfer
+                  Creer trusted-transfer
                 </Button>
               ) : null}
             </div>
@@ -354,29 +354,29 @@ export default function ACLs() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Managed ACLs"
+            label="Listes d'Acces (ACL)"
             value={aclList.length}
-            description={`Imported from named.conf.acls on ${targetLabel}`}
+            description="Regles d'acces reseau actives"
             icon={Shield}
             tone="success"
           />
           <MetricCard
-            label="Managed Keys"
+            label="Cles TSIG"
             value={keyList.length}
-            description={`Imported from named.conf.keys on ${targetLabel}`}
+            description="Cles de transfert autorisees"
             icon={KeyRound}
           />
           <MetricCard
-            label="ACL Include"
-            value={management ? (management.includes.namedConfAclsIncluded ? "Included" : "Missing") : "Unknown"}
-            description={management ? (management.writablePaths.namedConfAcls ? "Writable" : "Read-only") : "Status data unavailable"}
+            label="Fichier named.conf.acls"
+            value={management ? (management.includes.namedConfAclsIncluded ? "Inclus" : "Absent") : "Inconnu"}
+            description={management ? (management.writablePaths.namedConfAcls ? "Ecriture" : "Lecture seule") : "Indisponible"}
             icon={management?.includes.namedConfAclsIncluded ? CheckCircle2 : AlertTriangle}
             tone={management?.includes.namedConfAclsIncluded ? "success" : "warning"}
           />
           <MetricCard
-            label="Keys Include"
-            value={management ? (management.includes.namedConfKeysIncluded ? "Included" : "Missing") : "Unknown"}
-            description={management ? (management.writablePaths.namedConfKeys ? "Writable" : "Read-only") : "Status data unavailable"}
+            label="Fichier named.conf.keys"
+            value={management ? (management.includes.namedConfKeysIncluded ? "Inclus" : "Absent") : "Inconnu"}
+            description={management ? (management.writablePaths.namedConfKeys ? "Ecriture" : "Lecture seule") : "Indisponible"}
             icon={management?.includes.namedConfKeysIncluded ? CheckCircle2 : AlertTriangle}
             tone={management?.includes.namedConfKeysIncluded ? "success" : "warning"}
           />
@@ -410,32 +410,18 @@ export default function ACLs() {
           </CardContent>
         </Card>
 
-        <Alert>
-          <Shield className="h-4 w-4" />
-          <AlertTitle>Managed include files only</AlertTitle>
-          <AlertDescription>
-            The ACL page manages entries from <code className="rounded bg-background/80 px-1">named.conf.acls</code>. The TSIG page manages entries from <code className="rounded bg-background/80 px-1">named.conf.keys</code>. If an ACL exists only in <code className="rounded bg-background/80 px-1">named.conf.options</code>, BIND will still use it, but this page will not import it until it is moved into the dedicated include file.
-          </AlertDescription>
-        </Alert>
+        
 
         {!canWriteAcls || !canWriteKeys ? (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Partial read-only mode</AlertTitle>
+            <AlertTitle>Mode lecture seule partiel</AlertTitle>
             <AlertDescription className="space-y-1">
-              {!canWriteAcls ? <div>ACLs: {aclCapabilityReason}</div> : null}
-              {!canWriteKeys ? <div>TSIG keys: {keyCapabilityReason}</div> : null}
+              {!canWriteAcls ? <div>ACLs : {aclCapabilityReason}</div> : null}
+              {!canWriteKeys ? <div>Cles TSIG : {keyCapabilityReason}</div> : null}
             </AlertDescription>
           </Alert>
-        ) : (
-          <Alert>
-            <CheckCircle2 className="h-4 w-4" />
-            <AlertTitle>Writable target confirmed</AlertTitle>
-            <AlertDescription>
-              Changes from this screen are written directly to the active BIND target and followed by a BIND reconfiguration. Existing TSIG secrets stay masked by design when read back from the API.
-            </AlertDescription>
-          </Alert>
-        )}
+        ) : null}
 
         <div className="grid gap-4 xl:grid-cols-2">
           <AclListCard

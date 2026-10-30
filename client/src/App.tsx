@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025 Stephane ASSOGBA
+// Copyright (c) 2025 Stephane ASSOGBA
 
 import { Suspense, lazy } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import { Route, Switch } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, ProtectedRoute } from "@/lib/auth-provider";
+import { LanguageProvider } from "@/lib/i18n";
 import { queryClient } from "@/lib/queryClient";
 
 const ACLs = lazy(() => import("@/pages/acls"));
@@ -67,12 +68,14 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Suspense fallback={<RouteFallback />}>
-            <Router />
-          </Suspense>
-        </TooltipProvider>
+        <LanguageProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Suspense fallback={<RouteFallback />}>
+              <Router />
+            </Suspense>
+          </TooltipProvider>
+        </LanguageProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

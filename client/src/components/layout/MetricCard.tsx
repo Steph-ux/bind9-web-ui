@@ -1,4 +1,4 @@
-﻿import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -15,10 +15,10 @@ interface MetricCardProps {
 }
 
 const toneStyles: Record<MetricTone, string> = {
-  default: "bg-primary/12 text-primary ring-1 ring-primary/20",
-  success: "bg-emerald-500/12 text-emerald-400 ring-1 ring-emerald-500/20",
-  warning: "bg-amber-500/12 text-amber-400 ring-1 ring-amber-500/20",
-  danger: "bg-destructive/12 text-destructive ring-1 ring-destructive/20",
+  default: "bg-primary/10 text-primary ring-1 ring-primary/20",
+  success: "bg-emerald-500/10 text-emerald-500 ring-1 ring-emerald-500/20",
+  warning: "bg-amber-500/10 text-amber-500 ring-1 ring-amber-500/20",
+  danger: "bg-destructive/10 text-destructive ring-1 ring-destructive/20",
 };
 
 export function MetricCard({
@@ -30,27 +30,26 @@ export function MetricCard({
   className,
 }: MetricCardProps) {
   return (
-    <Card className={cn("linear-panel overflow-hidden border-border/60 bg-card/78 shadow-none", className)}>
-      <CardContent className="relative p-5">
-        <div className="linear-hairline absolute inset-x-0 top-0" />
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-2">
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+    <Card className={cn("border-border/60 bg-card/75 shadow-none transition-colors", className)}>
+      <CardContent className="p-3.5 sm:p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
               {label}
             </p>
-            <div className="text-3xl font-semibold tracking-[-0.06em]">{value}</div>
+            <div className="text-2xl font-bold tracking-tight">{value}</div>
             {description ? (
-              <div className="text-sm leading-6 text-muted-foreground">{description}</div>
+              <div className="text-xs text-muted-foreground truncate leading-relaxed">{description}</div>
             ) : null}
           </div>
           {Icon ? (
             <div
               className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl",
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl",
                 toneStyles[tone],
               )}
             >
-              <Icon className="h-5 w-5" />
+              <Icon className="h-4 w-4" />
             </div>
           ) : null}
         </div>
@@ -58,4 +57,3 @@ export function MetricCard({
     </Card>
   );
 }
-

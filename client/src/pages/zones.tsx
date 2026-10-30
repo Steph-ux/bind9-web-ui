@@ -321,16 +321,7 @@ export default function Zones() {
           />
         </div>
 
-        <Card className="border-amber-200 bg-amber-50/70">
-          <CardContent className="flex flex-col gap-2 p-4 text-sm text-amber-950">
-            <div className="font-semibold">Zone structure policy</div>
-            <div>
-              The web UI can create zones, delete zones, edit records and toggle replication.
-              Structural changes such as zone type, domain name, master servers, forwarders or file path
-              must be changed in BIND first, then re-imported with `Sync from BIND9`.
-            </div>
-          </CardContent>
-        </Card>
+
 
         <ZonesInventoryCard
           zones={filteredZones}

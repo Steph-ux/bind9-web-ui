@@ -145,8 +145,8 @@ export default function Status() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="Server Status"
-          description="Hardware utilization, BIND9 health and management capabilities."
+          title="Statut du Serveur"
+          description="Supervision du processeur, memoire vive, processus BIND9 et capacites d'administration."
           icon={Activity}
           badge={
             <Badge
@@ -221,40 +221,31 @@ export default function Status() {
           </Alert>
         ) : null}
 
-        <Alert>
-          <Shield className="h-4 w-4" />
-          <AlertTitle>What this page reflects</AlertTitle>
-          <AlertDescription>
-            Forwarders and the allow-* controls below are parsed from the active server&apos;s
-            <span className="mx-1 font-mono">named.conf.options</span>
-            file. Named ACL objects themselves are managed separately in
-            <span className="mx-1 font-mono">Security &gt; ACLs</span>.
-          </AlertDescription>
-        </Alert>
+        
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="CPU Usage"
+            label="Utilisation CPU"
             value={`${status.system.cpu.total.toFixed(1)}%`}
             description={`User ${status.system.cpu.user.toFixed(1)}%, System ${status.system.cpu.system.toFixed(1)}%`}
             icon={Cpu}
             tone="warning"
           />
           <MetricCard
-            label="Memory"
+            label="Memoire RAM"
             value={formatBytes(status.system.memory.used)}
             description={`${memUsedPct}% used of ${formatBytes(status.system.memory.total)}`}
             icon={Database}
           />
           <MetricCard
-            label="System Uptime"
+            label="Temps d'activite"
             value={status.uptime || "N/A"}
             description={`Hostname ${status.hostname || "unknown"}`}
             icon={Clock}
             tone="success"
           />
           <MetricCard
-            label="Open Files"
+            label="Fichiers Ouverts"
             value={status.system.openFiles}
             description={status.bind9.running ? `BIND9 ${status.bind9.version}` : "Daemon not detected"}
             icon={FileText}
@@ -266,7 +257,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <ArrowRightLeft className="h-4 w-4 text-primary" />
-                Control Plane
+                Environnement d'Execution
               </CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 pt-4 sm:grid-cols-2">
@@ -301,7 +292,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Shield className="h-4 w-4 text-primary" />
-                Writable Surface
+                Surfaces Editables
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
@@ -347,7 +338,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Network className="h-4 w-4 text-primary" />
-                Interface Statistics
+                Interfaces Reseau
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
@@ -383,7 +374,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Activity className="h-4 w-4 text-primary" />
-                BIND9 Process Information
+                Processus BIND9
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4">
@@ -526,7 +517,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Shield className="h-4 w-4 text-primary" />
-                Global Access Controls
+                Controles d'Acces Globaux
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
@@ -578,7 +569,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <Key className="h-4 w-4 text-primary" />
-                DNSSEC Signing Status
+                Signature DNSSEC
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4">
@@ -617,7 +608,7 @@ export default function Status() {
             <CardHeader className="border-b border-border/60">
               <CardTitle className="flex items-center gap-2 tracking-[-0.04em]">
                 <ArrowRightLeft className="h-4 w-4 text-primary" />
-                Zone Transfers
+                Transferts de Zone
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">

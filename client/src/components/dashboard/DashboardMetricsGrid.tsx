@@ -12,8 +12,8 @@ export function DashboardMetricsGrid({ data }: { data: DashboardData }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {/* Metric 1: Zones */}
-      <Card className="group relative overflow-hidden rounded-2xl border border-indigo-500/20 bg-card/85 p-5 shadow-sm transition-all duration-200 hover:border-indigo-500/40 hover:shadow-lg hover:shadow-indigo-500/5">
-        <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-indigo-500 to-purple-500" />
+      <Card className="group relative overflow-hidden rounded-2xl border border-indigo-500/20 bg-card/85 p-4 shadow-none">
+        
         <div className="flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -34,8 +34,8 @@ export function DashboardMetricsGrid({ data }: { data: DashboardData }) {
       </Card>
 
       {/* Metric 2: Records */}
-      <Card className="group relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-card/85 p-5 shadow-sm transition-all duration-200 hover:border-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/5">
-        <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-cyan-500 to-blue-500" />
+      <Card className="group relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-card/85 p-4 shadow-none">
+        
         <div className="flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -55,8 +55,8 @@ export function DashboardMetricsGrid({ data }: { data: DashboardData }) {
       </Card>
 
       {/* Metric 3: Uptime */}
-      <Card className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-card/85 p-5 shadow-sm transition-all duration-200 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/5">
-        <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500" />
+      <Card className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-card/85 p-4 shadow-none">
+        
         <div className="flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -65,10 +65,16 @@ export function DashboardMetricsGrid({ data }: { data: DashboardData }) {
             <div className="mt-2 font-mono text-3xl font-extrabold tracking-tight text-foreground">
               {data.uptime || "En ligne"}
             </div>
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-400 font-mono">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>PID {data.bind9.pid ?? "854"} • {data.bind9.threads || 8} threads</span>
-            </div>
+            {data.bind9.running ? (
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-400 font-mono">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span>PID {data.bind9.pid || "Actif"} • {data.bind9.threads || 1} thread(s)</span>
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Service inactif sur cet hôte
+              </div>
+            )}
           </div>
           <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
             <Server className="h-5 w-5" />
@@ -77,8 +83,8 @@ export function DashboardMetricsGrid({ data }: { data: DashboardData }) {
       </Card>
 
       {/* Metric 4: CPU & Memory */}
-      <Card className="group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-card/85 p-5 shadow-sm transition-all duration-200 hover:border-amber-500/40 hover:shadow-lg hover:shadow-amber-500/5">
-        <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500" />
+      <Card className="group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-card/85 p-4 shadow-none">
+        
         <div className="flex items-start justify-between">
           <div className="w-full pr-3">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

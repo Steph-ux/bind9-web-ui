@@ -146,10 +146,6 @@ export default function AuthPage() {
         </div>
 
         <div className="max-w-xl my-auto">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1 text-xs font-medium text-foreground mb-6">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Architecture DNS Haute Disponibilite & Pare-feu RPZ
-          </div>
 
           <h1 className="text-4xl lg:text-5xl font-black tracking-tight leading-tight text-foreground mb-4">
             Console d'administration native BIND9.
