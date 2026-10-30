@@ -17,12 +17,14 @@ interface BindServiceActionsProps {
   detection: HostBind9Detection | null;
   onRefresh: () => void;
   compact?: boolean;
+  hideStatusBadge?: boolean;
 }
 
 export function BindServiceActions({
   detection,
   onRefresh,
   compact = false,
+  hideStatusBadge = false,
 }: BindServiceActionsProps) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const { toast } = useToast();
@@ -55,31 +57,34 @@ export function BindServiceActions({
     switch (serviceStatus) {
       case "active":
         return (
-          <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400 font-mono text-[10px] uppercase">
+          <Badge variant="outline" className="gap-1.5 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-normal">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             Service Actif
           </Badge>
         );
       case "inactive":
         return (
-          <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-400 font-mono text-[10px] uppercase">
+          <Badge variant="outline" className="gap-1.5 border-border/70 bg-muted/40 text-muted-foreground text-xs font-normal">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
             Service Inactif
           </Badge>
         );
       case "failed":
         return (
-          <Badge variant="outline" className="border-rose-500/40 bg-rose-500/10 text-rose-400 font-mono text-[10px] uppercase">
+          <Badge variant="outline" className="gap-1.5 border-destructive/30 bg-destructive/10 text-destructive text-xs font-normal">
+            <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
             Service Échoué
           </Badge>
         );
       case "not-installed":
         return (
-          <Badge variant="outline" className="border-zinc-500/40 bg-zinc-500/10 text-zinc-400 font-mono text-[10px] uppercase">
+          <Badge variant="outline" className="gap-1.5 border-border/70 bg-muted/30 text-muted-foreground text-xs font-normal">
             Non Installé
           </Badge>
         );
       default:
         return (
-          <Badge variant="outline" className="border-border text-muted-foreground font-mono text-[10px] uppercase">
+          <Badge variant="outline" className="border-border text-muted-foreground text-xs font-normal">
             Inconnu
           </Badge>
         );
@@ -88,8 +93,8 @@ export function BindServiceActions({
 
   if (compact) {
     return (
-      <div className="flex items-center gap-1.5">
-        {getStatusBadge()}
+      <div className="flex items-center gap-2">
+        {!hideStatusBadge && getStatusBadge()}
         {isRunning ? (
           <>
             <Button
@@ -97,13 +102,13 @@ export function BindServiceActions({
               variant="outline"
               disabled={loadingAction !== null}
               onClick={() => handleAction("reload")}
-              className="h-7 px-2 text-[11px] gap-1 border-border/60 hover:bg-muted"
-              title="Recharger la configuration (rndc / reload)"
+              className="h-8 px-2.5 text-xs gap-1.5 border-border/70 hover:bg-muted"
+              title="Recharger la configuration (rndc reload)"
             >
               {loadingAction === "reload" ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <RotateCcw className="h-3 w-3 text-indigo-400" />
+                <RotateCcw className="h-3 w-3 text-primary" />
               )}
               Recharger
             </Button>
@@ -112,13 +117,13 @@ export function BindServiceActions({
               variant="outline"
               disabled={loadingAction !== null}
               onClick={() => handleAction("restart")}
-              className="h-7 px-2 text-[11px] gap-1 border-border/60 hover:bg-muted"
+              className="h-8 px-2.5 text-xs gap-1.5 border-border/70 hover:bg-muted"
               title="Redémarrer le service systemd"
             >
               {loadingAction === "restart" ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <RefreshCw className="h-3 w-3 text-amber-400" />
+                <RefreshCw className="h-3 w-3 text-amber-500" />
               )}
               Redémarrer
             </Button>
@@ -126,15 +131,15 @@ export function BindServiceActions({
         ) : (
           <Button
             size="sm"
-            variant="default"
+            variant="outline"
             disabled={loadingAction !== null || !detection?.bind9.isInstalled}
             onClick={() => handleAction("start")}
-            className="h-7 px-2.5 text-[11px] gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="h-8 px-3 text-xs gap-1.5 font-medium border-border/70 hover:bg-muted"
           >
             {loadingAction === "start" ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <Play className="h-3 w-3" />
+              <Play className="h-3.5 w-3.5 text-emerald-500" />
             )}
             Démarrer BIND9
           </Button>
@@ -144,16 +149,14 @@ export function BindServiceActions({
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-border/60 bg-card/70 shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-border/60 bg-card/70 shadow-none">
       <div className="flex items-center gap-2.5">
-        <div className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
-          isRunning ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-amber-500/30 bg-amber-500/10 text-amber-400"
-        }`}>
-          <Activity className="h-4 w-4" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Activity className="h-4.5 w-4.5" />
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-foreground">Gestionnaire de Service BIND9</span>
+            <span className="text-xs font-semibold text-foreground">Gestionnaire de Service BIND9</span>
             {getStatusBadge()}
           </div>
           <p className="text-[11px] text-muted-foreground">
@@ -171,12 +174,12 @@ export function BindServiceActions({
               variant="outline"
               disabled={loadingAction !== null}
               onClick={() => handleAction("reload")}
-              className="h-8 text-xs gap-1.5 border-border/70"
+              className="h-8 text-xs gap-1.5 border-border/70 hover:bg-muted"
             >
               {loadingAction === "reload" ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <RotateCcw className="h-3.5 w-3.5 text-indigo-400" />
+                <RotateCcw className="h-3.5 w-3.5 text-primary" />
               )}
               Recharger
             </Button>
@@ -185,12 +188,12 @@ export function BindServiceActions({
               variant="outline"
               disabled={loadingAction !== null}
               onClick={() => handleAction("restart")}
-              className="h-8 text-xs gap-1.5 border-border/70"
+              className="h-8 text-xs gap-1.5 border-border/70 hover:bg-muted"
             >
               {loadingAction === "restart" ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <RefreshCw className="h-3.5 w-3.5 text-amber-400" />
+                <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
               )}
               Redémarrer
             </Button>
@@ -199,7 +202,7 @@ export function BindServiceActions({
               variant="outline"
               disabled={loadingAction !== null}
               onClick={() => handleAction("stop")}
-              className="h-8 text-xs gap-1.5 border-rose-500/30 hover:bg-rose-500/10 text-rose-400"
+              className="h-8 text-xs gap-1.5 border-destructive/30 hover:bg-destructive/10 text-destructive"
             >
               {loadingAction === "stop" ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -212,14 +215,15 @@ export function BindServiceActions({
         ) : (
           <Button
             size="sm"
+            variant="outline"
             disabled={loadingAction !== null || !detection?.bind9.isInstalled}
             onClick={() => handleAction("start")}
-            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="h-8 text-xs gap-1.5 font-medium border-border/70 hover:bg-muted"
           >
             {loadingAction === "start" ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <Play className="h-3.5 w-3.5" />
+              <Play className="h-3.5 w-3.5 text-emerald-500" />
             )}
             Démarrer le Service
           </Button>

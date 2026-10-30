@@ -16,34 +16,38 @@ export function BindStatusCard({
   const isRunning = detection ? detection.bind9.serviceStatus === "active" : data.bind9.running;
   const version = detection?.bind9.version || data.bind9.version || "Non détecté";
   const pid = detection?.bind9.mainPid ?? data.bind9.pid ?? "N/A";
-  const serviceName = detection?.bind9.serviceName || "bind9";
+  const serviceName = detection?.bind9.serviceName || "named";
 
   return (
-    <Card className="rounded-2xl border border-border/70 bg-card/85 shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-border/50">
-        <div className="flex items-center gap-2.5">
-          <div className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
-            isRunning
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-              : "border-amber-500/30 bg-amber-500/10 text-amber-400"
-          }`}>
-            <Server className="h-4 w-4" />
+    <Card className="rounded-2xl border border-border/70 bg-card/85 shadow-none">
+      <CardHeader className="space-y-3 pb-3 border-b border-border/50">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Server className="h-4.5 w-4.5" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-sm font-semibold tracking-tight text-foreground truncate">
+                Serveur BIND9 Local
+              </CardTitle>
+              <p className="text-xs text-muted-foreground truncate">
+                Unité systemd : <code className="font-mono font-medium text-foreground">{serviceName}</code>
+              </p>
+            </div>
           </div>
-          <div>
-            <CardTitle className="text-base font-bold tracking-tight text-foreground">
-              Serveur BIND9 Local
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Moteur DNS natif sur l'hôte & unité systemd <code className="font-mono text-foreground font-semibold">{serviceName}</code>
-            </p>
-          </div>
+
+          <Badge variant="outline" className="shrink-0 gap-1.5 text-xs font-normal border-border/70 text-muted-foreground">
+            <span className={`h-1.5 w-1.5 rounded-full ${isRunning ? "bg-emerald-500" : "bg-amber-500"}`} />
+            {isRunning ? "Service Actif" : "Service Inactif"}
+          </Badge>
         </div>
 
-        <div className="flex items-center gap-2">
-          {detection && onRefresh && (
-            <BindServiceActions detection={detection} onRefresh={onRefresh} compact />
-          )}
-        </div>
+        {detection && onRefresh && (
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40 text-xs text-muted-foreground">
+            <span>Contrôle du service</span>
+            <BindServiceActions detection={detection} onRefresh={onRefresh} compact hideStatusBadge />
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="pt-4 space-y-3">
@@ -82,7 +86,7 @@ export function BindStatusCard({
         <div className="space-y-2 pt-1 text-xs">
           <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 p-2.5">
             <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${isRunning ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${isRunning ? "bg-emerald-500" : "bg-amber-500"}`} />
               <span className="font-semibold text-foreground">Hôte Système ({detection?.os.distro || "Linux"})</span>
             </div>
             <span className="font-mono text-[11px] text-muted-foreground">
